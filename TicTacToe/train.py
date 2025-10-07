@@ -248,4 +248,4 @@ if __name__ == "__main__":
     params_template = policy.init(jax.random.PRNGKey(0), dummy)
     print("Begin Evaluation")
     params, opt_state = load_checkpoint("D:\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\cp_10k_0e3", params_template)
-    evaluate_agent(params, 1000)
+    evaluate_agent(params, 10)
