@@ -28,11 +28,15 @@ def play_game(policy_apply_fn, params, rng_key):
     appends in Listen zu erlauben. Das ist in Ordnung für ein einfaches Demo-Training.
     """
     env = env_reset(0)
-
-    states, actions, rewards, players = [], [], [], []
+    max_steps = 9
+    states, actions, players = jnp.zeros((max_steps, 3, 3)), jnp.zeros((max_steps), dtype=jnp.int8), jnp.zeros((max_steps), dtype=jnp.float32)
     key = rng_key
 
-    for _ in range(9):
+    def cond(a):
+        env, _, _, _, _ = a
+        return ~env.done
+    def body(step, carry):
+        env, key, states, actions, players = carry
         # Aktion vom Policy-Netzwerk erhalten
         logits = policy_apply_fn(params, env.board)
 
@@ -41,45 +45,47 @@ def play_game(policy_apply_fn, params, rng_key):
         logits = jnp.where(valid_mask, logits, -jnp.inf)
 
         key, subkey = jax.random.split(key)
-        action = int(jax.random.categorical(subkey, logits))
+        action = jax.random.categorical(subkey, logits).astype(jnp.int8)
 
-        states.append(env.board)
-        actions.append(action)
-        players.append(int(env.current_player))
+        states = states.at[step].set(env.board)
+        actions = actions.at[step].set(action)
+        players = players.at[step].set(env.current_player)
 
         env, reward, done = env_step(env, action)
-        rewards.append(int(reward))
 
-        if done:
-            break
-
+        return env, key, states, actions, players
+    
+    initial_carry = (env, rng_key, states, actions, players)
+    final_env, _, final_states, final_actions, final_players = jax.lax.while_loop(cond, body, initial_carry)
     # Verwende das finale Spielergebnis als Target für alle Zeitpunkte
-    final_outcome = int(get_winner(env.board))  # 1, -1 oder 0
 
-    if final_outcome == 0:
-        final_outcome = -0.2 # penalty für unentschieden
+    num_steps = jnp.sum(final_states != 0, axis=(1, 2)).max()
 
-    players_array = jnp.array(players, dtype=jnp.int32)
-    returns = final_outcome * players_array
+    final_outcome = get_winner(final_env.board)  # 1, -1 oder 0
 
-    # Staple Zustände in ein Array (shape: steps x 3 x 3)
-    if len(states) == 0:
-        # Keine Schritte gemacht (sollte nicht passieren), gib leere Trajektorie zurück
-        return {'states': jnp.zeros((0, 3, 3)), 'actions': jnp.zeros((0,), dtype=jnp.int32), 'returns': jnp.zeros((0,), dtype=jnp.float32)}
+    final_outcome = jnp.where(final_outcome == 0, -0.2, final_outcome)
 
-    states_array = jnp.stack([jnp.asarray(s) for s in states])
+    returns = final_outcome * final_players
 
     return {
-        'states': states_array,
-        'actions': jnp.array(actions, dtype=jnp.int32),
-        'returns': returns.astype(jnp.float32),
+        'states': final_states,
+        'actions': final_actions,
+        'returns': returns,
+        'num_steps': num_steps
     }
 
 # 3. Loss-Funktion und Trainingsschritt
 def train_step(params, opt_state, optimizer, trajectory):
     """Berechnet den Verlust, die Gradienten und aktualisiert die Modellparameter."""
 
-    if float(jnp.sum(trajectory['returns'])) == 0.0:
+    num_steps = trajectory.get('num_steps', len(trajectory['states']))
+    
+    # Nur gültige Schritte verwenden
+    states = trajectory['states'][:num_steps]
+    actions = trajectory['actions'][:num_steps]
+    returns = trajectory['returns'][:num_steps]
+    
+    if float(jnp.sum(returns)) == 0.0:
         return params, opt_state, 0.0
     
     def loss_fn(p, states, actions, returns):
@@ -105,7 +111,7 @@ def train_step(params, opt_state, optimizer, trajectory):
         return loss
 
     # Gradienten berechnen
-    loss, grads = jax.value_and_grad(loss_fn)(params, trajectory['states'], trajectory['actions'], trajectory['returns'])
+    loss, grads = jax.value_and_grad(loss_fn)(params, states, actions, returns)
     
     # Parameter aktualisieren
     updates, new_opt_state = optimizer.update(grads, opt_state)
@@ -243,6 +249,7 @@ if __name__ == "__main__":
     # print("Trainierte Parameter wurden erstellt.")
     
     # Starte die Evaluation nach dem Training
+
     policy = SimplePolicy()
     dummy = jnp.zeros((3,3))
     params_template = policy.init(jax.random.PRNGKey(0), dummy)
