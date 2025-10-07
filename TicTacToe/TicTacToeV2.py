@@ -2,6 +2,7 @@ import chex
 import jax
 import jax.numpy as jnp
 import mctx
+from nn import RepresentationNetwork, DynamicsNetwork, PredictionNetwork
 
 Board = chex.Array
 Action = chex.Array
