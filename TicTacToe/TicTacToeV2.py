@@ -23,11 +23,10 @@ def get_winner(board:Board) -> Player:
     '''
     returns the winning player or 0 if tie or not Done
     '''
-    lines = jnp.concatenate([
-        board,  # rows
-        board.T,  # columns
-        jnp.array([[board[i,i] for i in range(3)]]),  # main diagonal
-        jnp.array([[board[i,2-i] for i in range(3)]])  # anti diagonal
+    lines = jnp.array([
+        board[0,:], board[1,:], board[2,:],
+        board[:,0], board[:,1], board[:,2],
+        jnp.diag(board), jnp.diag(jnp.fliplr(board))
     ])
     line_sums = jnp.sum(lines, axis=1)
     winner = jnp.where(jnp.any(line_sums == 3), 1, 0)
