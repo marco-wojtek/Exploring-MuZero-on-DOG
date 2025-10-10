@@ -57,6 +57,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     current_player_index = env.current_player - 1
     valid_values = env.action_set[current_player_index]
     actions = jnp.unique(valid_values)
+
     return jnp.where(
         (env.pins[current_player_index] == -1)[:, None],
         jnp.isin(actions, jnp.array([1, 6])),  # only 1 or 6 can move from home
@@ -80,3 +81,4 @@ def root_fn(params, rng_key, env:deterministic_MADN):
 
 def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
     pass    
+

@@ -20,12 +20,12 @@ def get_winner(board:Board) -> Player:
     '''
     returns the winning player or 0 if tie or not Done
     '''
-    lines = jnp.concatenate([
-        board,  # rows
-        board.T,  # columns
-        jnp.array([[board[i,i] for i in range(3)]]),  # main diagonal
-        jnp.array([[board[i,2-i] for i in range(3)]])  # anti diagonal
+    lines = jnp.array([
+        board[0,:], board[1,:], board[2,:],
+        board[:,0], board[:,1], board[:,2],
+        jnp.diag(board), jnp.diag(jnp.fliplr(board))
     ])
+
     line_sums = jnp.sum(lines, axis=1)
     winner = jnp.where(jnp.any(line_sums == 3), 1, 0)
     winner = jnp.where(jnp.any(line_sums == -3), -1, winner)
@@ -47,8 +47,8 @@ def env_step(env:TicTacToe, action:Action) -> tuple[TicTacToe, Reward, Done]:
     board = env.board.at[row, column].set(jnp.where(env.done | invalid_move, env.board[row, column], env.current_player))
 
     reward = jnp.where(env.done, 0, jnp.where(invalid_move, -1, get_winner(board)*env.current_player)).astype(jnp.int8)
-    
-    done = env.done | reward != 0 | invalid_move | jnp.all(board != 0)
+
+    done = jnp.logical_or.reduce(jnp.array([env.done, (reward != 0), invalid_move, jnp.all(board != 0)]))
 
     env = TicTacToe(
         board=board,

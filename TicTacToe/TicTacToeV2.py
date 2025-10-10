@@ -2,7 +2,7 @@ import chex
 import jax
 import jax.numpy as jnp
 import mctx
-from nn import RepresentationNetwork, DynamicsNetwork, PredictionNetwork
+#from nn import RepresentationNetwork, DynamicsNetwork, PredictionNetwork
 
 Board = chex.Array
 Action = chex.Array
@@ -28,6 +28,7 @@ def get_winner(board:Board) -> Player:
         board[:,0], board[:,1], board[:,2],
         jnp.diag(board), jnp.diag(jnp.fliplr(board))
     ])
+
     line_sums = jnp.sum(lines, axis=1)
     winner = jnp.where(jnp.any(line_sums == 3), 1, 0)
     winner = jnp.where(jnp.any(line_sums == -3), -1, winner)
@@ -61,7 +62,7 @@ def env_step(env:TicTacToeV2, action:Action) -> tuple[TicTacToeV2, Reward, Done]
     board = env.board.at[row, column].set(jnp.where(env.done | invalid_move, env.board[row, column], env.current_player))
 
     r_row, r_column = removed_action // 3, removed_action % 3
-    board = board.at[r_row, r_column].set(jnp.where(env.done | invalid_move | removed_action == -1, env.board[row, column], 0))
+    board = board.at[r_row, r_column].set(jnp.where(env.done | invalid_move | removed_action == -1, board[r_row, r_column], 0))
 
     reward = jnp.where(env.done, 0, jnp.where(invalid_move, -1, get_winner(board)*env.current_player)).astype(jnp.int8)
     
@@ -136,3 +137,4 @@ def recurrent_fn(params, rng_key, action, embedding):
     )
 
     return recurrent_fn_output, env
+

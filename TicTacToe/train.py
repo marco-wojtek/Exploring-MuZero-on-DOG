@@ -4,7 +4,8 @@ import flax.linen as nn
 import flax.serialization
 import os
 import optax
-from TicTacToeV2 import env_reset, env_step, get_winner
+import TicTacToeV2 as ttt_v2
+import TicTacToe as ttt
 import functools
 
 # 1. Ein einfaches Policy-Netzwerk, das Aktionen basierend auf dem Zustand vorschlägt
@@ -21,22 +22,22 @@ class SimplePolicy(nn.Module):
         return x  # Gibt Logits für jede Aktion zurück
 
 # 2. Funktion zum Spielen einer kompletten Partie, um Trainingsdaten zu sammeln
-def play_game(policy_apply_fn, params, rng_key):
+def play_game(game, policy_apply_fn, params, rng_key):
     """Spielt eine Partie (nicht-jittbar) und sammelt die Trajektorie.
 
     Wir verwenden eine Python-Schleife statt einer jittbaren Funktion, um
     appends in Listen zu erlauben. Das ist in Ordnung für ein einfaches Demo-Training.
     """
-    env = env_reset(0)
-    max_steps = 9
+    env = game.env_reset(0)
+    max_steps = 14
     states, actions, players = jnp.zeros((max_steps, 3, 3)), jnp.zeros((max_steps), dtype=jnp.int8), jnp.zeros((max_steps), dtype=jnp.float32)
     key = rng_key
 
     def cond(a):
-        env, _, _, _, _ = a
-        return ~env.done
-    def body(step, carry):
-        env, key, states, actions, players = carry
+        env, _, _, _, _, step = a
+        return ~env.done & (step < max_steps)
+    def body(carry):
+        env, key, states, actions, players, step = carry
         # Aktion vom Policy-Netzwerk erhalten
         logits = policy_apply_fn(params, env.board)
 
@@ -51,17 +52,18 @@ def play_game(policy_apply_fn, params, rng_key):
         actions = actions.at[step].set(action)
         players = players.at[step].set(env.current_player)
 
-        env, reward, done = env_step(env, action)
-
-        return env, key, states, actions, players
+        env, reward, done = game.env_step(env, action)
+        step = step + 1
+        return env, key, states, actions, players, step
     
-    initial_carry = (env, rng_key, states, actions, players)
-    final_env, _, final_states, final_actions, final_players = jax.lax.while_loop(cond, body, initial_carry)
+    initial_carry = (env, rng_key, states, actions, players, jnp.int8(0))
+    final_env, _, final_states, final_actions, final_players, final_steps = jax.lax.while_loop(cond, body, initial_carry)
     # Verwende das finale Spielergebnis als Target für alle Zeitpunkte
 
-    num_steps = jnp.sum(final_states != 0, axis=(1, 2)).max()
+    step_valid = jnp.any(final_states.reshape(max_steps, -1) != 0, axis=1)
+    num_steps = jnp.sum(step_valid)
 
-    final_outcome = get_winner(final_env.board)  # 1, -1 oder 0
+    final_outcome = game.get_winner(final_env.board)  # 1, -1 oder 0
 
     final_outcome = jnp.where(final_outcome == 0, -0.2, final_outcome)
 
@@ -120,7 +122,7 @@ def train_step(params, opt_state, optimizer, trajectory):
     return new_params, new_opt_state, loss
 
 # 4. Haupt-Trainingsschleife
-def main_training_loop(num_episodes=10000, learning_rate=0.001):
+def main_training_loop(game, num_episodes=10000, learning_rate=0.001):
     rng_key = jax.random.PRNGKey(42)
     
     # Netzwerk und Optimizer initialisieren
@@ -137,7 +139,7 @@ def main_training_loop(num_episodes=10000, learning_rate=0.001):
         rng_key, game_key = jax.random.split(rng_key)
         
         # Eine Partie spielen, um Daten zu sammeln
-        trajectory = play_game(policy_net.apply, params, game_key)
+        trajectory = play_game(game, policy_net.apply, params, game_key)
         
         # Trainingsschritt ausführen
         params, opt_state, loss = train_step(params, opt_state, optimizer, trajectory)
@@ -148,77 +150,6 @@ def main_training_loop(num_episodes=10000, learning_rate=0.001):
     print("Training abgeschlossen!")
     return params
 
-# 5. Evaluationsphase: Trainiertes Modell gegen einen Random Bot testen
-def get_trained_action(policy_apply_fn, params, board):
-    """Erhält die beste Aktion vom trainierten Modell."""
-    logits = policy_apply_fn(params, board)
-    valid_mask = (board.flatten() == 0)
-    logits = jnp.where(valid_mask, logits, -jnp.inf)
-    return jnp.argmax(logits)
-
-def get_random_action(board, rng_key):
-    """Wählt eine zufällige, gültige Aktion."""
-    valid_actions = jnp.where(board.flatten() == 0)[0]
-    return jax.random.choice(rng_key, valid_actions)
-
-def play_match(trained_params, rng_key, trained_player=1):
-    """Spielt eine Partie: Trainierter Agent vs. Random Bot."""
-    env = env_reset(0)
-    
-    while not env.done:
-        rng_key, action_key = jax.random.split(rng_key)
-        
-        if env.current_player == trained_player:
-            action = get_trained_action(SimplePolicy().apply, trained_params, env.board)
-        else:
-            action = get_random_action(env.board, action_key)
-            
-        env, _, _ = env_step(env, action.astype(jnp.int8))
-    
-    # Gibt den Gewinner zurück (1 für trainierten Agent, -1 für Random Bot, 0 für Unentschieden)
-    return get_winner(env.board) * trained_player
-
-def evaluate_agent(trained_params, num_matches=1000):
-    """Evaluiert den trainierten Agenten über viele Partien."""
-    print(f"\nStarte Evaluation gegen Random Bot ({num_matches} Partien)...")
-    rng_key = jax.random.PRNGKey(123)
-    
-    wins = 0
-    losses = 0
-    draws = 0
-    
-    # Spiele als Spieler 1 (beginnt)
-    for i in range(num_matches // 2):
-        rng_key, game_key = jax.random.split(rng_key)
-        winner = play_match(trained_params, game_key, trained_player=1)
-        if winner == 1:
-            wins += 1
-        elif winner == -1:
-            losses += 1
-        else:
-            draws += 1
-            
-    # Spiele als Spieler 2
-    for i in range(num_matches // 2):
-        rng_key, game_key = jax.random.split(rng_key)
-        winner = play_match(trained_params, game_key, trained_player=-1)
-        if winner == 1:
-            wins += 1
-        elif winner == -1:
-            losses += 1
-        else:
-            draws += 1
-            
-    win_rate = wins / num_matches
-    loss_rate = losses / num_matches
-    draw_rate = draws / num_matches
-    
-    print("\n--- Evaluationsergebnis ---")
-    print(f"Gewinnrate: {win_rate:.2%}")
-    print(f"Verlustrate: {loss_rate:.2%}")
-    print(f"Unentschieden: {draw_rate:.2%}")
-    print("---------------------------\n")
-
 def save_checkpoint(path: str, params, opt_state=None):
     """Speichert params (+ optional optimizer state) als Bytes."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -228,31 +159,13 @@ def save_checkpoint(path: str, params, opt_state=None):
         with open(path + ".opt", "wb") as f:
             f.write(flax.serialization.to_bytes(opt_state))
 
-def load_checkpoint(path: str, params_template, opt_state_template=None):
-    """
-    Lädt params in params_template und optional opt_state in opt_state_template.
-    Rückgabe: (params, opt_state_or_None)
-    """
-    with open(path + ".params", "rb") as f:
-        params_bytes = f.read()
-    params = flax.serialization.from_bytes(params_template, params_bytes)
-    opt_state = None
-    if opt_state_template is not None and os.path.exists(path + ".opt"):
-        with open(path + ".opt", "rb") as f:
-            opt_bytes = f.read()
-        opt_state = flax.serialization.from_bytes(opt_state_template, opt_bytes)
-    return params, opt_state
 
 if __name__ == "__main__":
-    # trained_params = main_training_loop(num_episodes=10000, learning_rate=0.0001)
-    # save_checkpoint("D:\Informatikstudium\Master\Masterarbeit\Exploring-MuZero-on-DOG\TicTacToe\Checkpoints\cp_10k_0e3", trained_params)
-    # print("Trainierte Parameter wurden erstellt.")
-    
-    # Starte die Evaluation nach dem Training
+    game = ttt
+    # game = ttt_v2
+    trained_params = main_training_loop(game, num_episodes=1000, learning_rate=0.001)
+    name = f"{game.__name__}_cp_1k_e3"
+    path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 
-    policy = SimplePolicy()
-    dummy = jnp.zeros((3,3))
-    params_template = policy.init(jax.random.PRNGKey(0), dummy)
-    print("Begin Evaluation")
-    params, opt_state = load_checkpoint("D:\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\cp_10k_0e3", params_template)
-    evaluate_agent(params, 10)
+    save_checkpoint(path, trained_params)
+    print("Trainierte Parameter wurden erstellt.")
