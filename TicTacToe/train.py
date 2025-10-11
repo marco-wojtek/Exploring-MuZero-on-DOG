@@ -20,6 +20,20 @@ class SimplePolicy(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(features=self.num_actions)(x)
         return x  # Gibt Logits für jede Aktion zurück
+    
+class LargerNN(nn.Module):
+    num_actions: int = 9
+
+    @nn.compact
+    def __call__(self, x):
+        # x ist der Zustand des Spielfelds (3, 3)
+        x = x.flatten()  # Umwandeln in einen Vektor der Größe (9,)
+        x = nn.Dense(features=128)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=64)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=self.num_actions)(x)
+        return x  # Gibt Logits für jede Aktion zurück
 
 # 2. Funktion zum Spielen einer kompletten Partie, um Trainingsdaten zu sammeln
 def play_game(game, policy_apply_fn, params, rng_key):
@@ -77,7 +91,7 @@ def play_game(game, policy_apply_fn, params, rng_key):
     }
 
 # 3. Loss-Funktion und Trainingsschritt
-def train_step(params, opt_state, optimizer, trajectory):
+def train_step(network, params, opt_state, optimizer, trajectory):
     """Berechnet den Verlust, die Gradienten und aktualisiert die Modellparameter."""
 
     num_steps = trajectory.get('num_steps', len(trajectory['states']))
@@ -92,7 +106,8 @@ def train_step(params, opt_state, optimizer, trajectory):
     
     def loss_fn(p, states, actions, returns):
         # Wende das Netzwerk auf den gesamten Batch von Zuständen an, indem wir vmap nutzen
-        logits = jax.vmap(SimplePolicy().apply, in_axes=(None, 0))(p, states)
+        logits = jax.vmap(network.apply, in_axes=(None, 0))(p, states)
+
         log_probs = jax.nn.log_softmax(logits)
         
         # Log-Wahrscheinlichkeit der ausgeführten Aktion auswählen
@@ -122,14 +137,14 @@ def train_step(params, opt_state, optimizer, trajectory):
     return new_params, new_opt_state, loss
 
 # 4. Haupt-Trainingsschleife
-def main_training_loop(game, num_episodes=10000, learning_rate=0.001):
+def main_training_loop(network, game, num_episodes=10000, learning_rate=0.001):
     rng_key = jax.random.PRNGKey(42)
     
     # Netzwerk und Optimizer initialisieren
-    policy_net = SimplePolicy()
+    # policy_net = SimplePolicy()
     dummy_board = jnp.zeros((3, 3))
-    params = policy_net.init(rng_key, dummy_board)
-    
+    params = network.init(rng_key, dummy_board)
+
     optimizer = optax.adam(learning_rate)
     opt_state = optimizer.init(params)
     
@@ -139,10 +154,10 @@ def main_training_loop(game, num_episodes=10000, learning_rate=0.001):
         rng_key, game_key = jax.random.split(rng_key)
         
         # Eine Partie spielen, um Daten zu sammeln
-        trajectory = play_game(game, policy_net.apply, params, game_key)
+        trajectory = play_game(game, network.apply, params, game_key)
         
         # Trainingsschritt ausführen
-        params, opt_state, loss = train_step(params, opt_state, optimizer, trajectory)
+        params, opt_state, loss = train_step(network, params, opt_state, optimizer, trajectory)
 
         if episode % (num_episodes // 10) == 0:
             print(f"Episode {episode}, Loss: {loss:.4f}")
@@ -161,10 +176,10 @@ def save_checkpoint(path: str, params, opt_state=None):
 
 
 if __name__ == "__main__":
-    game = ttt
-    # game = ttt_v2
-    trained_params = main_training_loop(game, num_episodes=1000, learning_rate=0.001)
-    name = f"{game.__name__}_cp_1k_e3"
+    game = ttt_v2
+    network = LargerNN()
+    trained_params = main_training_loop(network, game, num_episodes=1000, learning_rate=0.001)
+    name = f"{game.__name__}_Lnn_1k_e3"
     path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 
     save_checkpoint(path, trained_params)
