@@ -38,7 +38,7 @@ def get_winner(goal: Goal) -> Player:
     player_goals = jnp.all(goal > 0, axis=1)
     return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals)+1, 0)
 
-def env_reset(_, num_players=jnp.int8(4), distance=jnp.int8(16)) -> deterministic_MADN:
+def env_reset(_, num_players=jnp.int8(4), distance=jnp.int8(10)) -> deterministic_MADN:
     board_size = num_players * distance
     total_board_size = board_size + num_players * 4 # add goal areas
     return deterministic_MADN(
@@ -48,16 +48,18 @@ def env_reset(_, num_players=jnp.int8(4), distance=jnp.int8(16)) -> deterministi
         current_player=jnp.int8(0), # index of current player, 0-3
         done = jnp.bool_(False), # whether the game is over
         reward=jnp.int8(0), # reward for the current player
-        action_set=jnp.tile(jnp.arange(1, 6 + 1, dtype=jnp.int8), (num_players, 3)), # each player starts with 3 actions 1-6
+        action_set= 4 * jnp.ones((num_players, 6), dtype=jnp.int8), # each player starts with 4 actions 1-6
         start = jnp.array(jnp.arange(num_players)*distance, dtype=jnp.int8), # starting positions of each player
         target = jnp.array((jnp.arange(num_players)*distance - 1)%board_size, dtype=jnp.int8),
-        goal = jnp.reshape(jnp.arange(board_size, board_size + num_players*4), (num_players, 4)),
+        goal = jnp.reshape(jnp.arange(board_size, board_size + num_players*4, dtype=jnp.int8), (num_players, 4)),
         board_size=jnp.int8(board_size),
         total_board_size=jnp.int8(total_board_size),
     )
 
+@jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
-    pin, move = action # action is a tuple (pin index, move value)
+    pin = action[0].astype(jnp.int8)
+    move = action[1].astype(jnp.int8)
     # check if the action is valid
     invalid_action = ~valid_action(env)[pin, move-1]
 
@@ -80,7 +82,7 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     pins = env.pins.at[env.current_player, pin].set(jnp.where(invalid_action, env.pins[env.current_player, pin], new_position))
     pins = jax.lax.cond(
         (pin_at_pos != -1) & (pin_at_pos != env.current_player) & ~invalid_action, # if a player was at the new position and it's not the current player and the action is valid
-        lambda p: p.at[pin_at_pos, jnp.where(p[pin_at_pos] == new_position, jnp.arange(4), p[pin_at_pos])].set(-1), # send the pin of that player back to start area
+        lambda p: p.at[pin_at_pos, jnp.where(p[pin_at_pos] == new_position, jnp.arange(4, dtype=jnp.int8), p[pin_at_pos])].set(-1), # send the pin of that player back to start area
         lambda p: p,
         pins
     )
@@ -93,8 +95,15 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     )
 
     # update action set, change one instance of the played action to 0 (no action)
-    action_set = env.action_set
-
+    curr_state = env.action_set.at[env.current_player, move-1].get()
+    action_set = env.action_set.at[env.current_player, move-1].set(jnp.where(invalid_action | (curr_state == 0), curr_state, curr_state-1))
+    action_set = jax.lax.cond(
+        jnp.all(action_set[env.current_player] == 0), # if all actions are 0, refill the action set
+        lambda a: a.at[env.current_player].set(4 * jnp.ones(6, dtype=jnp.int8)),
+        lambda a: a,
+        action_set
+    )
+    # check if the game is done
     done = jnp.all(jnp.isin(env.pins[env.current_player], env.goal[env.current_player])) # check if the current player has won, order of the pins does not matter
     reward = jnp.where(done, 1, 0).astype(jnp.int8) # reward is 1 if the current player has won, 0 otherwise
     current_player = jnp.where(done | (move == 6) | invalid_action, env.current_player, (env.current_player + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
@@ -123,8 +132,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     target = env.target[current_player]
     goal = env.goal[current_player]
     action_set = env.action_set[current_player]
-    available_actions = jnp.unique(action_set)
-    valid_actions = jnp.isin(jnp.tile(jnp.arange(1, 7), (4, 1)), available_actions) # available actions for each pin
+    valid_actions = jnp.where(action_set[current_player]>0, True, False) # available actions for each pin
 
     # calculate possible actions
     moved_positions = current_pins[:, None] + jnp.arange(1, 7)
@@ -172,25 +180,46 @@ def root_fn(params, rng_key, env:deterministic_MADN):
 def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
     pass    
 
-env = env_reset(0, num_players=4, distance=16)
-print(env.board,
-      env.pins,
-      env.current_player,
-      env.done,
-      env.reward,
-      env.action_set)
-print("-"*50)
-env, reward, done = env_step(env, (0, 2))
-print(env.board,
-      env.pins,
-      env.current_player,
-      env.done,
-      env.reward,
-      env.action_set)
-env, reward, done = env_step(env, (0, 5))
-print(env.board,
-      env.pins,
-      env.current_player,
-      env.done,
-      env.reward,
-      env.action_set)
+# env = env_reset(0, num_players=4, distance=10)
+# env.board = env.board.at[8].set(1)
+# env.pins = env.pins.at[1].set(jnp.array([8, -1, -1, -1]))
+# env.current_player = 1
+# print(env.board,
+#       env.pins,
+#       env.current_player,
+#       env.done,
+#       env.reward,
+#       env.action_set)
+# print("-"*50)
+# env, reward, done = env_step(env, (0, 2))
+# print(env.board,
+#       env.pins,
+#       env.current_player,
+#       env.done,
+#       env.reward,
+#       env.action_set)
+
+action = jnp.array([0, 2], dtype=jnp.int8)
+env = env_reset(0, num_players=4, distance=10)
+
+# env_step ist mit @jax.jit dekoriert; das Original ist unter __wrapped__
+res_py = env_step.__wrapped__(env, action)    # ungejittete Ausführung
+res_jit = env_step(env, action)               # jittete Ausführung (erster Aufruf kompiliert)
+
+# warten bis fertig und vom Gerät holen
+res_jit = jax.tree_util.tree_map(lambda x: x.block_until_ready() if hasattr(x, "block_until_ready") else x, res_jit)
+res_py = jax.device_get(res_py)
+res_jit = jax.device_get(res_jit)
+
+# Prüfen auf Gleichheit
+chex.assert_trees_all_close(res_py, res_jit, atol=0, rtol=0)
+print("JIT und Non-JIT Ergebnisse sind gleich.")
+
+# # Debug: Inhalte anzeigen
+# res_py = jax.tree_util.tree_map(lambda x: jnp.array(x), res_py)
+# res_jit = jax.tree_util.tree_map(lambda x: jnp.array(x), res_jit)
+# print("res_py:", res_py)
+# print("res_jit:", res_jit)
+# # optional: JAXPR der nicht-jittbaren Version ansehen
+# print("jaxpr env_step (non-jit):")
+# print(jax.make_jaxpr(env_step.__wrapped__)(env, action))
