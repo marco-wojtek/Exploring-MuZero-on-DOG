@@ -7,7 +7,7 @@ import optax
 import TicTacToeV2 as ttt_v2
 import TicTacToe as ttt
 import functools
-from train import SimplePolicy, LargerNN
+from train import ImprovedTicTacToeNet, SimplePolicy, LargerNN
 
 def load_checkpoint(path: str, params_template, opt_state_template=None):
     """
@@ -39,8 +39,9 @@ def get_random_action(board, rng_key):
 def play_match(network, game, trained_params, rng_key, trained_player=1):
     """Spielt eine Partie: Trainierter Agent vs. Random Bot."""
     env = game.env_reset(0)
-    
-    while not env.done:
+    step = 0
+    limit = 30
+    while not env.done and step < limit:
         rng_key, action_key = jax.random.split(rng_key)
         
         if env.current_player == trained_player:
@@ -54,24 +55,30 @@ def play_match(network, game, trained_params, rng_key, trained_player=1):
         # print("Current board:\n", env.board)
         # print(env.done)
         # print(jnp.all(env.board != 0))
+        step += 1
     
     # Gibt den Gewinner zurück (1 für trainierten Agent, -1 für Random Bot, 0 für Unentschieden)
     # print(f"Final board:\n", env.board, "\n-----------------------------\n")
+    if step == limit:
+        return 0
     return game.get_winner(env.board) * trained_player
 
-def play_random_match(game, rng_key, games=100):
+def play_random_match(game, rng_key, limit, games=100):
     """Spielt eine Partie: Random Bot vs. Random Bot."""
     print(f"\nStarte Evaluation Random Bot gegen Random Bot ({games} Partien)...")
 
     one = 0
     neg_one = 0
+    
     for _ in range(games):
         env = game.env_reset(0)
-        while not env.done:
+        step = 0
+        while not env.done and step < limit:
             rng_key, action_key = jax.random.split(rng_key)
             action = get_random_action(env.board, action_key)
             env, _, _ = game.env_step(env, action.astype(jnp.int8))
-    
+            step += 1
+
         winner = game.get_winner(env.board)
         if winner == 1:
             one += 1
@@ -99,22 +106,28 @@ def evaluate_agent(network, game, trained_params, num_matches=1000):
             losses += 1
         else:
             draws += 1
-            
+    
+    print(f"Ergebnis als Spieler 1 {num_matches//2} Partien: Wins: {wins}, Losses: {losses}, Draws: {draws}")
     # Spiele als Spieler 2
+    wins2 = 0
+    losses2 = 0
+    draws2 = 0
     for i in range(num_matches // 2):
         rng_key, game_key = jax.random.split(rng_key)
         winner = play_match(network, game, trained_params, game_key, trained_player=-1)
         if winner == 1:
-            wins += 1
+            wins2 += 1
         elif winner == -1:
-            losses += 1
+            losses2 += 1
         else:
-            draws += 1
-            
-    win_rate = wins / num_matches
-    loss_rate = losses / num_matches
-    draw_rate = draws / num_matches
-    
+            draws2 += 1
+
+    print(f"Ergebnis als Spieler 2 {num_matches//2} Partien: Wins: {wins2}, Losses: {losses2}, Draws: {draws2}")
+
+    win_rate = (wins + wins2) / num_matches
+    loss_rate = (losses + losses2) / num_matches
+    draw_rate = (draws + draws2) / num_matches
+
     print("\n--- Evaluationsergebnis ---")
     print(f"Gewinnrate: {win_rate:.2%}")
     print(f"Verlustrate: {loss_rate:.2%}")
@@ -125,12 +138,25 @@ def evaluate_agent(network, game, trained_params, num_matches=1000):
 # game = ttt_v2
 game = ttt_v2
 print(f"{game.__name__} selected for evaluation.")
+# policy = ImprovedTicTacToeNet()
 policy = LargerNN()
 dummy = jnp.zeros((3,3))
 params_template = policy.init(jax.random.PRNGKey(0), dummy)
 print("Begin Evaluation")
-#play_random_match(game, jax.random.PRNGKey(1), games=1000)
-name = f"{game.__name__}_Lnn_1k_e3"
+# play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
+name = f"{game.__name__}_new_model"
 path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 params, opt_state = load_checkpoint(path, params_template)
-evaluate_agent(policy, game, params, 1000)
+evaluate_agent(policy, game, params, 100)
+
+# game = ttt
+# print(f"{game.__name__} selected for evaluation.")
+# policy = SimplePolicy()
+# dummy = jnp.zeros((3,3))
+# params_template = policy.init(jax.random.PRNGKey(0), dummy)
+# print("Begin Evaluation")
+# play_random_match(game, jax.random.PRNGKey(1), limit = 30, games=1000)
+# name = f"{game.__name__}_cp_1k_e3"
+# path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
+# params, opt_state = load_checkpoint(path, params_template)
+# evaluate_agent(policy, game, params, 1000)

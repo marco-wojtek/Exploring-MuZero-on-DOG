@@ -43,6 +43,7 @@ def env_reset(_):
         memory = jnp.zeros((2,3), dtype=jnp.int8) - 1 
     )
 
+@jax.jit
 def env_step(env:TicTacToeV2, action:Action) -> tuple[TicTacToeV2, Reward, Done]:
     row, column = action // 3, action % 3
     invalid_move = env.board[row, column] != 0

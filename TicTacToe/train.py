@@ -34,6 +34,20 @@ class LargerNN(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(features=self.num_actions)(x)
         return x  # Gibt Logits für jede Aktion zurück
+    
+class ImprovedTicTacToeNet(nn.Module):
+    num_actions: int = 9
+    
+    @nn.compact
+    def __call__(self, x, training=True):
+        x = x.flatten()
+        x = nn.Dense(features=128)(x)
+        x = nn.relu(x)
+        
+        x = nn.Dense(features=128)(x)
+        x = nn.relu(x)
+        
+        return nn.Dense(features=self.num_actions)(x)
 
 # 2. Funktion zum Spielen einer kompletten Partie, um Trainingsdaten zu sammeln
 def play_game(game, policy_apply_fn, params, rng_key):
@@ -43,9 +57,8 @@ def play_game(game, policy_apply_fn, params, rng_key):
     appends in Listen zu erlauben. Das ist in Ordnung für ein einfaches Demo-Training.
     """
     env = game.env_reset(0)
-    max_steps = 14
+    max_steps = 30
     states, actions, players = jnp.zeros((max_steps, 3, 3)), jnp.zeros((max_steps), dtype=jnp.int8), jnp.zeros((max_steps), dtype=jnp.float32)
-    key = rng_key
 
     def cond(a):
         env, _, _, _, _, step = a
@@ -79,9 +92,7 @@ def play_game(game, policy_apply_fn, params, rng_key):
 
     final_outcome = game.get_winner(final_env.board)  # 1, -1 oder 0
 
-    final_outcome = jnp.where(final_outcome == 0, -0.2, final_outcome)
-
-    returns = final_outcome * final_players
+    returns = jnp.where(final_outcome == 0, -0.5, final_outcome*final_players)  # Belohnung: Sieg = 1, Niederlage = -1, Unentschieden = -0.3
 
     return {
         'states': final_states,
@@ -101,15 +112,22 @@ def train_step(network, params, opt_state, optimizer, trajectory):
     actions = trajectory['actions'][:num_steps]
     returns = trajectory['returns'][:num_steps]
     
-    if float(jnp.sum(returns)) == 0.0:
-        return params, opt_state, 0.0
+    # if float(jnp.sum(returns)) == 0.0:
+    #     return params, opt_state, 0.0
     
     def loss_fn(p, states, actions, returns):
         # Wende das Netzwerk auf den gesamten Batch von Zuständen an, indem wir vmap nutzen
+        # augmentiere Daten durch Spiegeln
+        states = jnp.concatenate([states, jnp.fliplr(states), jnp.flipud(states)], axis=0)
+        returns = jnp.concatenate([returns, returns, returns], axis=0)
+        r = actions // 3
+        c = actions % 3
+        actions = jnp.concatenate([actions, (r * 3) + 2 - c, (2 - r) * 3 + c], axis=0)
+        # --------------------------------
+
         logits = jax.vmap(network.apply, in_axes=(None, 0))(p, states)
 
-        log_probs = jax.nn.log_softmax(logits)
-        
+        log_probs = jax.nn.log_softmax(logits)        
         # Log-Wahrscheinlichkeit der ausgeführten Aktion auswählen
         action_log_probs = jnp.take_along_axis(log_probs, actions[:, None], axis=1).squeeze()
         
@@ -128,6 +146,7 @@ def train_step(network, params, opt_state, optimizer, trajectory):
         return loss
 
     # Gradienten berechnen
+
     loss, grads = jax.value_and_grad(loss_fn)(params, states, actions, returns)
     
     # Parameter aktualisieren
@@ -161,7 +180,8 @@ def main_training_loop(network, game, num_episodes=10000, learning_rate=0.001):
 
         if episode % (num_episodes // 10) == 0:
             print(f"Episode {episode}, Loss: {loss:.4f}")
-            
+
+    print(f"Episode {num_episodes}, Loss: {loss:.4f}")
     print("Training abgeschlossen!")
     return params
 
@@ -177,9 +197,9 @@ def save_checkpoint(path: str, params, opt_state=None):
 
 if __name__ == "__main__":
     game = ttt_v2
-    network = LargerNN()
-    trained_params = main_training_loop(network, game, num_episodes=1000, learning_rate=0.001)
-    name = f"{game.__name__}_Lnn_1k_e3"
+    network = ImprovedTicTacToeNet()
+    trained_params = main_training_loop(network, game, num_episodes=1500, learning_rate=0.0005)
+    name = f"{game.__name__}_imp_net_1500ep_0005lr"
     path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 
     save_checkpoint(path, trained_params)

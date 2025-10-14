@@ -125,6 +125,9 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     return env, reward, done
 
 def valid_action(env:deterministic_MADN) -> chex.Array:
+    '''
+    Returns a mask of shape (4, 6) indicating which actions are valid for each pin of the current player
+    '''
     #return valid_action for each pin of the current player
     current_player = env.current_player
     current_pins = env.pins[current_player]
@@ -180,40 +183,40 @@ def root_fn(params, rng_key, env:deterministic_MADN):
 def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
     pass    
 
-# env = env_reset(0, num_players=4, distance=10)
-# env.board = env.board.at[8].set(1)
-# env.pins = env.pins.at[1].set(jnp.array([8, -1, -1, -1]))
-# env.current_player = 1
-# print(env.board,
-#       env.pins,
-#       env.current_player,
-#       env.done,
-#       env.reward,
-#       env.action_set)
-# print("-"*50)
-# env, reward, done = env_step(env, (0, 2))
-# print(env.board,
-#       env.pins,
-#       env.current_player,
-#       env.done,
-#       env.reward,
-#       env.action_set)
-
-action = jnp.array([0, 2], dtype=jnp.int8)
 env = env_reset(0, num_players=4, distance=10)
+env.board = env.board.at[8].set(1)
+env.pins = env.pins.at[1].set(jnp.array([8, -1, -1, -1]))
+env.current_player = 1
+print(env.board,
+      env.pins,
+      env.current_player,
+      env.done,
+      env.reward,
+      env.action_set)
+print("-"*50)
+env, reward, done = env_step(env, (0, 2))
+print(env.board,
+      env.pins,
+      env.current_player,
+      env.done,
+      env.reward,
+      env.action_set)
 
-# env_step ist mit @jax.jit dekoriert; das Original ist unter __wrapped__
-res_py = env_step.__wrapped__(env, action)    # ungejittete Ausführung
-res_jit = env_step(env, action)               # jittete Ausführung (erster Aufruf kompiliert)
+# action = jnp.array([0, 2], dtype=jnp.int8)
+# env = env_reset(0, num_players=4, distance=10)
 
-# warten bis fertig und vom Gerät holen
-res_jit = jax.tree_util.tree_map(lambda x: x.block_until_ready() if hasattr(x, "block_until_ready") else x, res_jit)
-res_py = jax.device_get(res_py)
-res_jit = jax.device_get(res_jit)
+# # env_step ist mit @jax.jit dekoriert; das Original ist unter __wrapped__
+# res_py = env_step.__wrapped__(env, action)    # ungejittete Ausführung
+# res_jit = env_step(env, action)               # jittete Ausführung (erster Aufruf kompiliert)
 
-# Prüfen auf Gleichheit
-chex.assert_trees_all_close(res_py, res_jit, atol=0, rtol=0)
-print("JIT und Non-JIT Ergebnisse sind gleich.")
+# # warten bis fertig und vom Gerät holen
+# res_jit = jax.tree_util.tree_map(lambda x: x.block_until_ready() if hasattr(x, "block_until_ready") else x, res_jit)
+# res_py = jax.device_get(res_py)
+# res_jit = jax.device_get(res_jit)
+
+# # Prüfen auf Gleichheit
+# chex.assert_trees_all_close(res_py, res_jit, atol=0, rtol=0)
+# print("JIT und Non-JIT Ergebnisse sind gleich.")
 
 # # Debug: Inhalte anzeigen
 # res_py = jax.tree_util.tree_map(lambda x: jnp.array(x), res_py)
