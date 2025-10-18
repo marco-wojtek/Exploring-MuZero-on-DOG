@@ -33,8 +33,47 @@ def get_trained_action(policy_apply_fn, params, board):
 
 def get_random_action(board, rng_key):
     """Wählt eine zufällige, gültige Aktion."""
-    valid_actions = jnp.where(board.flatten() == 0)[0]
-    return jax.random.choice(rng_key, valid_actions)
+    logits = jnp.where(board.flatten() == 0, 0.0, -jnp.inf)
+    action = jax.random.categorical(rng_key, logits)
+    return action
+
+def play_parallel_match(network, game, batch_size, trained_params, rng_key, trained_player=1):
+    """Spielt mehrere Partien parallel: Trainierter Agent vs. Random Bot."""
+    envs = jax.vmap(game.env_reset)(jnp.zeros((batch_size, ), dtype=jnp.int8))
+    step = 0
+    limit = 30
+    done_mask = jnp.zeros((batch_size,), dtype=bool)
+    
+    def cond(a):
+        envs, key, step, done_mask = a
+        return jnp.logical_and(~jnp.all(done_mask), step < limit)
+    
+    def step_fn(a):
+        envs, key, step, done_mask = a
+        key, subkey = jax.random.split(key)
+        
+        def single_step(env, key, done):
+            key, action_key = jax.random.split(key)
+            def trained_move():
+                return get_trained_action(network.apply, trained_params, env.board)
+            def random_move():
+                return get_random_action(env.board, action_key)
+            action = jax.lax.cond(env.current_player == trained_player, trained_move, random_move)
+            env, _, _ = game.env_step(env, action.astype(jnp.int8))
+            return env, key
+        
+        envs, keys = jax.vmap(single_step)(envs, jax.random.split(subkey, batch_size), done_mask)
+        done_mask = done_mask | envs.done
+        return envs, key, step + 1, done_mask
+    
+    leaf, key, final_step, done_mask = jax.lax.while_loop(cond, step_fn, (envs, rng_key, step, done_mask))
+    
+    def get_winner_result(env):
+        return game.get_winner(env.board) * trained_player
+    
+    winners = jax.vmap(get_winner_result)(leaf)
+    return winners
+
 
 def play_match(network, game, trained_params, rng_key, trained_player=1):
     """Spielt eine Partie: Trainierter Agent vs. Random Bot."""
@@ -134,29 +173,29 @@ def evaluate_agent(network, game, trained_params, num_matches=1000):
     print(f"Unentschieden: {draw_rate:.2%}")
     print("---------------------------\n")
 
-
-# game = ttt_v2
-game = ttt_v2
-print(f"{game.__name__} selected for evaluation.")
-# policy = ImprovedTicTacToeNet()
-policy = LargerNN()
-dummy = jnp.zeros((3,3))
-params_template = policy.init(jax.random.PRNGKey(0), dummy)
-print("Begin Evaluation")
-# play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
-name = f"{game.__name__}_new_model"
-path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
-params, opt_state = load_checkpoint(path, params_template)
-evaluate_agent(policy, game, params, 100)
-
-# game = ttt
+game = ttt
 # print(f"{game.__name__} selected for evaluation.")
-# policy = SimplePolicy()
+# # policy = ImprovedTicTacToeNet()
+# policy = ImprovedTicTacToeNet()
 # dummy = jnp.zeros((3,3))
 # params_template = policy.init(jax.random.PRNGKey(0), dummy)
 # print("Begin Evaluation")
-# play_random_match(game, jax.random.PRNGKey(1), limit = 30, games=1000)
-# name = f"{game.__name__}_cp_1k_e3"
+# # play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
+# name = f"{game.__name__}_imp_net_1500ep_00005lr"
 # path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 # params, opt_state = load_checkpoint(path, params_template)
 # evaluate_agent(policy, game, params, 1000)
+
+policy = ImprovedTicTacToeNet()
+dummy = jnp.zeros((3,3))
+params_template = policy.init(jax.random.PRNGKey(0), dummy)
+print(f"Begin Evaluation - {game.__name__}")
+# play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
+name = f"{game.__name__}_imp_net_2000ep_00001lr"
+path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
+params, opt_state = load_checkpoint(path, params_template)
+evaluate_agent(policy, game, params, 1000)
+# winners = play_parallel_match(policy, game, batch_size=50, trained_params=params, rng_key=jax.random.PRNGKey(42), trained_player=1)
+# # winners2 = play_parallel_match(policy, game, batch_size=50, trained_params=params, rng_key=jax.random.PRNGKey(42), trained_player=-1)
+# # print("Winrate as player 1:", winners)
+# # print("Winrate as player -1:", jnp.mean(winners2 == -1))

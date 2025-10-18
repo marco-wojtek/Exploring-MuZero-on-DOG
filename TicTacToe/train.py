@@ -49,7 +49,7 @@ class ImprovedTicTacToeNet(nn.Module):
         
         return nn.Dense(features=self.num_actions)(x)
 
-# 2. Funktion zum Spielen einer kompletten Partie, um Trainingsdaten zu sammeln
+@functools.partial(jax.jit, static_argnames=('game', 'policy_apply_fn'))
 def play_game(game, policy_apply_fn, params, rng_key):
     """Spielt eine Partie (nicht-jittbar) und sammelt die Trajektorie.
 
@@ -101,7 +101,6 @@ def play_game(game, policy_apply_fn, params, rng_key):
         'num_steps': num_steps
     }
 
-# 3. Loss-Funktion und Trainingsschritt
 def train_step(network, params, opt_state, optimizer, trajectory):
     """Berechnet den Verlust, die Gradienten und aktualisiert die Modellparameter."""
 
@@ -115,6 +114,7 @@ def train_step(network, params, opt_state, optimizer, trajectory):
     # if float(jnp.sum(returns)) == 0.0:
     #     return params, opt_state, 0.0
     
+    @jax.jit
     def loss_fn(p, states, actions, returns):
         # Wende das Netzwerk auf den gesamten Batch von Zuständen an, indem wir vmap nutzen
         # augmentiere Daten durch Spiegeln
@@ -198,8 +198,8 @@ def save_checkpoint(path: str, params, opt_state=None):
 if __name__ == "__main__":
     game = ttt_v2
     network = ImprovedTicTacToeNet()
-    trained_params = main_training_loop(network, game, num_episodes=1500, learning_rate=0.0005)
-    name = f"{game.__name__}_imp_net_1500ep_0005lr"
+    trained_params = main_training_loop(network, game, num_episodes=2000, learning_rate=0.0001)
+    name = f"{game.__name__}_imp_net_2000ep_00001lr"
     path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 
     save_checkpoint(path, trained_params)
