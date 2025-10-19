@@ -56,7 +56,7 @@ def env_reset(_, num_players=jnp.int8(4), distance=jnp.int8(10)) -> MADN:
         die=jnp.int8(0)
     )
 
-#@jax.jit
+@jax.jit
 def env_step(env: MADN, action: Action) -> MADN:
     pin = action.astype(jnp.int8)
     move = env.die

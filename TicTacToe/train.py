@@ -49,6 +49,25 @@ class ImprovedTicTacToeNet(nn.Module):
         
         return nn.Dense(features=self.num_actions)(x)
 
+class ConvTicTacToeNet(nn.Module):
+    num_actions: int = 9
+    
+    @nn.compact
+    def __call__(self, x, training=True):
+        x = x[..., None]  # Füge Kanal-Dimension hinzu: (3, 3, 1)
+        
+        x = nn.Conv(features=32, kernel_size=(2, 2), strides=(1, 1))(x)
+        x = nn.relu(x)
+        
+        x = nn.Conv(features=64, kernel_size=(2, 2), strides=(1, 1))(x)
+        x = nn.relu(x)
+        
+        x = x.flatten()
+        x = nn.Dense(features=128)(x)
+        x = nn.relu(x)
+        
+        return nn.Dense(features=self.num_actions)(x)
+    
 @functools.partial(jax.jit, static_argnames=('game', 'policy_apply_fn'))
 def play_game(game, policy_apply_fn, params, rng_key):
     """Spielt eine Partie (nicht-jittbar) und sammelt die Trajektorie.
@@ -196,10 +215,19 @@ def save_checkpoint(path: str, params, opt_state=None):
 
 
 if __name__ == "__main__":
+    # game = ttt_v2
+    # network = ImprovedTicTacToeNet()
+    # trained_params = main_training_loop(network, game, num_episodes=2000, learning_rate=0.0001)
+    # name = f"{game.__name__}_imp_net_2000ep_00001lr"
+    # path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
+
+    # save_checkpoint(path, trained_params)
+    # print("Trainierte Parameter wurden erstellt.")
+
     game = ttt_v2
-    network = ImprovedTicTacToeNet()
-    trained_params = main_training_loop(network, game, num_episodes=2000, learning_rate=0.0001)
-    name = f"{game.__name__}_imp_net_2000ep_00001lr"
+    network = ConvTicTacToeNet()
+    trained_params = main_training_loop(network, game, num_episodes=1000, learning_rate=0.0001)
+    name = f"{game.__name__}_conv_net_1000ep_00001lr"
     path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 
     save_checkpoint(path, trained_params)
