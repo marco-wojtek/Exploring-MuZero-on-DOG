@@ -8,6 +8,7 @@ import TicTacToeV2 as ttt_v2
 import TicTacToe as ttt
 import functools
 from train import ConvTicTacToeNet, ImprovedTicTacToeNet, SimplePolicy, LargerNN
+from mcts import run_mcts
 
 def load_checkpoint(path: str, params_template, opt_state_template=None):
     """
@@ -23,6 +24,14 @@ def load_checkpoint(path: str, params_template, opt_state_template=None):
             opt_bytes = f.read()
         opt_state = flax.serialization.from_bytes(opt_state_template, opt_bytes)
     return params, opt_state
+
+def get_mcts_action(env, board, rng_key, num_simulations):
+    """Erhält die beste Aktion vom MCTS-Algorithmus."""
+    policy_output = run_mcts(rng_key, env, num_simulations=num_simulations)
+    action_weights = policy_output.action_weights.mean(axis=0)
+    valid_mask = (board.flatten() == 0)
+    action_weights = jnp.where(valid_mask, action_weights, -jnp.inf)
+    return jnp.argmax(action_weights)
 
 def get_trained_action(policy_apply_fn, params, board):
     """Erhält die beste Aktion vom trainierten Modell."""
@@ -58,7 +67,9 @@ def play_parallel_match(network, game, batch_size, trained_params, rng_key, trai
                 return get_trained_action(network.apply, trained_params, env.board)
             def random_move():
                 return get_random_action(env.board, action_key)
-            action = jax.lax.cond(env.current_player == trained_player, trained_move, random_move)
+            def mcts_move():
+                return get_mcts_action(network.apply, trained_params, env.board, action_key)
+            action = jax.lax.cond(env.current_player == trained_player, trained_move, mcts_move)
             env, _, _ = game.env_step(env, action.astype(jnp.int8))
             return env, key
         
@@ -75,7 +86,7 @@ def play_parallel_match(network, game, batch_size, trained_params, rng_key, trai
     return winners
 
 
-def play_match(network, game, trained_params, rng_key, trained_player=1):
+def play_match(network, game, trained_params, rng_key, trained_player=1, num_simulations=0):
     """Spielt eine Partie: Trainierter Agent vs. Random Bot."""
     env = game.env_reset(0)
     step = 0
@@ -87,7 +98,10 @@ def play_match(network, game, trained_params, rng_key, trained_player=1):
             action = get_trained_action(network.apply, trained_params, env.board)
             # print("Trained player: ", action)
         else:
-            action = get_random_action(env.board, action_key)
+            if num_simulations == 0:
+                action = get_random_action(env.board, action_key)
+            else:
+                action = get_mcts_action(env, env.board, action_key, num_simulations)
             # print("Random player: ", action)
             
         env, _, _ = game.env_step(env, action.astype(jnp.int8))
@@ -126,9 +140,12 @@ def play_random_match(game, rng_key, limit, games=100):
 
     print(f"Random Bot 1: {one/games}, Random Bot -1: {neg_one/games}, Draw: {(games - one - neg_one)/games}")
 
-def evaluate_agent(network, game, trained_params, num_matches=1000):
+def evaluate_agent(network, game, trained_params, num_matches=1000, num_simulations=0):
     """Evaluiert den trainierten Agenten über viele Partien."""
-    print(f"\nStarte Evaluation gegen Random Bot ({num_matches} Partien)...")
+    if num_simulations == 0:
+        print(f"\nStarte Evaluation gegen Random Bot ({num_matches} Partien)...")
+    else:
+        print(f"\nStarte Evaluation gegen MCTS Bot mit {num_simulations} Simulationen ({num_matches} Partien)...")
     rng_key = jax.random.PRNGKey(1)
     
     wins = 0
@@ -138,7 +155,7 @@ def evaluate_agent(network, game, trained_params, num_matches=1000):
     # Spiele als Spieler 1 (beginnt)
     for i in range(num_matches // 2):
         rng_key, game_key = jax.random.split(rng_key)
-        winner = play_match(network, game, trained_params, game_key, trained_player=1)
+        winner = play_match(network, game, trained_params, game_key, trained_player=1, num_simulations=num_simulations)
         if winner == 1:
             wins += 1
         elif winner == -1:
@@ -153,7 +170,7 @@ def evaluate_agent(network, game, trained_params, num_matches=1000):
     draws2 = 0
     for i in range(num_matches // 2):
         rng_key, game_key = jax.random.split(rng_key)
-        winner = play_match(network, game, trained_params, game_key, trained_player=-1)
+        winner = play_match(network, game, trained_params, game_key, trained_player=-1, num_simulations=num_simulations)
         if winner == 1:
             wins2 += 1
         elif winner == -1:
@@ -174,43 +191,20 @@ def evaluate_agent(network, game, trained_params, num_matches=1000):
     print("---------------------------\n")
 
 game = ttt_v2
-print(f"{game.__name__} selected for evaluation.")
-policy = SimplePolicy()
+
+policy = ConvTicTacToeNet()
 dummy = jnp.zeros((3,3))
 params_template = policy.init(jax.random.PRNGKey(0), dummy)
-print("Begin Evaluation")
 # play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
-name = f"{game.__name__}_cp_1k_e3"
+name = f"{game.__name__}_conv_net_1000ep_00001lr"   
 path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 params, opt_state = load_checkpoint(path, params_template)
-evaluate_agent(policy, game, params, 1000)
-# print(f"{game.__name__} selected for evaluation.")
-# policy = ImprovedTicTacToeNet()
-# dummy = jnp.zeros((3,3))
-# params_template = policy.init(jax.random.PRNGKey(0), dummy)
-# print("Begin Evaluation")
-# # play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
-# name = f"{game.__name__}_imp_net_1000ep_0001lr"
-# path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
-# params, opt_state = load_checkpoint(path, params_template)
-# evaluate_agent(policy, game, params, 1000)
-
-# policy = ImprovedTicTacToeNet()
-# dummy = jnp.zeros((3,3))
-# params_template = policy.init(jax.random.PRNGKey(0), dummy)
-# print(f"Begin Evaluation - {game.__name__}")
-# # play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
-# name = f"{game.__name__}_imp_net_2000ep_00001lr"
-# path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
-# params, opt_state = load_checkpoint(path, params_template)
-# evaluate_agent(policy, game, params, 1000)
-
-# policy = ConvTicTacToeNet()
-# dummy = jnp.zeros((3,3))
-# params_template = policy.init(jax.random.PRNGKey(0), dummy)
-# print(f"Begin Evaluation - {game.__name__}")
-# # play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
-# name = f"{game.__name__}_conv_net_1000ep_00001lr"   
-# path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
-# params, opt_state = load_checkpoint(path, params_template)
-# evaluate_agent(policy, game, params, 1000)
+num_simulations = 5
+print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+num_simulations = 10
+print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+num_simulations = 30
+print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)

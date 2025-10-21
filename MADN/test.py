@@ -1,4 +1,4 @@
-from deterministic_madn import deterministic_MADN, env_reset, env_step, valid_action, no_step
+from deterministic_madn import deterministic_MADN, env_reset, env_step, refill_action_set, valid_action, no_step
 import jax
 import jax.numpy as jnp
 
@@ -11,9 +11,11 @@ def simulate_game():
         print("Current player: ", env.current_player)
         print("Current board:\n", env.board)
         print("Current pins:\n", env.pins)
+        print("Current actionset:\n", env.action_set)
         valid_actions = valid_action(env)
         print("Valid actions:\n", valid_actions)
         if not jnp.any(valid_actions):
+            refill_action_set(env)
             env, reward, done = no_step(env)
             print("No valid actions available. Skipping turn.")
         else:

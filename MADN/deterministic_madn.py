@@ -113,19 +113,25 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
 
     env = deterministic_MADN(
         board=board,
-        num_players=env.num_players,
-        pins=pins,
+        num_players=env.num_players,#/
+        pins=pins,#
         current_player=current_player,
-        done= done,
-        reward=reward,
-        action_set=action_set,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
+        done= done,#
+        reward=reward,#
+        action_set=action_set,#/
+        start=env.start,#
+        target=env.target,#
+        goal=env.goal,#
+        board_size=env.board_size,#
+        total_board_size=env.total_board_size,#
     )
     return env, reward, done
+
+def refill_action_set(env:deterministic_MADN) -> chex.Array:
+    '''
+    Refills the action set for the current player if all actions are used up.
+    '''
+    env.action_set = env.action_set.at[env.current_player].set(env.pins.shape[1] * jnp.ones(6, dtype=jnp.int8))
 
 def no_step(env:deterministic_MADN) -> deterministic_MADN:
     """
