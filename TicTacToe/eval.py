@@ -8,7 +8,7 @@ import TicTacToeV2 as ttt_v2
 import TicTacToe as ttt
 import functools
 from train import ConvTicTacToeNet, ImprovedTicTacToeNet, SimplePolicy, LargerNN
-from mcts import run_mcts
+from mcts import run_mcts, run_gumbel
 
 def load_checkpoint(path: str, params_template, opt_state_template=None):
     """
@@ -28,6 +28,14 @@ def load_checkpoint(path: str, params_template, opt_state_template=None):
 def get_mcts_action(env, board, rng_key, num_simulations):
     """Erhält die beste Aktion vom MCTS-Algorithmus."""
     policy_output = run_mcts(rng_key, env, num_simulations=num_simulations)
+    action_weights = policy_output.action_weights.mean(axis=0)
+    valid_mask = (board.flatten() == 0)
+    action_weights = jnp.where(valid_mask, action_weights, -jnp.inf)
+    return jnp.argmax(action_weights)
+
+def get_gumbel_action(env, board, rng_key, num_simulations):
+    """Wählt eine Aktion basierend auf Gumbel-Softmax Sampling."""
+    policy_output = run_gumbel(rng_key, env, num_simulations=num_simulations)
     action_weights = policy_output.action_weights.mean(axis=0)
     valid_mask = (board.flatten() == 0)
     action_weights = jnp.where(valid_mask, action_weights, -jnp.inf)
@@ -140,6 +148,33 @@ def play_random_match(game, rng_key, limit, games=100):
 
     print(f"Random Bot 1: {one/games}, Random Bot -1: {neg_one/games}, Draw: {(games - one - neg_one)/games}")
 
+def play_mcts_match(game, rng_key, limit, num_simulations, games=100, gumebel=False):
+    """Spielt eine Partie: MCTS Bot vs. MCTS Bot."""
+    print(f"\nStarte Evaluation MCTS Bot gegen MCTS Bot mit {num_simulations} Simulationen ({games} Partien)...")
+
+    one = 0
+    neg_one = 0
+    
+    for _ in range(games):
+        env = game.env_reset(0)
+        step = 0
+        while not env.done and step < limit:
+            rng_key, action_key = jax.random.split(rng_key)
+            if gumebel:
+                action = get_gumbel_action(env, env.board, action_key, num_simulations)
+            else:
+                action = get_mcts_action(env, env.board, action_key, num_simulations)
+            env, _, _ = game.env_step(env, action.astype(jnp.int8))
+            step += 1
+
+        winner = game.get_winner(env.board)
+        if winner == 1:
+            one += 1
+        elif winner == -1:
+            neg_one += 1
+
+    print(f"MCTS Bot 1: {one/games}, MCTS Bot -1: {neg_one/games}, Draw: {(games - one - neg_one)/games}")
+
 def evaluate_agent(network, game, trained_params, num_matches=1000, num_simulations=0):
     """Evaluiert den trainierten Agenten über viele Partien."""
     if num_simulations == 0:
@@ -192,19 +227,23 @@ def evaluate_agent(network, game, trained_params, num_matches=1000, num_simulati
 
 game = ttt_v2
 
-policy = ConvTicTacToeNet()
-dummy = jnp.zeros((3,3))
-params_template = policy.init(jax.random.PRNGKey(0), dummy)
-# play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
-name = f"{game.__name__}_conv_net_1000ep_00001lr"   
-path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
-params, opt_state = load_checkpoint(path, params_template)
-num_simulations = 5
-print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
-evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
-num_simulations = 10
-print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
-evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
-num_simulations = 30
-print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
-evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+# policy = ConvTicTacToeNet()
+# dummy = jnp.zeros((3,3))
+# params_template = policy.init(jax.random.PRNGKey(0), dummy)
+# # play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
+# name = f"{game.__name__}_conv_net_1000ep_00001lr"   
+# path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
+# params, opt_state = load_checkpoint(path, params_template)
+# num_simulations = 5
+# print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+# evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+# num_simulations = 10
+# print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+# evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+# num_simulations = 30
+# print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+# evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+play_mcts_match(game, jax.random.PRNGKey(1), limit=30, num_simulations=5, games=1000, gumebel=True)
+play_mcts_match(game, jax.random.PRNGKey(6), limit=30, num_simulations=10, games=1000, gumebel=True)
+play_mcts_match(game, jax.random.PRNGKey(90), limit=30, num_simulations=30, games=1000, gumebel=True)
+

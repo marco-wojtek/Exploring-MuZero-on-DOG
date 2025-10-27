@@ -194,7 +194,26 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
         result
     )
     return result & valid_actions # filter possible actions with available actions
-    
+
+def encode_board(env:deterministic_MADN) -> chex.Array:
+    '''
+    returns a 4xN array encoding the board state for each player
+    '''
+    start = env.start
+    num_players = env.num_players
+    board = env.board
+
+    current_pin_positions = (board == jnp.arange(num_players)[:, None]).astype(jnp.int8)
+    current_player = jnp.ones_like(board, dtype=jnp.int8) * env.current_player
+    available_actions = jax.vmap(lambda p: jnp.ones_like(board, dtype=jnp.int8) * env.action_set[p])(jnp.arange(jnp.arange(len(env.action_set))))
+    board_encoding = jnp.concatenate([current_pin_positions, current_player[None, :], available_actions], axis=0)
+    return board_encoding
+
+    # encoding = jax.vmap(lambda s: jnp.roll(board, -s))(start)
+    # board_encoding = (encoding == jnp.arange(num_players)[:, None]).astype(jnp.int8)
+    # return board_encoding
+
+
 def winning_action(env:deterministic_MADN) -> chex.Array:
     pass
 

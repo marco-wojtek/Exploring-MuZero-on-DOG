@@ -31,8 +31,6 @@
 | ImpNet |  2k |  0.0001   | 5.10% | 94.50% | 0.40% | 31/20
 | ConvNet |  1k |  0.0001   | 4.50% | 95.30% | 0.20% | 0/45
 
-
-
 ## TicTacToeV2 results (1000 games against mcts Bot, 30 simulations)
 
 | Network         | Episodes | lr | winrrate | loserate | tierate | Wins as 1 or -1 w 500 games each
@@ -43,3 +41,21 @@
 | ImpNet |  1.5k |  0.0005   | 0.60% | 99.40% | 0.00% | 0/6
 | ImpNet |  2k |  0.0001   | 0.50% | 99.40% | 0.10% | 0/5
 | ConvNet |  1k |  0.0001   | 2.10% | 97.80% | 0.10% | 0/21
+
+## TicTacToeV2 results (1000 games mcts vs mcts)
+|Calculation steps | Bot 1 | Bot -1 | Draw |
+|:---:|:---:|:---:|:----:|
+|5|0.48|0.472|0.048|
+|10|0.504|0.464|0.032|
+|30|0.581|0.407|0.012|
+|100|0.641|0.203|0.156|
+
+Gumbel MuZero
+
+|Calculation steps | Bot 1 | Bot -1 | Draw |
+|:---:|:---:|:---:|:----:|
+|5|0.52|0.405|0.075|
+|10|0.547|0.403|0.05|
+|30|0.522|0.467|0.011|
+
+|100|0.577|0.415|0.008|

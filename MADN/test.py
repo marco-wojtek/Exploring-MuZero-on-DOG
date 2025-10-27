@@ -1,4 +1,4 @@
-from deterministic_madn import deterministic_MADN, env_reset, env_step, refill_action_set, valid_action, no_step
+from deterministic_madn import *
 import jax
 import jax.numpy as jnp
 
@@ -35,23 +35,26 @@ def simulate_game():
     print("Final board:\n", env.board)
     print("Final pins:\n", env.pins)
 
-simulate_game()
-# env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
-# env.board = env.board.at[24].set(1)
-# env.board = env.board.at[26].set(1)
-# env.board = env.board.at[27].set(1)
-# env.board = env.board.at[25].set(1)
-# env.board = env.board.at[10].set(0)
-# env.board = env.board.at[15].set(0)
-# env.board = env.board.at[3].set(0)
-# env.pins = env.pins.at[1, 0].set(24)
-# env.pins = env.pins.at[1, 1].set(26)
-# env.pins = env.pins.at[1, 2].set(27)
-# env.pins = env.pins.at[1, 3].set(25)
-# env.pins = env.pins.at[0, 0].set(3)
-# env.pins = env.pins.at[0, 2].set(10)
-# env.pins = env.pins.at[0, 3].set(15)
+# simulate_game()
+env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
+env.board = env.board.at[24].set(1)
+env.board = env.board.at[26].set(1)
+env.board = env.board.at[27].set(1)
+env.board = env.board.at[25].set(1)
+env.board = env.board.at[10].set(0)
+env.board = env.board.at[15].set(0)
+env.board = env.board.at[3].set(0)
+env.pins = env.pins.at[1, 0].set(24)
+env.pins = env.pins.at[1, 1].set(26)
+env.pins = env.pins.at[1, 2].set(27)
+env.pins = env.pins.at[1, 3].set(25)
+env.pins = env.pins.at[0, 0].set(3)
+env.pins = env.pins.at[0, 2].set(10)
+env.pins = env.pins.at[0, 3].set(15)
 
+enc = encode_board(env)
+print(env.board)
+print("Encoded board: ", enc)
 # env.current_player = 1
 # print(env)
 # print(jnp.isin(env.pins[env.current_player], env.goal[env.current_player]))

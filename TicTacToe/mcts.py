@@ -22,6 +22,21 @@ def run_mcts(rng_key:chex.PRNGKey, env:TicTacToeV2, num_simulations:int):
     )
     return policy_output
 
+@functools.partial(jax.jit, static_argnums=(2,))
+def run_gumbel(rng_key:chex.PRNGKey, env:TicTacToeV2, num_simulations:int):
+    batch_size = 1
+    key1, key2 = jax.random.split(rng_key)
+    policy_output = mctx.gumbel_muzero_policy(
+        params= None,
+        rng_key=key1,
+        root = jax.vmap(root_fn, (None, 0))(env,jax.random.split(key2, batch_size)),
+        recurrent_fn=jax.vmap(recurrent_fn, (None,None,0,0)),
+        num_simulations=num_simulations,
+        max_depth=9,
+        qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1)
+    )
+    return policy_output
+
 # env = env_reset(0)
 # env, reward, done = env_step(env, 0)
 # print(env.board)
