@@ -138,4 +138,3 @@ def recurrent_fn(params, rng_key, action, embedding):
     )
 
     return recurrent_fn_output, env
-

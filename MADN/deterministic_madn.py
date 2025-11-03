@@ -1,6 +1,7 @@
 import chex
 import jax
 import jax.numpy as jnp
+import mctx
 
 Board = chex.Array
 Start = chex.Array
@@ -30,12 +31,14 @@ class deterministic_MADN:
     board_size: Size  # scalar, size of the board (num_players * distance)
     total_board_size: Size  # scalar, size of the board + goal areas (num_players * distance + num_players * 4)
 
-def get_winner(goal: Goal) -> Player:
+def get_winner(env: deterministic_MADN) -> Player:
     '''
     returns the index of the winning player or 0 if tie or not Done
     '''
-    player_goals = jnp.all(goal > 0, axis=1)
-    return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals)+1, 0)
+    board = env.board
+    goals = board[env.goal]
+    player_goals = jnp.all(goals >= 0, axis=1)
+    return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals), -1)
 
 def env_reset(_, num_players=jnp.int8(4), distance=jnp.int8(10)) -> deterministic_MADN:
     board_size = num_players * distance
@@ -43,73 +46,78 @@ def env_reset(_, num_players=jnp.int8(4), distance=jnp.int8(10)) -> deterministi
     num_pins = 4
     return deterministic_MADN(
         board = - jnp.ones(total_board_size, dtype=jnp.int8), # board is filled with -1 (empty) or 0-3 (player index)
-        num_players = num_players, # number of players
+        num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
         pins = - jnp.ones((num_players,num_pins), dtype=jnp.int8), # index of each players' pins, -1 means in start area
-        current_player=jnp.int8(0), # index of current player, 0-3
+        current_player=jnp.array(0, dtype=jnp.int8), # index of current player, 0-3
         done = jnp.bool_(False), # whether the game is over
-        reward=jnp.int8(0), # reward for the current player
+        reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
         action_set= num_pins * jnp.ones((num_players, 6), dtype=jnp.int8), # each player starts with 4 actions 1-6
         start = jnp.array(jnp.arange(num_players)*distance, dtype=jnp.int8), # starting positions of each player
         target = jnp.array((jnp.arange(num_players)*distance - 1)%board_size, dtype=jnp.int8),
         goal = jnp.reshape(jnp.arange(board_size, board_size + num_players*4, dtype=jnp.int8), (num_players, 4)),
-        board_size=jnp.int8(board_size),
-        total_board_size=jnp.int8(total_board_size),
+        board_size=jnp.array(board_size, dtype=jnp.int8),
+        total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
     )
 
-@jax.jit
+#@jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     pin = action[0].astype(jnp.int8)
     move = action[1].astype(jnp.int8) # action is in {1, 2, 3, 4, 5, 6}
+    current_player = env.current_player
     # check if the action is valid
     invalid_action = ~valid_action(env)[pin, move-1]
 
-    moved_positions = env.pins[env.current_player, pin] + move
+    current_position = env.pins[current_player, pin]
+    moved_positions = current_position + move
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - env.target[env.current_player]
+    x = moved_positions - env.target[current_player]
 
     new_position = jnp.where(
-        env.pins[env.current_player, pin] == -1,
-        env.start[env.current_player], # move from start area to starting position
-        jnp.where(jnp.isin(env.pins[env.current_player, pin], env.goal[env.current_player]),
+        current_position == -1,
+        env.start[current_player], # move from start area to starting position
+        jnp.where(jnp.isin(current_position, env.goal[current_player]),
                     moved_positions,  
                     jnp.where(
-                        (4 >= x) & (x > 0) & (env.board[env.goal[env.current_player, x-1]] != env.current_player),
-                        env.goal[env.current_player, x-1], # move to goal position
+                        (4 >= x) & (x > 0) & (env.board[env.goal[current_player, x-1]] != current_player) & (current_position < env.target[current_player]),
+                        env.goal[current_player, x-1], # move to goal position
                         fitted_positions
                     )
         )
     )
-
+    
     # update pins
-    pin_at_pos = env.board[new_position] # check if a player was at the new position, also consider start area
-    pins = env.pins.at[env.current_player, pin].set(jnp.where(invalid_action, env.pins[env.current_player, pin], new_position))
+    # pin at new position
+    pin_at_pos = env.board[new_position]
+    # if a player is at the new position and it's not the current player, send that pin back to start area
+    pins = env.pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
     pins = jax.lax.cond(
-        (pin_at_pos != -1) & (pin_at_pos != env.current_player) & ~invalid_action, # if a player was at the new position and it's not the current player and the action is valid
+        (pin_at_pos != -1) & (pin_at_pos != current_player) & ~invalid_action, # if a player was at the new position and it's not the current player and the action is valid
         lambda p: p.at[pin_at_pos].set(jnp.where(p[pin_at_pos] == new_position, -1, p[pin_at_pos])), # send the pin of that player back to start area
         lambda p: p,
         pins
     )
-    board = env.board.at[new_position].set(jnp.where(invalid_action, env.board[new_position], env.current_player))
-
     board = jax.lax.cond(
-        env.pins[env.current_player, pin] != -1, # if the pin was moved
-        lambda b: b.at[env.pins[env.current_player, pin]].set(-1), # set the old position to empty
-        lambda b: b, board
+        ~invalid_action,
+        lambda b: set_pins_on_board(-jnp.ones_like(b, dtype=jnp.int8), pins),
+        lambda b: b,
+        env.board
     )
 
     # update action set, change one instance of the played action to 0 (no action)
-    curr_state = env.action_set.at[env.current_player, move-1].get()
-    action_set = env.action_set.at[env.current_player, move-1].set(jnp.where(invalid_action | (curr_state == 0), curr_state, curr_state-1))
+    curr_state = env.action_set.at[current_player, move-1].get()
+    action_set = env.action_set.at[current_player, move-1].set(jnp.where(invalid_action | (curr_state == 0), curr_state, curr_state-1))
     action_set = jax.lax.cond(
-        jnp.all(action_set[env.current_player] == 0), # if all actions are 0, refill the action set
-        lambda a: a.at[env.current_player].set(env.pins.shape[1] * jnp.ones(6, dtype=jnp.int8)),
+        jnp.all(action_set[current_player] == 0), # if all actions are 0, refill the action set
+        lambda a: a.at[current_player].set(env.pins.shape[1] * jnp.ones(6, dtype=jnp.int8)),
         lambda a: a,
         action_set
     )
-    reward = jnp.where(env.done, 0, jnp.where(invalid_action, -1, get_winner(env.goal))) # reward is 0 if game is done, -1 if action is invalid, else the index of the winning player (1-4) or 0 if no winner yet
+    winner = get_winner(env)
+    reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner==current_player)), dtype=jnp.int8) # reward is 0 if game is done, -1 if action is invalid, else the index of the winning player (1-4) or 0 if no winner yet
     # check if the game is done
-    done = jnp.all(jnp.isin(pins[env.current_player], env.goal[env.current_player])) # check if the current player has won, order of the pins does not matter
-    current_player = jnp.where(done | (move == 6) | invalid_action, env.current_player, (env.current_player + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
+    done = env.done | jnp.where(winner != -1, True, False)
+    # player changes on invalid action
+    current_player = jnp.where(done | (move == 6), current_player, (current_player + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
 
     env = deterministic_MADN(
         board=board,
@@ -127,6 +135,25 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     )
     return env, reward, done
 
+@jax.jit
+def set_pins_on_board(board, pins):
+    num_players, num_pins = pins.shape
+
+    def body(idx, board):
+        player = idx // num_pins
+        pin = idx % num_pins
+        pos = pins[player, pin]
+        board = jax.lax.cond(
+            pos != -1,
+            lambda b: b.at[pos].set(player),
+            lambda b: b,
+            board
+        )
+        return board
+
+    board = jax.lax.fori_loop(0, num_players * num_pins, body, board)
+    return board
+
 def refill_action_set(env:deterministic_MADN) -> chex.Array:
     '''
     Refills the action set for the current player if all actions are used up.
@@ -137,6 +164,7 @@ def no_step(env:deterministic_MADN) -> deterministic_MADN:
     """
     No-op step function for the environment.
     """
+    refill_action_set(env)
     env = deterministic_MADN(
         board=env.board,
         num_players=env.num_players,
@@ -151,7 +179,7 @@ def no_step(env:deterministic_MADN) -> deterministic_MADN:
         board_size=env.board_size,
         total_board_size=env.total_board_size,
     )
-    return env, 0, env.done
+    return env, jnp.array(0, dtype=jnp.int8), env.done
 
 @jax.jit
 def valid_action(env:deterministic_MADN) -> chex.Array:
@@ -183,7 +211,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     # filter actions for pins in goal area
     result = jnp.where(
         jnp.isin(current_pins, goal)[:, None],
-        (current_pins[:, None] + jnp.arange(1, 7) <= goal[-1]) & (board[moved_positions] != current_player),
+        (moved_positions <= goal[-1]) & (board[moved_positions%env.total_board_size] != current_player),
         result
     )
 
@@ -195,42 +223,132 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     )
     return result & valid_actions # filter possible actions with available actions
 
-def encode_board(env:deterministic_MADN) -> chex.Array:
-    '''
-    returns a 4xN array encoding the board state for each player
-    '''
-    start = env.start
+def encode_board(env: deterministic_MADN) -> chex.Array:
     num_players = env.num_players
     board = env.board
 
-    current_pin_positions = (board == jnp.arange(num_players)[:, None]).astype(jnp.int8)
-    current_player = jnp.ones_like(board, dtype=jnp.int8) * env.current_player
-    available_actions = jax.vmap(lambda p: jnp.ones_like(board, dtype=jnp.int8) * env.action_set[p])(jnp.arange(jnp.arange(len(env.action_set))))
-    board_encoding = jnp.concatenate([current_pin_positions, current_player[None, :], available_actions], axis=0)
+    # Spielerpositionen (One-hot)
+    player_channels = (board == jnp.arange(num_players)[:, None]).astype(jnp.int8)  # (4, board_size)
+
+    # Spielerposition im Haus
+    home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
+
+    # Aktueller Spieler (optional)
+    current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.current_player  # (1, board_size)
+
+    # Action-Häufigkeit als Kanäle
+    action_counts = env.action_set[env.current_player]  # shape (6,)
+    action_channels = jnp.repeat(action_counts[:, None], board.shape[0], axis=1)  # (6, board_size)
+
+    # Alles zusammenfügen
+    board_encoding = jnp.concatenate([player_channels, home_positions, current_player_channel, action_channels], axis=0)  # (features, board_size)
     return board_encoding
 
-    # encoding = jax.vmap(lambda s: jnp.roll(board, -s))(start)
-    # board_encoding = (encoding == jnp.arange(num_players)[:, None]).astype(jnp.int8)
-    # return board_encoding
+def encode_board_linear(env: deterministic_MADN) -> chex.Array:
+    num_players = env.num_players
+    board = env.board
 
+    # Spielerpositionen (One-hot)
+    player_channels = (board == jnp.arange(num_players)[:, None]).astype(jnp.int8)
+    player_channels = player_channels.reshape(-1)  # (features * board_size,)
+
+    # Spielerposition im Haus
+    home_positions = jnp.count_nonzero(env.pins == -1, axis=1)
+    home_positions = home_positions.reshape(-1)  # (num_players,)
+
+    # Aktueller Spieler (optional)
+    current_player_channel = jnp.zeros(num_players, dtype=jnp.int8).at[env.current_player].set(1) 
+
+    # Action-Häufigkeit als Kanäle
+    action_counts = env.action_set[env.current_player]  # shape (6,)
+
+    # Alles zusammenfügen
+    board_encoding = jnp.concatenate([player_channels, home_positions, current_player_channel, action_counts], axis=0)  # (features, board_size)
+    return board_encoding
+
+def map_action(action_index: chex.Array) -> Action:
+    '''
+    Maps an action index (0-23) to an Action (pin, move)
+    '''
+    pin = (action_index // 6).astype(jnp.int8)
+    move = (action_index % 6 + 1).astype(jnp.int8)
+    return jnp.array([pin, move], dtype=jnp.int8)
 
 def winning_action(env:deterministic_MADN) -> chex.Array:
-    pass
+    env_copy = deterministic_MADN(
+        board=env.board,
+        num_players=env.num_players,
+        current_player=env.current_player,
+        pins=env.pins,
+        done=env.done,
+        reward=env.reward,
+        action_set=env.action_set,
+        start=env.start,
+        target=env.target,
+        goal=env.goal,
+        board_size=env.board_size,
+        total_board_size=env.total_board_size,
+    )
+
+    env_copy, reward, done = jax.vmap(env_step, (None, 0))(env_copy, jnp.array([jnp.array([pin, move], dtype=jnp.int8) for pin in range(4) for move in range(1,7)], dtype=jnp.int8))
+
+    return reward == 1
 
 def policy_function(env:deterministic_MADN) -> chex.Array:
-    pass    
+    return sum(
+        (valid_action(env).flatten().astype(jnp.float32) * 100,
+        winning_action(env).astype(jnp.float32) * 200)
+    )    
 
-def rollout(env:deterministic_MADN, rng_key:chex.PRNGKey, policy_function, max_steps:int=100) -> tuple[deterministic_MADN, chex.PRNGKey]:
-    pass
+def rollout(env:deterministic_MADN, rng_key:chex.PRNGKey) -> tuple[deterministic_MADN, chex.PRNGKey]:
 
-def value_function(env:deterministic_MADN) -> chex.Array:
-    pass
+    def cond(a):
+        env, key = a
+        return ~env.done
+    def step(a):
+        env, key = a
+        key, subkey = jax.random.split(key)
+        def step_env(e):
+            action_idx = jax.random.categorical(subkey, policy_function(e)).astype(jnp.int8)
+            action = map_action(action_idx)
+            return env_step(e, action)
+        env, reward, done = jax.lax.cond(
+            jnp.all(valid_action(env) == False),
+            lambda e: no_step(e),
+            lambda e: step_env(e),
+            env)
 
-def root_fn(params, rng_key, env:deterministic_MADN):
-    pass
+        return env, key
+
+    leaf, key = jax.lax.while_loop(cond, step, (env, rng_key))
+    winner = get_winner(leaf)
+    root_player = env.current_player
+    # +1 für Sieg, -1 für Niederlage, 0 sonst
+    return jnp.where(winner == -1, 0.0, jnp.where(winner == root_player, 1.0, -1.0))
+
+def value_function(env:deterministic_MADN, rng_key:chex.PRNGKey) -> chex.Array:
+    return rollout(env, rng_key).astype(jnp.float32)
+
+def root_fn(env:deterministic_MADN, rng_key:chex.PRNGKey) -> mctx.RootFnOutput:
+    return mctx.RootFnOutput(
+        prior_logits = policy_function(env),
+        value=value_function(env, rng_key),
+        embedding=env,
+    )
 
 def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
-    pass    
+    env = embedding
+
+    env, reward, done = env_step(env, map_action(action))
+
+    recurrent_fn_output = mctx.RecurrentFnOutput(
+        reward= reward,
+        discount= jnp.where(done, 0, -1).astype(jnp.float32),
+        prior_logits = policy_function(env),
+        value = jnp.where(done, 0, value_function(env, rng_key)).astype(jnp.float32),
+    )
+
+    return recurrent_fn_output, env    
 
 # action = jnp.array([0, 2], dtype=jnp.int8)
 # env = env_reset(0, num_players=4, distance=10)
@@ -257,3 +375,21 @@ def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
 # print("jaxpr env_step (non-jit):")
 # print(jax.make_jaxpr(env_step.__wrapped__)(env, action))
 
+# env = env_reset(0, num_players=jnp.int8(4), distance=jnp.int8(10))
+# enc = encode_board_linear(env)
+# print("Encoded board shape: ", enc.shape)
+# print("Encoded board: ", enc)
+
+def all_pin_distributions(total=7, num_pins=4):
+    # Erzeuge alle möglichen Werte für die ersten drei Pins
+    a = jnp.arange(total + 1)
+    b = jnp.arange(total + 1)
+    c = jnp.arange(total + 1)
+    # Erzeuge alle Kombinationen (a, b, c)
+    grid = jnp.array(jnp.meshgrid(a, b, c, indexing='ij')).reshape(3, -1).T
+    # Berechne den vierten Wert
+    d = total - grid[:, 0] - grid[:, 1] - grid[:, 2]
+    # Filtere gültige Kombinationen (d >= 0)
+    mask = d >= 0
+    result = jnp.concatenate([grid[mask], d[mask][:, None]], axis=1)
+    return result

@@ -52,6 +52,7 @@ def run_gumbel(rng_key:chex.PRNGKey, env:TicTacToeV2, num_simulations:int):
 # print(env.board)
 # env, reward, done = env_step(env, 7)
 # print(env.board)
-# policy_output = run_mcts(jax.random.PRNGKey(0), env, 50)
+# policy_output = run_gumbel(jax.random.PRNGKey(0), env, 50)
 # w = policy_output.action_weights
 # print(w.mean(axis=0))
+# print(policy_output.action)

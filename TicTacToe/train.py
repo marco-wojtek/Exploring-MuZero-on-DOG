@@ -70,11 +70,6 @@ class ConvTicTacToeNet(nn.Module):
     
 @functools.partial(jax.jit, static_argnames=('game', 'policy_apply_fn'))
 def play_game(game, policy_apply_fn, params, rng_key):
-    """Spielt eine Partie (nicht-jittbar) und sammelt die Trajektorie.
-
-    Wir verwenden eine Python-Schleife statt einer jittbaren Funktion, um
-    appends in Listen zu erlauben. Das ist in Ordnung für ein einfaches Demo-Training.
-    """
     env = game.env_reset(0)
     max_steps = 30
     states, actions, players = jnp.zeros((max_steps, 3, 3)), jnp.zeros((max_steps), dtype=jnp.int8), jnp.zeros((max_steps), dtype=jnp.float32)
@@ -106,8 +101,8 @@ def play_game(game, policy_apply_fn, params, rng_key):
     final_env, _, final_states, final_actions, final_players, final_steps = jax.lax.while_loop(cond, body, initial_carry)
     # Verwende das finale Spielergebnis als Target für alle Zeitpunkte
 
-    step_valid = jnp.any(final_states.reshape(max_steps, -1) != 0, axis=1)
-    num_steps = jnp.sum(step_valid)
+    # step_valid = jnp.any(final_states.reshape(max_steps, -1) != 0, axis=1)
+    # num_steps = jnp.sum(step_valid)
 
     final_outcome = game.get_winner(final_env.board)  # 1, -1 oder 0
 
@@ -117,7 +112,7 @@ def play_game(game, policy_apply_fn, params, rng_key):
         'states': final_states,
         'actions': final_actions,
         'returns': returns,
-        'num_steps': num_steps
+        'num_steps': final_steps
     }
 
 def train_step(network, params, opt_state, optimizer, trajectory):
@@ -159,7 +154,7 @@ def train_step(network, params, opt_state, optimizer, trajectory):
         # Entropiebonus zur Förderung der Exploration
         probs = jnp.exp(log_probs)
         entropy = -jnp.mean(jnp.sum(probs * log_probs, axis=1))
-        entropy_coef = 0.01
+        entropy_coef = 0.1
 
         loss = policy_loss - entropy_coef * entropy
         return loss
@@ -225,9 +220,9 @@ if __name__ == "__main__":
     # print("Trainierte Parameter wurden erstellt.")
 
     game = ttt_v2
-    network = ConvTicTacToeNet()
-    trained_params = main_training_loop(network, game, num_episodes=1000, learning_rate=0.0001)
-    name = f"{game.__name__}_conv_net_1000ep_00001lr"
+    network = ImprovedTicTacToeNet()
+    trained_params = main_training_loop(network, game, num_episodes=3000, learning_rate=0.0001)
+    name = f"{game.__name__}_imp_net_5000ep_00001lr"
     path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
 
     save_checkpoint(path, trained_params)

@@ -148,7 +148,7 @@ def play_random_match(game, rng_key, limit, games=100):
 
     print(f"Random Bot 1: {one/games}, Random Bot -1: {neg_one/games}, Draw: {(games - one - neg_one)/games}")
 
-def play_mcts_match(game, rng_key, limit, num_simulations, games=100, gumebel=False):
+def play_mcts_match(game, rng_key, limit, num_simulations, games=100, gumbel=False):
     """Spielt eine Partie: MCTS Bot vs. MCTS Bot."""
     print(f"\nStarte Evaluation MCTS Bot gegen MCTS Bot mit {num_simulations} Simulationen ({games} Partien)...")
 
@@ -160,7 +160,7 @@ def play_mcts_match(game, rng_key, limit, num_simulations, games=100, gumebel=Fa
         step = 0
         while not env.done and step < limit:
             rng_key, action_key = jax.random.split(rng_key)
-            if gumebel:
+            if gumbel:
                 action = get_gumbel_action(env, env.board, action_key, num_simulations)
             else:
                 action = get_mcts_action(env, env.board, action_key, num_simulations)
@@ -227,23 +227,104 @@ def evaluate_agent(network, game, trained_params, num_matches=1000, num_simulati
 
 game = ttt_v2
 
-# policy = ConvTicTacToeNet()
-# dummy = jnp.zeros((3,3))
-# params_template = policy.init(jax.random.PRNGKey(0), dummy)
-# # play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
-# name = f"{game.__name__}_conv_net_1000ep_00001lr"   
-# path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
-# params, opt_state = load_checkpoint(path, params_template)
-# num_simulations = 5
-# print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
-# evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
-# num_simulations = 10
-# print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
-# evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
-# num_simulations = 30
-# print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
-# evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
-play_mcts_match(game, jax.random.PRNGKey(1), limit=30, num_simulations=5, games=1000, gumebel=True)
-play_mcts_match(game, jax.random.PRNGKey(6), limit=30, num_simulations=10, games=1000, gumebel=True)
-play_mcts_match(game, jax.random.PRNGKey(90), limit=30, num_simulations=30, games=1000, gumebel=True)
+policy = ImprovedTicTacToeNet()
+dummy = jnp.zeros((3,3))
+params_template = policy.init(jax.random.PRNGKey(0), dummy)
+# play_random_match(game, jax.random.PRNGKey(1), limit=20, games=100)
+name = f"{game.__name__}_imp_net_3000ep_00001lr"   
+path = "C:\\Users\\marco\\Informatikstudium\\Master\\Masterarbeit\\Exploring-MuZero-on-DOG\\TicTacToe\\Checkpoints\\" + name
+params, opt_state = load_checkpoint(path, params_template)
+print(f"Begin Evaluation - {game.__name__} - with random policy")
+evaluate_agent(policy, game, params, 1000, num_simulations=0)
+num_simulations = 5
+print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+num_simulations = 10
+print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+num_simulations = 30
+print(f"Begin Evaluation - {game.__name__} - with {num_simulations} MCTS simulations")
+evaluate_agent(policy, game, params, 1000, num_simulations=num_simulations)
+# play_mcts_match(game, jax.random.PRNGKey(1), limit=30, num_simulations=5, games=1000, gumbel=True)
+# play_mcts_match(game, jax.random.PRNGKey(6), limit=30, num_simulations=10, games=1000, gumbel=True)
+# play_mcts_match(game, jax.random.PRNGKey(90), limit=30, num_simulations=30, games=1000, gumbel=True)
 
+def test(game, rng_key, mcts_player=1, num_simulations=0):
+    """Spielt eine Partie: Trainierter Agent vs. Random Bot."""
+    env = game.env_reset(0)
+    step = 0
+    limit = 30
+    while not env.done and step < limit:
+        rng_key, action_key = jax.random.split(rng_key)
+        
+        if env.current_player == mcts_player:
+            action = get_gumbel_action(env, env.board, action_key, num_simulations)
+            # print("Trained player: ", action)
+        else:
+            action = get_random_action(env.board, action_key)
+            
+        env, _, _ = game.env_step(env, action.astype(jnp.int8))
+        # print("Current board:\n", env.board)
+        # print(env.done)
+        # print(jnp.all(env.board != 0))
+        step += 1
+    
+    # Gibt den Gewinner zurück (1 für trainierten Agent, -1 für Random Bot, 0 für Unentschieden)
+    # print(f"Final board:\n", env.board, "\n-----------------------------\n")
+    if step == limit:
+        return 0
+    return game.get_winner(env.board) * mcts_player
+
+def eva_test(game, num_matches=1000, num_simulations=0):
+    """Evaluiert den trainierten Agenten über viele Partien."""
+    if num_simulations == 0:
+        print(f"\nStarte Evaluation gegen Random Bot ({num_matches} Partien)...")
+    else:
+        print(f"\nStarte Evaluation gegen MCTS Bot mit {num_simulations} Simulationen ({num_matches} Partien)...")
+    rng_key = jax.random.PRNGKey(1)
+    
+    wins = 0
+    losses = 0
+    draws = 0
+    
+    # Spiele als Spieler 1 (beginnt)
+    for i in range(num_matches // 2):
+        rng_key, game_key = jax.random.split(rng_key)
+        winner = test(game, game_key, mcts_player=1, num_simulations=num_simulations)
+        if winner == 1:
+            wins += 1
+        elif winner == -1:
+            losses += 1
+        else:
+            draws += 1
+    
+    print(f"Ergebnis als Spieler 1 {num_matches//2} Partien: Wins: {wins}, Losses: {losses}, Draws: {draws}")
+    # Spiele als Spieler 2
+    wins2 = 0
+    losses2 = 0
+    draws2 = 0
+    for i in range(num_matches // 2):
+        rng_key, game_key = jax.random.split(rng_key)
+        winner = test(game, game_key, mcts_player=-1, num_simulations=num_simulations)
+        if winner == 1:
+            wins2 += 1
+        elif winner == -1:
+            losses2 += 1
+        else:
+            draws2 += 1
+
+    print(f"Ergebnis als Spieler 2 {num_matches//2} Partien: Wins: {wins2}, Losses: {losses2}, Draws: {draws2}")
+
+    win_rate = (wins + wins2) / num_matches
+    loss_rate = (losses + losses2) / num_matches
+    draw_rate = (draws + draws2) / num_matches
+    print("\n--- Evaluationsergebnis ---")
+    print(f"Gewinnrate: {win_rate:.2%}")
+    print(f"Verlustrate: {loss_rate:.2%}")
+    print(f"Unentschieden: {draw_rate:.2%}")
+    print("---------------------------\n")
+
+eva_test(game, 1000, num_simulations=5)
+eva_test(game, 1000, num_simulations=10)
+eva_test(game, 1000, num_simulations=30)
+eva_test(game, 1000, num_simulations=100)
