@@ -30,12 +30,59 @@ class deterministic_MADN:
     goal: Goal  # shape (num_players,4), goal positions of the players
     board_size: Size  # scalar, size of the board (num_players * distance)
     total_board_size: Size  # scalar, size of the board + goal areas (num_players * distance + num_players * 4)
-    rules = {
-        'enable_initial_free_pin':False,
-        'enable_circular_board':True,
-        'enable_friendly_fire':False,
-        'enable_start_on_6':True,
-    }
+    rules : dict  # game rules
+
+def env_reset(
+        _,
+        num_players=jnp.int8(4),
+        distance=jnp.int8(10),
+        enable_initial_free_pin = False,
+        enable_circular_board = True,
+        enable_friendly_fire = False,
+        enable_start_on_6 = True,
+        enable_bonus_turn_on_6 = True
+            ) -> deterministic_MADN:
+    
+    board_size = num_players * distance
+    total_board_size = board_size + num_players * 4 # add goal areas
+    num_pins = 4
+
+    start = jnp.array(jnp.arange(num_players)*distance, dtype=jnp.int8)
+    pins = - jnp.ones((num_players,num_pins), dtype=jnp.int8)
+    pins = jax.lax.cond(
+        enable_initial_free_pin,
+        lambda: pins.at[:,0].set(start),
+        lambda: pins
+    )
+    board = - jnp.ones(total_board_size, dtype=jnp.int8)
+    board = jax.lax.cond(
+        enable_initial_free_pin,
+        lambda: set_pins_on_board(board, pins),
+        lambda: board
+    )
+
+    return deterministic_MADN(
+        board = board, # board is filled with -1 (empty) or 0-3 (player index)
+        num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
+        pins = pins,
+        current_player=jnp.array(0, dtype=jnp.int8), # index of current player, 0-3
+        done = jnp.bool_(False), # whether the game is over
+        reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
+        action_set= num_pins * jnp.ones((num_players, 6), dtype=jnp.int8), # each player starts with 4 actions 1-6
+        start = start,
+        target = jnp.array((jnp.arange(num_players)*distance - 1)%board_size, dtype=jnp.int8),
+        goal = jnp.reshape(jnp.arange(board_size, board_size + num_players*4, dtype=jnp.int8), (num_players, 4)),
+        board_size=jnp.array(board_size, dtype=jnp.int8),
+        total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
+        rules = {
+        'enable_initial_free_pin':enable_initial_free_pin,
+        'enable_circular_board':enable_circular_board,
+        'enable_friendly_fire':enable_friendly_fire,
+        'enable_start_on_6':enable_start_on_6,
+        'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
+        }
+    )
+
 
 def get_winner(board, goal_area) -> Player:
     '''
@@ -44,25 +91,6 @@ def get_winner(board, goal_area) -> Player:
     goals = board[goal_area]
     player_goals = jnp.all(goals >= 0, axis=1)
     return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals), -1)
-
-def env_reset(_, num_players=jnp.int8(4), distance=jnp.int8(10)) -> deterministic_MADN:
-    board_size = num_players * distance
-    total_board_size = board_size + num_players * 4 # add goal areas
-    num_pins = 4
-    return deterministic_MADN(
-        board = - jnp.ones(total_board_size, dtype=jnp.int8), # board is filled with -1 (empty) or 0-3 (player index)
-        num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
-        pins = - jnp.ones((num_players,num_pins), dtype=jnp.int8), # index of each players' pins, -1 means in start area
-        current_player=jnp.array(0, dtype=jnp.int8), # index of current player, 0-3
-        done = jnp.bool_(False), # whether the game is over
-        reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
-        action_set= num_pins * jnp.ones((num_players, 6), dtype=jnp.int8), # each player starts with 4 actions 1-6
-        start = jnp.array(jnp.arange(num_players)*distance, dtype=jnp.int8), # starting positions of each player
-        target = jnp.array((jnp.arange(num_players)*distance - 1)%board_size, dtype=jnp.int8),
-        goal = jnp.reshape(jnp.arange(board_size, board_size + num_players*4, dtype=jnp.int8), (num_players, 4)),
-        board_size=jnp.array(board_size, dtype=jnp.int8),
-        total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
-    )
 
 @jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
@@ -122,7 +150,7 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     # check if the game is done
     done = env.done | jnp.where(winner != -1, True, False)
     # player changes on invalid action
-    current_player = jnp.where(done | (move == 6), current_player, (current_player + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
+    current_player = jnp.where(done | (env.rules['enable_bonus_turn_on_6'] & (move == 6)), current_player, (current_player + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
 
     env = deterministic_MADN(
         board=board,
@@ -209,9 +237,19 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     # filter out invalid moves blocked by own pins
     result = (board[fitted_positions] != current_player) # check move to any board position
 
+    result = jax.lax.cond(
+        env.rules['enable_circular_board'],
+        lambda: result,
+        lambda: jnp.where(
+            (current_positions <= target) & (moved_positions > (target + len(current_pins))), # if moving beyond target is not allowed
+            False,
+            result
+        )
+    )
+
     result = jnp.where(
         (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
-        result | (board[goal[x-1]] != current_player), # if goal is possible, check if goal position is free
+        (env.rules["enable_circular_board"] & result) | (board[goal[x-1]] != current_player), # if goal is possible, check if goal position is free
         result
     )
     # filter actions for pins in goal area
@@ -222,9 +260,14 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     )
 
     # filter actions for pins in start area
+    start_moves = jax.lax.cond(
+        env.rules['enable_start_on_6'],
+        lambda: jnp.array([1, 6]),
+        lambda: jnp.array([-1, 1]) # only move out with 1
+    )
     result = jnp.where(
         (current_pins == -1)[:, None],
-        jnp.isin(jnp.arange(1, 7), jnp.array([1, 6])) & (env.board[env.start[current_player]] != env.current_player),
+        jnp.isin(jnp.arange(1, 7), start_moves) & (env.board[env.start[current_player]] != env.current_player),
         result
     )
     return result & valid_actions # filter possible actions with available actions

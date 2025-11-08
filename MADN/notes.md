@@ -87,4 +87,3 @@
 - enable_forced_attack
 - enable_friendly_fire (on team member pins)
 - enable_circular_board
-- enable_counter_clockwise_walking

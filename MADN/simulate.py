@@ -19,8 +19,7 @@ def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int
     )
     return policy_output
 
-def simulate_game(key):
-    env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
+def simulate_game(env, key):
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     while not env.done:
@@ -44,7 +43,6 @@ def simulate_game(key):
             env, reward, done = env_step(env, chosen)
         print("Reward: ", reward)
         print("Done: ", done)
-        print("Winner: ", get_winner(env.board, env.goal))
         print("-"*30)
         steps += 1
     print("Game over after ", steps, " steps.")
@@ -52,8 +50,7 @@ def simulate_game(key):
     print("Final pins:\n", env.pins)
 
 @functools.partial(jax.jit, static_argnames=('game', 'policy_apply_fn'))
-def play_game(game, num_players, distance, policy_apply_fn, params, rng_key):
-    env = game.env_reset(0, num_players=num_players, distance=distance)
+def play_game(env, game, num_players, distance, policy_apply_fn, params, rng_key):
     steps = 0
     states, actions, players = [], [], []
     while not env.done:
@@ -85,8 +82,7 @@ def play_game(game, num_players, distance, policy_apply_fn, params, rng_key):
     }
 
 
-def simulate_mcts_game(key, iterations = 500):
-    env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
+def simulate_mcts_game(env, key, iterations = 500):
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     while not env.done:
@@ -134,7 +130,9 @@ def simulate_mcts_game(key, iterations = 500):
 
 '''Simulate a random game'''
 # simulate_mcts_game(999, 1500)
-# simulate_game(90789)
+# env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
+# env.rules['enable_start_on_6'] = False
+# simulate_game(env, 90789)
 
 '''Test MCTS on a specific board state'''
 # env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
@@ -174,25 +172,27 @@ def simulate_mcts_game(key, iterations = 500):
 # print("Time taken for MCTS: ", end - start)
 
 '''Test a specific board state and following transitions'''
-env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
-env.pins = jnp.array([
-    [9, 0, 5, 20],
-    [27, 24, 25, 26]
-    ], dtype=jnp.int8)
-env.board = set_pins_on_board(env.board, env.pins)
-env.current_player = 1
-env.action_set = jnp.array([
-    [4, 4, 4, 4, 4, 4],
-    [0, 4, 0, 2, 2, 1]
-    ], dtype=jnp.int8)
-env.done = True
-env, reward, done = env_step(env, jnp.array([1,6]))
-print("After action:")
-print("Winner: ", get_winner(env.board, env.goal))
-print(env.pins)
-print(reward)
-print(done)
+env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10), enable_initial_free_pin=True)
+# env.pins = jnp.array([
+#     [19, 18, 17, 22],
+#     [-1, 10, 25, 9]
+#     ], dtype=jnp.int8)
+# env.board = set_pins_on_board(env.board, env.pins)
+# env.current_player = 0
+# env.action_set = jnp.array([
+#     [4, 4, 4, 4, 4, 4],
+#     [4, 4, 4, 4, 4, 4]
+#     ], dtype=jnp.int8)
 print(env.board)
+print(env.pins)
+# env.done = True
+# env, reward, done = env_step(env, jnp.array([1,6]))
+# print("After action:")
+# print("Winner: ", get_winner(env.board, env.goal))
+# print(env.pins)
+# print(reward)
+# print(done)
+# print(env.board)
 
 # print("After action:")
 # print(get_winner(env))
