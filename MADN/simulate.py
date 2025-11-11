@@ -1,11 +1,12 @@
 import functools
-from deterministic_madn import *
+# from deterministic_madn import *
+from classic_madn import *
 import jax
 import jax.numpy as jnp
 from time import time
 
 @functools.partial(jax.jit, static_argnums=(2,))
-def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int):
+def run_gumbel(rng_key:chex.PRNGKey, env:classic_MADN, num_simulations:int):
     batch_size = 1
     key1, key2 = jax.random.split(rng_key)
     policy_output = mctx.gumbel_muzero_policy(
@@ -26,7 +27,9 @@ def simulate_game(env, key):
         print("Current player: ", env.current_player)
         print("Current board:\n", env.board)
         print("Current pins:\n", env.pins)
-        print("Current actionset:\n", env.action_set)
+        rng_key, subkey = jax.random.split(rng_key)
+        env = throw_die(env, subkey)
+        print("Die throw:\n", env.die)
         valid_actions = valid_action(env)
         print("Valid actions:\n", valid_actions)
         if not jnp.any(valid_actions):
@@ -37,8 +40,7 @@ def simulate_game(env, key):
             N = valid_action_indices.shape[0]
             rng_key, subkey = jax.random.split(rng_key)
             idx = jax.random.randint(subkey, (), 0, N)
-            chosen = valid_action_indices[idx]
-            chosen = chosen.at[1].set(chosen[1]+1)  # Ensure action index is int8
+            chosen = valid_action_indices[idx][0]
             print("Chosen action: ", chosen)
             env, reward, done = env_step(env, chosen)
         print("Reward: ", reward)
@@ -130,9 +132,8 @@ def simulate_mcts_game(env, key, iterations = 500):
 
 '''Simulate a random game'''
 # simulate_mcts_game(999, 1500)
-# env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
-# env.rules['enable_start_on_6'] = False
-# simulate_game(env, 90789)
+env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10), enable_initial_free_pin=True)
+simulate_game(env, 99)
 
 '''Test MCTS on a specific board state'''
 # env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
@@ -172,19 +173,13 @@ def simulate_mcts_game(env, key, iterations = 500):
 # print("Time taken for MCTS: ", end - start)
 
 '''Test a specific board state and following transitions'''
-env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10), enable_initial_free_pin=True)
-# env.pins = jnp.array([
-#     [19, 18, 17, 22],
-#     [-1, 10, 25, 9]
-#     ], dtype=jnp.int8)
-# env.board = set_pins_on_board(env.board, env.pins)
-# env.current_player = 0
+# env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10), enable_initial_free_pin=True)
 # env.action_set = jnp.array([
 #     [4, 4, 4, 4, 4, 4],
 #     [4, 4, 4, 4, 4, 4]
 #     ], dtype=jnp.int8)
-print(env.board)
-print(env.pins)
+# key = jax.random.PRNGKey(53)
+# print(rollout(env, key))
 # env.done = True
 # env, reward, done = env_step(env, jnp.array([1,6]))
 # print("After action:")

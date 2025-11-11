@@ -79,11 +79,11 @@
 - enable_start_block
 - enable_teams
 - enable_jumping_in_goal
-- enable_initial_free_pin
-- enable_extra_move_on_6 (only dMADN and MADN)
-- enable_start_on_1_and_6 (dMADN, MADN)
+- enable_initial_free_pin XXXXXXXXXXXXXXX
+- enable_extra_move_on_6 (only dMADN and MADN) XXXXXXXXXXXXXXXXXXXX
+- enable_start_on_1_and_6 (dMADN, MADN) XXXXXXXXXXXXXXXXX
 - enable_rethrow (up to 3 throws if all pins in start, MADN only)
 - enable_forced_start (only MADN)
 - enable_forced_attack
 - enable_friendly_fire (on team member pins)
-- enable_circular_board
+- enable_circular_board XXXXXXXXXXXXXXXXX
