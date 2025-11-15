@@ -109,6 +109,23 @@ def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> chex.Array:
         rules=env.rules,
     )
 
+def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
+    return classic_MADN(
+        board=env.board,
+        num_players=env.num_players,
+        pins=env.pins,
+        current_player=env.current_player,
+        done=env.done,
+        reward=env.reward,
+        start=env.start,
+        target=env.target,
+        goal=env.goal,
+        die=die_value.astype(jnp.int8),
+        board_size=env.board_size,
+        total_board_size=env.total_board_size,
+        rules=env.rules,
+    )
+
 @jax.jit
 def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
     pin = pin.astype(jnp.int8)
@@ -390,26 +407,70 @@ def rollout(env:classic_MADN, rng_key:chex.PRNGKey) -> tuple[classic_MADN, chex.
 def value_function(env:classic_MADN, rng_key:chex.PRNGKey) -> chex.Array:
     return rollout(env, rng_key).astype(jnp.float32)
 
-def root_fn(env:classic_MADN, rng_key:chex.PRNGKey) -> mctx.RootFnOutput:
+def recurrent_chance_fn(params, rng_key, chance_outcome, afterstate: classic_MADN):
+    """
+    Chance node: Würfelwurf simulieren, für jeden Würfelwert einen neuen Zustand erzeugen.
+    """
+    dice_value = chance_outcome + 1  # Konvertiere 0-5 zu 1-6
+    
+    # Setze den Würfelwert im Afterstate
+    env = set_die(afterstate, dice_value)
+    
+    # Berechne die resultierenden Werte für diesen spezifischen Würfelwert
+    action_logits = valid_action(env).astype(jnp.float32)
+    value = value_function(env, rng_key)
+    reward = env.reward.astype(jnp.float32)
+    discount = jnp.where(env.done, 0.0, 1.0)
+    
+    return mctx.ChanceRecurrentFnOutput(
+        action_logits=action_logits,  # [A] - Aktionswahrscheinlichkeiten
+        value=value,                  # scalar - Zustandswert
+        reward=reward,                # scalar - Reward
+        discount=discount             # scalar - Discount
+    ), env
+
+# Angepasste recurrent_fn ohne Würfelwurf
+def recurrent_fn(params, rng_key, action: Action, embedding: classic_MADN):
+    """
+    Recurrent function - führt nur die Spieleraktion aus, kein Würfelwurf
+    """
+    env = embedding
+    
+    # Prüfe ob gültige Aktionen verfügbar sind
+    valid_actions = valid_action(env)
+    
+    if jnp.all(~valid_actions):
+        # Keine gültigen Aktionen - überspringe Zug
+        afterstate, reward, done = no_step(env)
+    else:
+        # Führe Aktion aus (Würfel wurde bereits in chance_fn geworfen)
+        afterstate, reward, done = env_step(env,action)#jax.vmap(env_step, (None, 0))(env, action)
+    
+    chance_logits = jnp.ones(6) * jnp.log(1.0 / 6.0)  # Uniform
+
+    afterstate_value = value_function(afterstate, rng_key)
+    return mctx.DecisionRecurrentFnOutput(
+        chance_logits=chance_logits,
+        afterstate_value=afterstate_value
+    ), afterstate
+
+# Root function anpassen
+def root_fn(env: classic_MADN, rng_key: chex.PRNGKey) -> mctx.RootFnOutput:
+    """
+    Root function für MCTS - Startzustand ohne Würfelwurf
+    """
+
+    if env.die <= 0:
+        # Keine Aktionen möglich ohne Würfelwert
+        prior_logits = jnp.full(4, -jnp.inf, dtype=jnp.float32)
+    else:
+        prior_logits = policy_function(env)
+    
     return mctx.RootFnOutput(
-        prior_logits = policy_function(env),
+        prior_logits=prior_logits,
         value=value_function(env, rng_key),
         embedding=env,
     )
-
-def recurrent_fn(params, rng_key, action: Action, embedding:classic_MADN):
-    env = embedding
-
-    env, reward, done = env_step(env, map_action(action))
-
-    recurrent_fn_output = mctx.RecurrentFnOutput(
-        reward= reward,
-        discount= jnp.where(done, 0, -1).astype(jnp.float32),
-        prior_logits = policy_function(env),
-        value = jnp.where(done, 0, value_function(env, rng_key)).astype(jnp.float32),
-    )
-
-    return recurrent_fn_output, env    
 
 def all_pin_distributions(total=7, num_pins=4):
     # Erzeuge alle möglichen Werte für die ersten drei Pins
