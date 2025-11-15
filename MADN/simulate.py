@@ -1,12 +1,12 @@
 import functools
 # from deterministic_madn import *
-from classic_madn import *
+from deterministic_madn import *
 import jax
 import jax.numpy as jnp
 from time import time
 
 @functools.partial(jax.jit, static_argnums=(2,))
-def run_gumbel(rng_key:chex.PRNGKey, env:classic_MADN, num_simulations:int):
+def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int):
     batch_size = 1
     key1, key2 = jax.random.split(rng_key)
     policy_output = mctx.gumbel_muzero_policy(
@@ -28,8 +28,6 @@ def simulate_game(env, key):
         print("Current board:\n", env.board)
         print("Current pins:\n", env.pins)
         rng_key, subkey = jax.random.split(rng_key)
-        env = throw_die(env, subkey)
-        print("Die throw:\n", env.die)
         valid_actions = valid_action(env)
         print("Valid actions:\n", valid_actions)
         if not jnp.any(valid_actions):
@@ -40,7 +38,8 @@ def simulate_game(env, key):
             N = valid_action_indices.shape[0]
             rng_key, subkey = jax.random.split(rng_key)
             idx = jax.random.randint(subkey, (), 0, N)
-            chosen = valid_action_indices[idx][0]
+            chosen = valid_action_indices[idx]
+            chosen = chosen.at[1].set(chosen[1]+1)  # Ensure action index is int8
             print("Chosen action: ", chosen)
             env, reward, done = env_step(env, chosen)
         print("Reward: ", reward)
@@ -50,39 +49,6 @@ def simulate_game(env, key):
     print("Game over after ", steps, " steps.")
     print("Final board:\n", env.board)
     print("Final pins:\n", env.pins)
-
-@functools.partial(jax.jit, static_argnames=('game', 'policy_apply_fn'))
-def play_game(env, game, num_players, distance, policy_apply_fn, params, rng_key):
-    steps = 0
-    states, actions, players = [], [], []
-    while not env.done:
-        valid_actions = valid_action(env)
-        if not jnp.any(valid_actions):
-            action = None
-            env, reward, done = no_step(env)
-        else:
-            logits = policy_apply_fn(params, encode_board(env.board))
-
-            # Ungültige Züge maskieren
-            flat_valid_mask = valid_actions.flatten()
-            logits = jnp.where(flat_valid_mask, logits, -jnp.inf)
-
-            rng_key, subkey = jax.random.split(rng_key)
-            action_idx = jax.random.categorical(subkey, logits).astype(jnp.int8)
-            action = map_action(action_idx)
-
-            env, reward, done = game.env_step(env, action)
-        
-        states.append(env.board)
-        actions.append(action)
-        players.append(env.current_player)
-
-    return {
-        'states': jnp.array(states),
-        'actions': jnp.array(actions),
-        'players': jnp.array(players)
-    }
-
 
 def simulate_mcts_game(env, key, iterations = 500):
     rng_key = jax.random.PRNGKey(key)
@@ -131,13 +97,12 @@ def simulate_mcts_game(env, key, iterations = 500):
 
 
 '''Simulate a random game'''
-# simulate_mcts_game(999, 1500)
 env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10), enable_initial_free_pin=True)
-simulate_game(env, 99)
+simulate_mcts_game(env, 999, 300)
+# simulate_game(env, 99)
 
 '''Test MCTS on a specific board state'''
-# env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10))
-# print(env.rules)
+# env = env_reset(0, num_players=jnp.int8(4), distance=jnp.int8(10))
 # print("Current board:\n", env.board)
 # env.pins = jnp.array([
 #     [7, 5, -1, -1],
@@ -202,3 +167,107 @@ simulate_game(env, 99)
 # home_positions = jnp.ones((env.num_players, env.board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
 # print(home_positions)
 # print(home_positions[jnp.arange(env.current_player, env.current_player + env.num_players) % env.num_players])
+
+
+''' 4 players distance 10
+.   .   .   .   0   0   X   .   .   .   .
+.   .   .   .   0   _   0   .   .   .   .
+.   .   .   .   0   _   0   .   .   .   .
+.   .   .   .   0   _   0   .   .   .   .
+X   0   0   0   0   _   0   0   0   0   0
+0   _   _   _   _   .   _   _   _   _   0
+0   0   0   0   0   _   0   0   0   0   X
+.   .   .   .   0   _   0   .   .   .   .
+.   .   .   .   0   _   0   .   .   .   .
+.   .   .   .   0   _   0   .   .   .   .
+.   .   .   .   X   0   0   .   .   .   .
+'''
+
+''' 2 players distance 10
+     0   
+0    _   X
+0    _   0
+0    _   0
+0    _   0
+0    .   0
+0    _   0
+0    _   0   
+0    _   0
+X    _   0
+     0
+'''
+''' distance * spieler
+0   0   0   0   0   0   0   0   0   0
+0   0   0   0   0   0   0   0   0   0
+
+_   _   _   _
+_   _   _   _
+
+
+
+'''
+
+def board_to_matrix(env):
+    board = env.board
+    num_players = int(env.num_players)
+    n = int(env.board_size // num_players)
+    board_str = ""
+    if num_players == 2:
+        board_matrix = jnp.ones((2, n))*8
+        board_matrix = board_matrix.at[0, :].set(board[0:n])
+        board_matrix = board_matrix.at[1, :].set(jnp.flip(board[n:2*n]))
+    elif num_players == 3:
+        board_matrix = jnp.ones((n+1, n+1))*8
+        board_matrix = board_matrix.at[0, :].set(board[0:n+1])
+        board_matrix = board_matrix.at[jnp.arange(n+1), n - jnp.arange(n+1)].set(board[n:2*n+1])
+        board_matrix = board_matrix.at[1:, 0].set(jnp.flip(board[2*n:3*n]))
+    elif num_players == 4:
+        board_matrix = jnp.ones((n+1, n+1))*8
+        board_matrix = board_matrix.at[0, :].set(board[0:n+1])
+        board_matrix = board_matrix.at[:, -1].set(board[n:2*n+1])
+        board_matrix = board_matrix.at[-1, :].set(jnp.flip(board[2*n:3*n+1]))
+        board_matrix = board_matrix.at[1:, 0].set(jnp.flip(board[3*n:4*n]))
+    return board_matrix
+
+def matrix_to_string(matrix):
+    str_repr = ""
+    pin_rep = ["♠", "♥", "♦", "♣"]
+    for row in matrix:
+        for cell in row:
+            if cell == -1:
+                str_repr += " \u25A1 "
+            elif cell == 8:
+                str_repr += " . "
+            else:
+                str_repr += f" {pin_rep[int(cell)]} "
+        str_repr += "\n"
+    return str_repr
+
+# print(matrix_to_string(board_to_matrix(env)))
+
+def simulate_game_with_visualization(env, key):
+    rng_key = jax.random.PRNGKey(key)
+    steps = 0
+    while not env.done:
+        rng_key, subkey = jax.random.split(rng_key)
+        valid_actions = valid_action(env)
+        if not jnp.any(valid_actions):
+            env, reward, done = no_step(env)
+        else:
+            valid_action_indices = jnp.argwhere(valid_actions)
+            N = valid_action_indices.shape[0]
+            rng_key, subkey = jax.random.split(rng_key)
+            idx = jax.random.randint(subkey, (), 0, N)
+            chosen = valid_action_indices[idx]
+            chosen = chosen.at[1].set(chosen[1]+1)  # Ensure action index is int8
+            print("Player ", int(env.current_player), " chooses action ", chosen)
+            env, reward, done = env_step(env, chosen)
+        print(matrix_to_string(board_to_matrix(env)))
+        print("-"*30)
+        steps += 1
+    print("Game over after ", steps, " steps.")
+    print("Final board:\n", env.board)
+    print("Final pins:\n", env.pins)
+
+# env = env_reset(0, num_players=jnp.int8(4), distance=jnp.int8(10), enable_initial_free_pin=True)
+# simulate_game_with_visualization(env, 99)
