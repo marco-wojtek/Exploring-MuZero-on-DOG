@@ -35,7 +35,7 @@ def simulate_game(env, key):
     print("Final board:\n", env.board)
     print("Final pins:\n", env.pins)
 
-
+@functools.partial(jax.jit, static_argnums=(2,))
 def run_mcts_search(env: classic_MADN, rng_key: chex.PRNGKey, num_simulations: int = 100):
     """
     Führt MCTS Suche mit stochastic MuZero aus
@@ -47,20 +47,21 @@ def run_mcts_search(env: classic_MADN, rng_key: chex.PRNGKey, num_simulations: i
         params=None,  # Keine gelernten Parameter in diesem Beispiel
         rng_key=key1,
         root=jax.vmap(root_fn, (None, 0))(env,jax.random.split(key2, batch_size)),
-        decision_recurrent_fn=recurrent_fn,
-        chance_recurrent_fn=recurrent_chance_fn,
+        decision_recurrent_fn=jax.vmap(recurrent_fn, (None,None,0,0)),
+        chance_recurrent_fn=jax.vmap(recurrent_chance_fn, (None,None,0,0)),
         num_simulations=num_simulations,
-        max_depth=300,
+        invalid_actions=~valid_action(env)[None, :],
+        max_depth=500,
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1)
         )
     
     return mcts_policy
 
 def madn_mcts_example():
-    rng_key = jax.random.PRNGKey(12)
-    env = env_reset(0, num_players=2, distance=10)
+    rng_key = jax.random.PRNGKey(1)
+    env = env_reset(0, num_players=2, distance=10, enable_circular_board=False)
     pins = jnp.array([[3,2,6,18],
-                      [10, 4, 19, 0]])
+                      [17, 4, 19, 0]])
     env.pins = pins
     env.board = set_pins_on_board(env.board, pins)    
     print(env.board)    
@@ -68,30 +69,48 @@ def madn_mcts_example():
     rng_key, subkey = jax.random.split(rng_key)
     env = throw_die(env, subkey)
     print("Die throw:\n", env.die)
+    valid_actions = valid_action(env)
+    print("Valid actions:\n", valid_actions)    
+
     
     # MCTS Suche
     rng_key, subkey = jax.random.split(rng_key)
-    policy_output = run_mcts_search(env, subkey, num_simulations=200)
+    policy_output = run_mcts_search(env, subkey, num_simulations=500)
     
     # Beste Aktion wählen
     action = jnp.argmax(policy_output.action_weights)
     
     return action, policy_output.action_weights
 
-print(madn_mcts_example())
-# simulate_game(env_reset(0, num_players=2, distance=10, enable_initial_free_pin=True), key=42)
+# simulate_game(env_reset(0, num_players=2, distance=10, enable_dice_rethrow=True), key=42)
 
-rng_key = jax.random.PRNGKey(12)
-env = env_reset(0, num_players=2, distance=10)
-pins = jnp.array([[3,2,6,18],
-                    [10, 4, 19, 0]])
-env.board = set_pins_on_board(env.board, pins)    
-print(env.board)    
-# Würfel werfen
-rng_key, subkey = jax.random.split(rng_key)
-env = throw_die(env, subkey)
+# print(madn_mcts_example())
+env = env_reset(0, num_players=2, distance=10, enable_dice_rethrow=True)
+env.pins = jnp.array([[-1, 22, 23, 21],
+                        [17, 4, 19, 0]])
+env.board = set_pins_on_board(env.board, env.pins)
+
+env = throw_die(env, jax.random.PRNGKey(0))
 print("Die throw:\n", env.die)
-valid_actions = valid_action(env)
-print("Valid actions:\n", valid_actions)
-print(value_function(env,rng_key))
+print("Valid actions:\n", valid_action(env))
+print("Current player: ", env.current_player)
+print("env.throw_counter: ", env.throw_counter)
+env, _, _ = no_step(env)
+env = throw_die(env, jax.random.PRNGKey(0))
+print("Die throw:\n", env.die)
+print("Valid actions:\n", valid_action(env))
+print("Current player: ", env.current_player)
+print("env.throw_counter: ", env.throw_counter)
+env, _, _ = no_step(env)
+env = throw_die(env, jax.random.PRNGKey(0))
+print("Die throw:\n", env.die)
+print("Valid actions:\n", valid_action(env))
+print("Current player: ", env.current_player)
+print("env.throw_counter: ", env.throw_counter)
+env, _, _ = no_step(env)
+env = throw_die(env, jax.random.PRNGKey(0))
+print("Die throw:\n", env.die)
+print("Valid actions:\n", valid_action(env))
+print("Current player: ", env.current_player)
+print("env.throw_counter: ", env.throw_counter)
 # env, reward, done = env_step(env, jnp.array(2, dtype=jnp.int8))

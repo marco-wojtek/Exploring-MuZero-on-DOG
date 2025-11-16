@@ -15,6 +15,7 @@ Pins = chex.Array
 Num_players = chex.Array
 Size = chex.Array
 Die = chex.Array
+Counter = chex.Array
 
 @chex.dataclass
 class classic_MADN:
@@ -30,6 +31,7 @@ class classic_MADN:
     die: Die
     board_size: Size  # scalar, size of the board (num_players * distance)
     total_board_size: Size  # scalar, size of the board + goal areas (num_players * distance + num_players * 4)
+    throw_counter: Counter
     rules : dict  # game rules
 
 def env_reset(
@@ -40,7 +42,8 @@ def env_reset(
         enable_circular_board = True,
         enable_friendly_fire = False,
         enable_start_on_6 = True,
-        enable_bonus_turn_on_6 = True
+        enable_bonus_turn_on_6 = True,
+        enable_dice_rethrow = False,
             ) -> classic_MADN:
     
     board_size = num_players * distance
@@ -74,12 +77,14 @@ def env_reset(
         die = jnp.array(0, dtype=jnp.int8),
         board_size=jnp.array(board_size, dtype=jnp.int8),
         total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
+        throw_counter=jnp.array(0, dtype=jnp.int8),
         rules = {
         'enable_initial_free_pin':enable_initial_free_pin,
         'enable_circular_board':enable_circular_board,
         'enable_friendly_fire':enable_friendly_fire,
         'enable_start_on_6':enable_start_on_6,
         'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
+        'enable_dice_rethrow':enable_dice_rethrow,
         }
     )
 
@@ -92,7 +97,7 @@ def get_winner(board, goal_area) -> Player:
     player_goals = jnp.all(goals >= 0, axis=1)
     return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals), -1)
 
-def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> chex.Array:
+def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> classic_MADN:
     return classic_MADN(
         board=env.board,
         num_players=env.num_players,
@@ -106,6 +111,7 @@ def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> chex.Array:
         die=jax.random.randint(rng_key, (), 1, 7).astype(jnp.int8),
         board_size=env.board_size,
         total_board_size=env.total_board_size,
+        throw_counter=env.throw_counter + 1,
         rules=env.rules,
     )
 
@@ -123,6 +129,7 @@ def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
         die=die_value.astype(jnp.int8),
         board_size=env.board_size,
         total_board_size=env.total_board_size,
+        throw_counter=env.throw_counter + 1,
         rules=env.rules,
     )
 
@@ -190,6 +197,7 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
         die=env.die,#
         board_size=env.board_size,#
         total_board_size=env.total_board_size,#
+        throw_counter=jnp.array(0, dtype=jnp.int8),#
         rules=env.rules,#/
     )
     return env, reward, done
@@ -217,11 +225,30 @@ def no_step(env:classic_MADN) -> classic_MADN:
     """
     No-op step function for the environment.
     """
+    current_player = env.current_player
+    board = env.board
+    goal = env.goal[current_player]
+    pins = env.pins[current_player]
+
+    pins_not_at_home = len(pins) - jnp.count_nonzero(pins == -1) # number of pins not at home
+    locked_condition = jnp.where(
+        pins_not_at_home >0,
+        jnp.all(board[goal[-pins_not_at_home:]] == current_player),  # check if pins in goal area are locked
+        True
+    )
+    counter_condition = (env.throw_counter<3) 
+    condition = (env.rules['enable_dice_rethrow'] and locked_condition and counter_condition)
+    '''
+    Wenn die regel an ist, der aktuelle Spieler in einer locked position ist und der counter <3 ist, dann wird der Spieler nicht gewechselt.
+    Ist die regel aus, ist der Zug bei Bewegungsunfähigkeit direkt zuende ohne neu wurf.
+    Ist die Regel an aber der Spieler hat nicht alle pins im start oder am ende vom Ziel, wird der Spieler gewechselt.
+    Ist die Regel an und der Spieler ist locked aber hat noch keinen counter von 3, wird der Spieler nicht gewechselt.
+    '''                     
     env = classic_MADN(
         board=env.board,
         num_players=env.num_players,
         pins=env.pins,
-        current_player=(env.current_player + 1) % env.num_players,
+        current_player=jax.lax.cond(condition, lambda: env.current_player, lambda: (env.current_player + 1) % env.num_players),
         done=env.done,
         reward=env.reward,
         start=env.start,
@@ -230,6 +257,7 @@ def no_step(env:classic_MADN) -> classic_MADN:
         die=env.die,
         board_size=env.board_size,
         total_board_size=env.total_board_size,
+        throw_counter= jax.lax.cond(condition,  lambda: env.throw_counter, lambda: jnp.array(0, dtype=jnp.int8)),
         rules=env.rules,
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
@@ -364,6 +392,7 @@ def winning_action(env:classic_MADN) -> chex.Array:
         die=env.die,
         board_size=env.board_size,
         total_board_size=env.total_board_size,
+        throw_counter=env.throw_counter,
         rules=env.rules,
     )
 
@@ -439,12 +468,18 @@ def recurrent_fn(params, rng_key, action: Action, embedding: classic_MADN):
     # Prüfe ob gültige Aktionen verfügbar sind
     valid_actions = valid_action(env)
     
-    if jnp.all(~valid_actions):
-        # Keine gültigen Aktionen - überspringe Zug
-        afterstate, reward, done = no_step(env)
-    else:
-        # Führe Aktion aus (Würfel wurde bereits in chance_fn geworfen)
-        afterstate, reward, done = env_step(env,action)#jax.vmap(env_step, (None, 0))(env, action)
+    afterstate, reward, done = jax.lax.cond(
+        jnp.all(~valid_actions),
+        lambda _: no_step(env),
+        lambda _: env_step(env, action),
+        operand=None
+    )
+    # if jnp.all(~valid_actions):
+    #     # Keine gültigen Aktionen - überspringe Zug
+    #     afterstate, reward, done = no_step(env)
+    # else:
+    #     # Führe Aktion aus (Würfel wurde bereits in chance_fn geworfen)
+    #     afterstate, reward, done = env_step(env,action)#jax.vmap(env_step, (None, 0))(env, action)
     
     chance_logits = jnp.ones(6) * jnp.log(1.0 / 6.0)  # Uniform
 
@@ -460,14 +495,14 @@ def root_fn(env: classic_MADN, rng_key: chex.PRNGKey) -> mctx.RootFnOutput:
     Root function für MCTS - Startzustand ohne Würfelwurf
     """
 
-    if env.die <= 0:
-        # Keine Aktionen möglich ohne Würfelwert
-        prior_logits = jnp.full(4, -jnp.inf, dtype=jnp.float32)
-    else:
-        prior_logits = policy_function(env)
+    # if env.die <= 0:
+    #     # Keine Aktionen möglich ohne Würfelwert
+    #     prior_logits = jnp.full(4, -jnp.inf, dtype=jnp.float32)
+    # else:
+    #     prior_logits = policy_function(env)
     
     return mctx.RootFnOutput(
-        prior_logits=prior_logits,
+        prior_logits=policy_function(env),
         value=value_function(env, rng_key),
         embedding=env,
     )

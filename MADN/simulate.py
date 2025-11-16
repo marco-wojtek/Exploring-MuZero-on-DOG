@@ -4,6 +4,7 @@ from deterministic_madn import *
 import jax
 import jax.numpy as jnp
 from time import time
+from visualize_madn import board_to_matrix, matrix_to_string
 
 @functools.partial(jax.jit, static_argnums=(2,))
 def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int):
@@ -15,6 +16,7 @@ def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int
         root = jax.vmap(root_fn, (None, 0))(env,jax.random.split(key2, batch_size)),
         recurrent_fn=jax.vmap(recurrent_fn, (None,None,0,0)),
         num_simulations=num_simulations,
+        invalid_actions=~valid_action(env).flatten()[None, :],
         max_depth=350,
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1)
     )
@@ -206,42 +208,6 @@ _   _   _   _
 
 
 '''
-
-def board_to_matrix(env):
-    board = env.board
-    num_players = int(env.num_players)
-    n = int(env.board_size // num_players)
-    board_str = ""
-    if num_players == 2:
-        board_matrix = jnp.ones((2, n))*8
-        board_matrix = board_matrix.at[0, :].set(board[0:n])
-        board_matrix = board_matrix.at[1, :].set(jnp.flip(board[n:2*n]))
-    elif num_players == 3:
-        board_matrix = jnp.ones((n+1, n+1))*8
-        board_matrix = board_matrix.at[0, :].set(board[0:n+1])
-        board_matrix = board_matrix.at[jnp.arange(n+1), n - jnp.arange(n+1)].set(board[n:2*n+1])
-        board_matrix = board_matrix.at[1:, 0].set(jnp.flip(board[2*n:3*n]))
-    elif num_players == 4:
-        board_matrix = jnp.ones((n+1, n+1))*8
-        board_matrix = board_matrix.at[0, :].set(board[0:n+1])
-        board_matrix = board_matrix.at[:, -1].set(board[n:2*n+1])
-        board_matrix = board_matrix.at[-1, :].set(jnp.flip(board[2*n:3*n+1]))
-        board_matrix = board_matrix.at[1:, 0].set(jnp.flip(board[3*n:4*n]))
-    return board_matrix
-
-def matrix_to_string(matrix):
-    str_repr = ""
-    pin_rep = ["♠", "♥", "♦", "♣"]
-    for row in matrix:
-        for cell in row:
-            if cell == -1:
-                str_repr += " \u25A1 "
-            elif cell == 8:
-                str_repr += " . "
-            else:
-                str_repr += f" {pin_rep[int(cell)]} "
-        str_repr += "\n"
-    return str_repr
 
 # print(matrix_to_string(board_to_matrix(env)))
 
