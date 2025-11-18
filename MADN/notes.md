@@ -87,3 +87,8 @@
 - enable_forced_attack
 - enable_friendly_fire (on team member pins)
 - enable_circular_board XXXXXXXXXXXXXXXXX
+
+# stochastic MuZero (mctx)
+Die policy beginnt immer mit einem decision Node also nach einem Würfelwurf. 
+
+Decision_Node --action--> Afterstate (vor Würfelwurf) --Würfelwurf--> Chance_Node ---Baue Kanten mit mögl. actions--->Decision_Node

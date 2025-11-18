@@ -27,6 +27,8 @@ def board_to_matrix(env):
 def matrix_to_string(matrix):
     str_repr = ""
     pin_rep = ["♠", "♥", "♦", "♣"]
+    pin_colors = ["\033[94m", "\033[91m", "\033[93m", "\033[92m"]
+    reset = "\033[0m"
     for row in matrix:
         for cell in row:
             if cell == -1:
@@ -36,6 +38,8 @@ def matrix_to_string(matrix):
             elif cell == 9:
                 str_repr += "  "
             else:
-                str_repr += f" {pin_rep[int(cell)]} "
+                idx = int(cell)
+                color = pin_colors[idx % len(pin_colors)]
+                str_repr += f" {color}{pin_rep[idx]}{reset} "
         str_repr += "\n"
     return str_repr

@@ -3,6 +3,12 @@ import jax
 import jax.numpy as jnp
 import mctx
 
+NORMAL_DICE_DISTRIBUTION = jnp.array([1/6, 1/6, 1/6, 1/6, 1/6, 1/6])
+# Options for soft-locked players and rethrowing dice
+OUT_ON_SIX_DICE_DISTRIBUTION = jnp.array([25/216, 25/216, 25/216, 25/216, 25/216, 91/216])
+OUT_ON_ONE_DICE_DISTRIBUTION = jnp.array([91/216, 25/216, 25/216, 25/216, 25/216, 25/216])
+OUT_ON_ONE_AND_SIX_DICE_DISTRIBUTION = jnp.array([76/216, 16/216, 16/216, 16/216, 16/216, 76/216])
+
 Board = chex.Array
 Start = chex.Array
 Target = chex.Array
@@ -31,7 +37,6 @@ class classic_MADN:
     die: Die
     board_size: Size  # scalar, size of the board (num_players * distance)
     total_board_size: Size  # scalar, size of the board + goal areas (num_players * distance + num_players * 4)
-    throw_counter: Counter
     rules : dict  # game rules
 
 def env_reset(
@@ -41,7 +46,7 @@ def env_reset(
         enable_initial_free_pin = False,
         enable_circular_board = True,
         enable_friendly_fire = False,
-        enable_start_on_6 = True,
+        enable_start_on_1 = True,
         enable_bonus_turn_on_6 = True,
         enable_dice_rethrow = False,
             ) -> classic_MADN:
@@ -77,12 +82,11 @@ def env_reset(
         die = jnp.array(0, dtype=jnp.int8),
         board_size=jnp.array(board_size, dtype=jnp.int8),
         total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
-        throw_counter=jnp.array(0, dtype=jnp.int8),
         rules = {
         'enable_initial_free_pin':enable_initial_free_pin,
         'enable_circular_board':enable_circular_board,
         'enable_friendly_fire':enable_friendly_fire,
-        'enable_start_on_6':enable_start_on_6,
+        'enable_start_on_1':enable_start_on_1,
         'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
         'enable_dice_rethrow':enable_dice_rethrow,
         }
@@ -97,6 +101,39 @@ def get_winner(board, goal_area) -> Player:
     player_goals = jnp.all(goals >= 0, axis=1)
     return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals), -1)
 
+def is_soft_locked(env: classic_MADN) -> chex.Array:
+    '''
+    Checks if the current player is in a soft locked position
+    A soft locked position is defined as having all pins either in the start area or in the goal area and not being able to move any pin out of the start area or within the goal area.
+    '''
+    current_player = env.current_player
+    pins = env.pins[current_player]
+    board = env.board
+    goal_pos = env.goal[current_player]
+
+    pins_not_at_home = len(pins) - jnp.count_nonzero(pins == -1) # number of pins not at home
+    locked_condition = jnp.where(
+        pins_not_at_home >0,
+        jnp.all(board[goal_pos[-pins_not_at_home:]] == current_player),  # check if pins in goal area are locked
+        True
+    )
+    return locked_condition
+
+def dice_probabilities(env:classic_MADN) -> chex.Array:
+    soft_locked = is_soft_locked(env)
+    #print("Soft locked: ", soft_locked)
+    a= jax.lax.cond(
+        soft_locked & env.rules['enable_dice_rethrow'],
+        lambda: jax.lax.cond(
+            env.rules['enable_start_on_1'],
+            lambda: OUT_ON_ONE_AND_SIX_DICE_DISTRIBUTION,
+            lambda: OUT_ON_SIX_DICE_DISTRIBUTION
+        ),
+        lambda: NORMAL_DICE_DISTRIBUTION
+    )
+    #print("Dice probabilities: ", a)
+    return a
+
 def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> classic_MADN:
     return classic_MADN(
         board=env.board,
@@ -108,10 +145,9 @@ def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> classic_MADN:
         start=env.start,
         target=env.target,
         goal=env.goal,
-        die=jax.random.randint(rng_key, (), 1, 7).astype(jnp.int8),
+        die=jax.random.choice(rng_key, jnp.array([1,2,3,4,5,6], dtype=jnp.int8), p = dice_probabilities(env)),
         board_size=env.board_size,
         total_board_size=env.total_board_size,
-        throw_counter=env.throw_counter + 1,
         rules=env.rules,
     )
 
@@ -129,7 +165,6 @@ def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
         die=die_value.astype(jnp.int8),
         board_size=env.board_size,
         total_board_size=env.total_board_size,
-        throw_counter=env.throw_counter + 1,
         rules=env.rules,
     )
 
@@ -197,7 +232,6 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
         die=env.die,#
         board_size=env.board_size,#
         total_board_size=env.total_board_size,#
-        throw_counter=jnp.array(0, dtype=jnp.int8),#
         rules=env.rules,#/
     )
     return env, reward, done
@@ -224,31 +258,12 @@ def set_pins_on_board(board, pins):
 def no_step(env:classic_MADN) -> classic_MADN:
     """
     No-op step function for the environment.
-    """
-    current_player = env.current_player
-    board = env.board
-    goal = env.goal[current_player]
-    pins = env.pins[current_player]
-
-    pins_not_at_home = len(pins) - jnp.count_nonzero(pins == -1) # number of pins not at home
-    locked_condition = jnp.where(
-        pins_not_at_home >0,
-        jnp.all(board[goal[-pins_not_at_home:]] == current_player),  # check if pins in goal area are locked
-        True
-    )
-    counter_condition = (env.throw_counter<3) 
-    condition = (env.rules['enable_dice_rethrow'] and locked_condition and counter_condition)
-    '''
-    Wenn die regel an ist, der aktuelle Spieler in einer locked position ist und der counter <3 ist, dann wird der Spieler nicht gewechselt.
-    Ist die regel aus, ist der Zug bei Bewegungsunfähigkeit direkt zuende ohne neu wurf.
-    Ist die Regel an aber der Spieler hat nicht alle pins im start oder am ende vom Ziel, wird der Spieler gewechselt.
-    Ist die Regel an und der Spieler ist locked aber hat noch keinen counter von 3, wird der Spieler nicht gewechselt.
-    '''                     
+    """                  
     env = classic_MADN(
         board=env.board,
         num_players=env.num_players,
         pins=env.pins,
-        current_player=jax.lax.cond(condition, lambda: env.current_player, lambda: (env.current_player + 1) % env.num_players),
+        current_player=(env.current_player + 1) % env.num_players,
         done=env.done,
         reward=env.reward,
         start=env.start,
@@ -257,7 +272,6 @@ def no_step(env:classic_MADN) -> classic_MADN:
         die=env.die,
         board_size=env.board_size,
         total_board_size=env.total_board_size,
-        throw_counter= jax.lax.cond(condition,  lambda: env.throw_counter, lambda: jnp.array(0, dtype=jnp.int8)),
         rules=env.rules,
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
@@ -308,9 +322,9 @@ def valid_action(env:classic_MADN) -> chex.Array:
 
     # filter actions for pins in start area
     start_moves = jax.lax.cond(
-        env.rules['enable_start_on_6'],
+        env.rules['enable_start_on_1'],
         lambda: jnp.array([1, 6]),
-        lambda: jnp.array([-1, 1]) # only move out with 1
+        lambda: jnp.array([-1, 6]) # only move out with 1
     )
     result = jnp.where(
         (current_pins == -1),
@@ -370,13 +384,13 @@ def encode_board_linear(env: classic_MADN) -> chex.Array:
     board_encoding = jnp.concatenate([player_channels, home_positions, current_player_channel, die_channel], axis=0)  # (features, board_size)
     return board_encoding
 
-def map_action(action_index: chex.Array) -> Action:
+def map_action(env:classic_MADN, board_position: chex.Array) -> Action:
     '''
-    Maps an action index (0-23) to an Action (pin, move)
+    Returns the pin index (0-3) corresponding to the board position
     '''
-    pin = (action_index // 6).astype(jnp.int8)
-    move = (action_index % 6 + 1).astype(jnp.int8)
-    return jnp.array([pin, move], dtype=jnp.int8)
+    pins = env.pins[env.current_player]
+    pin_index = jnp.argwhere(pins == board_position)
+    return pin_index[0][0]
 
 def winning_action(env:classic_MADN) -> chex.Array:
     env_copy = classic_MADN(
@@ -392,7 +406,6 @@ def winning_action(env:classic_MADN) -> chex.Array:
         die=env.die,
         board_size=env.board_size,
         total_board_size=env.total_board_size,
-        throw_counter=env.throw_counter,
         rules=env.rules,
     )
 
@@ -468,18 +481,13 @@ def recurrent_fn(params, rng_key, action: Action, embedding: classic_MADN):
     # Prüfe ob gültige Aktionen verfügbar sind
     valid_actions = valid_action(env)
     
+    # bestimme Afterstate (state nach einer aktion aber vor dem nächsten würfelwurf)
     afterstate, reward, done = jax.lax.cond(
         jnp.all(~valid_actions),
         lambda _: no_step(env),
         lambda _: env_step(env, action),
         operand=None
     )
-    # if jnp.all(~valid_actions):
-    #     # Keine gültigen Aktionen - überspringe Zug
-    #     afterstate, reward, done = no_step(env)
-    # else:
-    #     # Führe Aktion aus (Würfel wurde bereits in chance_fn geworfen)
-    #     afterstate, reward, done = env_step(env,action)#jax.vmap(env_step, (None, 0))(env, action)
     
     chance_logits = jnp.ones(6) * jnp.log(1.0 / 6.0)  # Uniform
 

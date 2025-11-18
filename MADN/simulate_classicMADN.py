@@ -2,6 +2,7 @@ import functools
 from classic_madn import *
 import jax
 import mctx
+from visualize_madn import *
 
 
 def simulate_game(env, key):
@@ -82,35 +83,29 @@ def madn_mcts_example():
     
     return action, policy_output.action_weights
 
-# simulate_game(env_reset(0, num_players=2, distance=10, enable_dice_rethrow=True), key=42)
+# simulate_game(env_reset(0, num_players=2, distance=10, enable_dice_rethrow=True, enable_initial_free_pin=True), key=42)
 
 # print(madn_mcts_example())
-env = env_reset(0, num_players=2, distance=10, enable_dice_rethrow=True)
-env.pins = jnp.array([[-1, 22, 23, 21],
-                        [17, 4, 19, 0]])
-env.board = set_pins_on_board(env.board, env.pins)
+def step(env, key):
+    rng_key = jax.random.PRNGKey(key)
+    steps = 0
+    print("Current player: ", env.current_player)
+    print(matrix_to_string(board_to_matrix(env)))
+    rng_key, subkey = jax.random.split(rng_key)
+    env = throw_die(env, subkey)
+    print("Die throw:\n", env.die)
+    valid_actions = valid_action(env)
+    print("Valid actions:\n", valid_actions)
+    if not jnp.any(valid_actions):
+        env, reward, done = no_step(env)
+        print("No valid actions available. Skipping turn.")
+    else:
+        valid_action_indices = jnp.argwhere(valid_actions)
+        N = valid_action_indices.shape[0]
+        rng_key, subkey = jax.random.split(rng_key)
+        idx = jax.random.randint(subkey, (), 0, N)
+        chosen = valid_action_indices[idx][0]
+        print("Chosen action: ", chosen)
+        env, reward, done = env_step(env, chosen)
+    return env
 
-env = throw_die(env, jax.random.PRNGKey(0))
-print("Die throw:\n", env.die)
-print("Valid actions:\n", valid_action(env))
-print("Current player: ", env.current_player)
-print("env.throw_counter: ", env.throw_counter)
-env, _, _ = no_step(env)
-env = throw_die(env, jax.random.PRNGKey(0))
-print("Die throw:\n", env.die)
-print("Valid actions:\n", valid_action(env))
-print("Current player: ", env.current_player)
-print("env.throw_counter: ", env.throw_counter)
-env, _, _ = no_step(env)
-env = throw_die(env, jax.random.PRNGKey(0))
-print("Die throw:\n", env.die)
-print("Valid actions:\n", valid_action(env))
-print("Current player: ", env.current_player)
-print("env.throw_counter: ", env.throw_counter)
-env, _, _ = no_step(env)
-env = throw_die(env, jax.random.PRNGKey(0))
-print("Die throw:\n", env.die)
-print("Valid actions:\n", valid_action(env))
-print("Current player: ", env.current_player)
-print("env.throw_counter: ", env.throw_counter)
-# env, reward, done = env_step(env, jnp.array(2, dtype=jnp.int8))

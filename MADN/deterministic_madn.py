@@ -39,7 +39,7 @@ def env_reset(
         enable_initial_free_pin = False,
         enable_circular_board = True,
         enable_friendly_fire = False,
-        enable_start_on_6 = True,
+        enable_start_on_1 = True,
         enable_bonus_turn_on_6 = True
             ) -> deterministic_MADN:
     
@@ -78,7 +78,7 @@ def env_reset(
         'enable_initial_free_pin':enable_initial_free_pin,
         'enable_circular_board':enable_circular_board,
         'enable_friendly_fire':enable_friendly_fire,
-        'enable_start_on_6':enable_start_on_6,
+        'enable_start_on_1':enable_start_on_1,
         'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
         }
     )
@@ -263,9 +263,9 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
 
     # filter actions for pins in start area
     start_moves = jax.lax.cond(
-        env.rules['enable_start_on_6'],
+        env.rules['enable_start_on_1'],
         lambda: jnp.array([1, 6]),
-        lambda: jnp.array([-1, 1]) # only move out with 1
+        lambda: jnp.array([-1, 6]) 
     )
     result = jnp.where(
         (current_pins == -1)[:, None],
