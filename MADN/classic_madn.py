@@ -331,6 +331,10 @@ def valid_action(env:classic_MADN) -> chex.Array:
         jnp.isin(die, start_moves) & (env.board[env.start[current_player]] != env.current_player),
         result
     )
+
+    # Falls board_size +1 großes action space
+    # result2 = jnp.full(env.total_board_size+1, False)
+    # result2 = result2.at[current_pins].set(result) 
     return result # filter possible actions with available actions
 
 def encode_board(env: classic_MADN) -> chex.Array:
