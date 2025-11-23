@@ -92,3 +92,11 @@
 Die policy beginnt immer mit einem decision Node also nach einem Würfelwurf. 
 
 Decision_Node --action--> Afterstate (vor Würfelwurf) --Würfelwurf--> Chance_Node ---Baue Kanten mit mögl. actions--->Decision_Node
+
+# Zugzwang
+Wichtig für MuZero:
+1. Dynamics-Modell f muss no-step Übergänge kennen (kommen in Trainingsdaten vor)
+2. policy g sollte für Zugzwang keinen output lernen
+    a) no-step als eigenes Action-label
+    b) vor policy aufruf, automatisch weiterleiten und kein branching dort einfügen
+3. policy kann verzerrt lernen (lernen verlangsamt) wenn es in Zugzwang-Zuständen die policy lernt

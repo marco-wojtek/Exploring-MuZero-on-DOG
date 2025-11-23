@@ -342,9 +342,17 @@ def encode_board(env: classic_MADN) -> chex.Array:
     board = env.board
     distance = env.board_size // num_players
     current_player = env.current_player
+    current_pins = env.pins[current_player]
     
     #rolled idx
     rolled_idx = jnp.arange(env.current_player, env.current_player + env.num_players) % env.num_players
+    # Pin Channel (current_player only), position jedes einzelnen pins (4xboard_size) leer wenn -1
+    pin_channel = jax.nn.one_hot(
+        jnp.clip(current_pins, 0, board.shape[0]-1),  # Werte außerhalb vermeiden
+        board.shape[0],
+        dtype=jnp.int8
+    )
+    pin_channel = jnp.where(current_pins[:, None] == -1, 0, pin_channel)
     # Spielerpositionen (One-hot)
     # with roll over for current player
     new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
@@ -362,7 +370,7 @@ def encode_board(env: classic_MADN) -> chex.Array:
     die_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.die  # (1, board_size)
 
     # Alles zusammenfügen
-    board_encoding = jnp.concatenate([player_channels, home_positions, die_channel], axis=0)  # (features, board_size)
+    board_encoding = jnp.concatenate([pin_channel, player_channels, home_positions, die_channel], axis=0)  # (features, board_size)
     return board_encoding
 
 def encode_board_linear(env: classic_MADN) -> chex.Array:
