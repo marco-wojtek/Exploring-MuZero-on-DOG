@@ -9,5 +9,6 @@ dependencies = [
     "jax>=0.7.2",
     "mctx>=0.0.6",
     "optax>=0.2.6",
+    "pillow>=12.0.0",
     "pytest>=8.4.2",
 ]

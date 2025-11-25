@@ -3,6 +3,7 @@ from classic_madn import *
 import jax
 import mctx
 from visualize_madn import *
+import time, sys, os
 
 
 def simulate_game(env, key):
@@ -108,4 +109,35 @@ def step(env, key):
         print("Chosen action: ", chosen)
         env, reward, done = env_step(env, chosen)
     return env
+
+
+def get_trajectory(env, key):
+    rng_key = jax.random.PRNGKey(key)
+    steps = 0
+    trajectory = [board_to_matrix(env)]
+    while not env.done:
+        rng_key, subkey = jax.random.split(rng_key)
+        env = throw_die(env, subkey)
+        valid_actions = valid_action(env)
+        if not jnp.any(valid_actions):
+            env, reward, done = no_step(env)
+        else:
+            valid_action_indices = jnp.argwhere(valid_actions)
+            N = valid_action_indices.shape[0]
+            rng_key, subkey = jax.random.split(rng_key)
+            idx = jax.random.randint(subkey, (), 0, N)
+            chosen = valid_action_indices[idx][0]
+            env, reward, done = env_step(env, chosen)
+        steps += 1
+        trajectory.append(board_to_matrix(env))
+    return env, trajectory
+
+
+env = env_reset(0, num_players=2, distance=10, enable_circular_board=False)
+env, t = get_trajectory(env, key=42)
+# animate_terminal(t, delay=0.15)
+print("Game over after ", len(t)-1, " steps.")
+print("Final board:\n", env.board)
+print("Final pins:\n", env.pins)
+# ...existing code...
 

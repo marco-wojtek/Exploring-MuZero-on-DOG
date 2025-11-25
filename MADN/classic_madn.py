@@ -21,7 +21,6 @@ Pins = chex.Array
 Num_players = chex.Array
 Size = chex.Array
 Die = chex.Array
-Counter = chex.Array
 
 @chex.dataclass
 class classic_MADN:
@@ -358,7 +357,7 @@ def encode_board(env: classic_MADN) -> chex.Array:
     new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
     new_pins = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
     board = jnp.concatenate([new_board, new_pins], axis=0)
-    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
+    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)[1:]  # (4, board_size)
 
     # Spielerposition im Haus
     home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
