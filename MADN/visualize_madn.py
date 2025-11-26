@@ -6,26 +6,37 @@ def board_to_matrix(env):
     board = env.board
     num_players = int(env.num_players)
     n = int(env.board_size // num_players)
+    start = env.start
+    start_area = board[start]
     goal = env.goal
+    goal_area = board[goal]
     if num_players == 2:
         board_matrix = jnp.ones((3, n))*8
         board_matrix = board_matrix.at[0, :].set(board[0:n])
         board_matrix = board_matrix.at[1, :].set(jnp.ones(n)*9)
         board_matrix = board_matrix.at[2, :].set(jnp.flip(board[n:2*n]))
 
+        board_matrix = board_matrix.at[0, 0].set(jnp.where(start_area[0]==-1, 10, start_area[0]))
+        board_matrix = board_matrix.at[-1, -1].set(jnp.where(start_area[1]==-1, 11, start_area[1]))
+
         board_matrix = jnp.pad(board_matrix, ((1,1),(1,1)), constant_values=9)
-        board_matrix = board_matrix.at[-1, 2:6].set(board[goal[0]])
-        board_matrix = board_matrix.at[0, -6: -2].set(jnp.flip(board[goal[1]]))
+        board_matrix = board_matrix.at[-1, 2:6].set(jnp.where(goal_area[0]==-1, 10, goal_area[0]))
+        board_matrix = board_matrix.at[0, -6: -2].set(jnp.flip(jnp.where(goal_area[1]==-1, 11, goal_area[1])))
     elif num_players == 3:
         board_matrix = jnp.ones((n+1, n+1))*8
         board_matrix = board_matrix.at[0, :].set(board[0:n+1])
         board_matrix = board_matrix.at[jnp.arange(n+1), n - jnp.arange(n+1)].set(board[n:2*n+1])
         board_matrix = board_matrix.at[1:, 0].set(jnp.flip(board[2*n:3*n]))
 
+        board_matrix = board_matrix.at[0, 0].set(jnp.where(start_area[0]==-1, 10, start_area[0]))
+        board_matrix = board_matrix.at[0, -1].set(jnp.where(start_area[1]==-1, 11, start_area[1]))
+        board_matrix = board_matrix.at[-1, 0].set(jnp.where(start_area[2]==-1, 12, start_area[2]))
+
+
         board_matrix = jnp.pad(board_matrix, ((1,1),(1,1)), constant_values=9)
-        board_matrix = board_matrix.at[2:6, 0].set(board[goal[0]])
-        board_matrix = board_matrix.at[0, -6: -2].set(jnp.flip(board[goal[1]]))
-        board_matrix = board_matrix.at[-3, 3:7].set(board[goal[2]])
+        board_matrix = board_matrix.at[2:6, 0].set(jnp.where(goal_area[0]==-1, 10, goal_area[0]))
+        board_matrix = board_matrix.at[0, -6: -2].set(jnp.flip(jnp.where(goal_area[1]==-1, 11, goal_area[1])))
+        board_matrix = board_matrix.at[-3, 3:7].set(jnp.where(goal_area[2]==-1, 12, goal_area[2]))
     elif num_players == 4:
         board_matrix = jnp.ones((n+1, n+1))*8
         board_matrix = board_matrix.at[0, :].set(board[0:n+1])
@@ -33,12 +44,17 @@ def board_to_matrix(env):
         board_matrix = board_matrix.at[-1, :].set(jnp.flip(board[2*n:3*n+1]))
         board_matrix = board_matrix.at[1:, 0].set(jnp.flip(board[3*n:4*n]))
 
-        board_matrix = jnp.pad(board_matrix, ((1,1),(1,1)), constant_values=9)
-        board_matrix = board_matrix.at[2:6, 0].set(board[goal[0]])
-        board_matrix = board_matrix.at[0, -6: -2].set(jnp.flip(board[goal[1]]))
-        board_matrix = board_matrix.at[-6:-2, -1].set(jnp.flip(board[goal[2]]))
-        board_matrix = board_matrix.at[-1, 2:6].set(board[goal[3]])
+        board_matrix = board_matrix.at[0, 0].set(jnp.where(start_area[0]==-1, 10, start_area[0]))
+        board_matrix = board_matrix.at[0, -1].set(jnp.where(start_area[1]==-1, 11, start_area[1]))
+        board_matrix = board_matrix.at[-1, -1].set(jnp.where(start_area[2]==-1, 12, start_area[2]))
+        board_matrix = board_matrix.at[-1, 0].set(jnp.where(start_area[3]==-1, 13, start_area[3]))
+        
 
+        board_matrix = jnp.pad(board_matrix, ((1,1),(1,1)), constant_values=9)
+        board_matrix = board_matrix.at[2:6, 0].set(jnp.where(goal_area[0]==-1, 10, goal_area[0]))
+        board_matrix = board_matrix.at[0, -6: -2].set(jnp.flip(jnp.where(goal_area[1]==-1, 11, goal_area[1])))
+        board_matrix = board_matrix.at[-6:-2, -1].set(jnp.flip(jnp.where(goal_area[2]==-1, 12, goal_area[2])))
+        board_matrix = board_matrix.at[-1, 2:6].set(jnp.where(goal_area[3]==-1, 13, goal_area[3]))
     return board_matrix
 
 def matrix_to_string(matrix):
@@ -54,6 +70,10 @@ def matrix_to_string(matrix):
                 str_repr += " . "
             elif cell == 9:
                 str_repr += "   "
+            elif cell >= 10:
+                idx = int(cell-10)
+                color = pin_colors[idx % len(pin_colors)]
+                str_repr += f" {color}\u25A1{reset} "
             else:
                 idx = int(cell)
                 color = pin_colors[idx % len(pin_colors)]
