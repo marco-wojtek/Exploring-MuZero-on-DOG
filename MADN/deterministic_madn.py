@@ -38,6 +38,7 @@ def env_reset(
         distance=jnp.int8(10),
         enable_initial_free_pin = False,
         enable_circular_board = True,
+        enable_start_blocking = False,
         enable_friendly_fire = False,
         enable_start_on_1 = True,
         enable_bonus_turn_on_6 = True
@@ -77,6 +78,7 @@ def env_reset(
         rules = {
         'enable_initial_free_pin':enable_initial_free_pin,
         'enable_circular_board':enable_circular_board,
+        'enable_start_blocking':enable_start_blocking,
         'enable_friendly_fire':enable_friendly_fire,
         'enable_start_on_1':enable_start_on_1,
         'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
@@ -185,7 +187,7 @@ def set_pins_on_board(board, pins):
         )
         return board
 
-    board = jax.lax.fori_loop(0, num_players * num_pins, body, board)
+    board = jax.lax.fori_loop(0, num_players * num_pins, body, jnp.ones_like(board, dtype=jnp.int8) * -1)
     return board
 
 def refill_action_set(env:deterministic_MADN) -> chex.Array:
@@ -230,14 +232,29 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     action_set = env.action_set[current_player]
     valid_actions = jnp.where(action_set>0, True, False) # available actions for each pin
 
+    start = env.start
+    num_players_static = start.shape[0]          # statisch für JIT
+    player_ids = jnp.arange(num_players_static, dtype=board.dtype)
+    pins_on_start = (board[start] == player_ids)
     # calculate possible actions
     current_positions = current_pins[:, None]
-    moved_positions = current_pins[:, None] + jnp.arange(1, 7)
+    moved_positions = current_positions + jnp.arange(1, 7)
     fitted_positions = moved_positions % env.board_size
     x = moved_positions - target
 
     # filter out invalid moves blocked by own pins
     result = (board[fitted_positions] != current_player) # check move to any board position
+
+    # filter actions where a pin on a start spot would block others
+    distance = env.board_size // num_players_static
+    nearest_start_before = ((current_positions//distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
+    nearest_start_after = fitted_positions//distance
+    cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
+    result = jnp.where(
+        env.rules['enable_start_blocking'] & cond,
+        ~pins_on_start[nearest_start_after],
+        result
+    )
 
     result = jax.lax.cond(
         env.rules['enable_circular_board'],

@@ -3,6 +3,30 @@ import jax
 import jax.numpy as jnp
 import mctx
 
+def all_pin_distributions(total=7):
+    # Erzeuge alle möglichen Werte für die ersten drei Pins
+    a = jnp.arange(total + 1)
+    b = jnp.arange(total + 1)
+    c = jnp.arange(total + 1)
+    # Erzeuge alle Kombinationen (a, b, c)
+    grid = jnp.array(jnp.meshgrid(a, b, c, indexing='ij')).reshape(3, -1).T
+    # Berechne den vierten Wert
+    d = total - grid[:, 0] - grid[:, 1] - grid[:, 2]
+    # Filtere gültige Kombinationen (d >= 0)
+    mask = d >= 0
+    result = jnp.concatenate([grid[mask], d[mask][:, None]], axis=1)
+    return result
+
+DISTS_7_4 = all_pin_distributions(7)  # (120,4), lex nach a0,a1,a2
+
+def index_to_dist(idx: int) -> jnp.ndarray:
+    return DISTS_7_4[idx]  # (4,)
+
+def dist_to_index(dist: jnp.ndarray):
+    # JAX-kompatibel: lineare Suche über konstante Tabelle
+    mask = jnp.all(DISTS_7_4 == dist[None, :], axis=1)
+    return jnp.int32(jnp.argmax(mask)) 
+
 Board = chex.Array
 Start = chex.Array
 Target = chex.Array
@@ -96,6 +120,9 @@ def env_reset(
         }
     )
 
+def distribute_cards(env: DOG, quantity: int):
+    pass
+
 @jax.jit
 def set_pins_on_board(board, pins):
     num_players, num_pins = pins.shape
@@ -112,8 +139,95 @@ def set_pins_on_board(board, pins):
         )
         return board
 
-    board = jax.lax.fori_loop(0, num_players * num_pins, body, board)
+    board = jax.lax.fori_loop(0, num_players * num_pins, body, jnp.ones_like(board, dtype=jnp.int8) * -1)
     return board
+
+# returns a boolean array indicating valid swap positions
+def valid_swap(env):
+    current_player = env.current_player
+    Num_players = env.num_players
+    current_pins = env.pins[current_player]
+    board = env.board
+    target = env.target[current_player]
+    goal = env.goal[current_player]
+    start = env.start
+    num_players_static = start.shape[0]          # statisch für JIT
+    player_ids = jnp.arange(num_players_static, dtype=board.dtype)
+
+    swap_mat = jnp.tile(board[:-Num_players*4], (4,1))
+    
+    condA = jnp.where(~jnp.isin(swap_mat, jnp.array([-1, current_player])), True, False)
+    condA = condA.at[:,start].set(board[start] == player_ids)
+
+    condB = (~jnp.isin(current_pins, jnp.array([-1, start[current_player]])))[:, None] 
+    return  condA & condB
+
+def val_action_7(env:DOG, seven_dist) -> chex.Array:
+    '''
+    Returns a mask of shape (4, ) indicating which actions are valid for each pin of the current player
+    '''
+    #return valid_action for each pin of the current player
+    current_player = env.current_player
+    board = env.board
+    target = env.target[current_player]
+    goal = env.goal[current_player]
+
+    # calculate possible actions
+    current_positions = env.pins[current_player]
+    moved_positions = current_positions + seven_dist
+    fitted_position = moved_positions % env.board_size
+    x = moved_positions - target
+
+
+    # Überlaufen der Zielposition verhindern falls kein Rundbrett
+    result = jax.lax.cond(
+        env.rules['enable_circular_board'],
+        lambda: jnp.ones_like(current_positions, dtype=bool),
+        lambda: ~((current_positions <= target) & (moved_positions > (target + 4)))
+    )
+    result = jnp.where(
+        (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
+        (env.rules["enable_circular_board"] | result),#(env.rules["enable_circular_board"] & result) | (board[goal[x-1]] != current_player), # if goal is possible, check if goal position is free
+        result
+    )
+    # filter actions for pins in goal area
+    result = jnp.where(
+        jnp.isin(current_positions, goal),
+        (moved_positions <= goal[-1]),# & (board[moved_positions%env.total_board_size] != current_player),
+        result
+    )
+
+    # alle Aktionen müssenrechenrisch möglich sein und es dürfen keine zwei Pins auf die gleiche Position ziehen
+    board_mover = jnp.where(current_positions == -1, moved_positions==-1, True)# prüfe dass kein pin im startbereich bewegt werden würde 
+
+    return jnp.all(result & board_mover) 
+
+@jax.jit
+def valid_actions(env: DOG) -> chex.Array:
+    """
+    Returns a boolean array indicating valid actions for the current player.
+    An action is valid if the corresponding card is present in the player's hand.
+    """
+    current_player = env.current_player
+    current_pins = env.pins[current_player]
+    hand = env.hands[current_player]
+
+    # valid_actions based on cards in hand
+    valid_action = jnp.where(hand > 0, True, False)
+
+    # filter actions based on effect (handle special cards seperatly if necessary)
+    
+    pass
+
+def map_action_to_card(action: Action, env: DOG) -> Card:
+    """
+    Maps an action index to a card value based on the current player's hand.
+    """
+    hand = env.hands[env.current_player]
+    card_indices = jnp.where(hand > 0, jnp.arange(len(hand)), -1)
+    valid_card_indices = card_indices[card_indices != -1]
+    card = valid_card_indices[action]
+    return card
 
 def no_step(env:DOG) ->  DOG:
     """
@@ -144,3 +258,17 @@ def no_step(env:DOG) ->  DOG:
         rules=env.rules,
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
+
+@jax.jit
+def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
+    """
+    Placeholder step function for the environment.
+    Currently implements a no-op step that just passes the turn to the next player.
+    """               
+    # WICHTIG: Wenn dog gespielt wird, muss man über das startfeld ins Ziel gehen, ohne darauf loszugehen. 
+    # target ist das feld vor dem startfeld.
+    # das heißt x muss noch einen wert abgezogen bekommen, damit r.g. eine 5 auf target, ins Ziel führt
+    # ergo: Man kann nicht mi einer 1 vom startfeld ins Ziel gehen!!
+    env, reward, done = no_step(env)
+    
+    return env, reward, done

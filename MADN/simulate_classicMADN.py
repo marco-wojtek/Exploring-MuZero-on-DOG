@@ -115,9 +115,11 @@ def get_trajectory(env, key):
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     trajectory = [board_to_matrix(env)]
+    dices = []
     while not env.done:
         rng_key, subkey = jax.random.split(rng_key)
         env = throw_die(env, subkey)
+        dices.append(env.die)
         valid_actions = valid_action(env)
         if not jnp.any(valid_actions):
             env, reward, done = no_step(env)
@@ -130,14 +132,14 @@ def get_trajectory(env, key):
             env, reward, done = env_step(env, chosen)
         steps += 1
         trajectory.append(board_to_matrix(env))
-    return env, trajectory
+    return env, trajectory, dices
 
 
 env = env_reset(0, num_players=2, distance=10, enable_circular_board=False)
-env, t = get_trajectory(env, key=42)
+env, t, d = get_trajectory(env, key=99)
 # animate_terminal(t, delay=0.15)
 print("Game over after ", len(t)-1, " steps.")
 print("Final board:\n", env.board)
 print("Final pins:\n", env.pins)
-# ...existing code...
 
+matrices_to_gif(t, "madn_terminal_simulation.gif")

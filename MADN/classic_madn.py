@@ -44,6 +44,8 @@ def env_reset(
         distance=jnp.int8(10),
         enable_initial_free_pin = False,
         enable_circular_board = True,
+        enable_start_blocking = False,
+        enable_jump_in_goal_area = True,
         enable_friendly_fire = False,
         enable_start_on_1 = True,
         enable_bonus_turn_on_6 = True,
@@ -84,6 +86,8 @@ def env_reset(
         rules = {
         'enable_initial_free_pin':enable_initial_free_pin,
         'enable_circular_board':enable_circular_board,
+        'enable_start_blocking':enable_start_blocking,
+        'enable_jump_in_goal_area':enable_jump_in_goal_area,
         'enable_friendly_fire':enable_friendly_fire,
         'enable_start_on_1':enable_start_on_1,
         'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
@@ -186,6 +190,7 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
         jnp.where(jnp.isin(current_positions, env.goal[current_player]),
                     moved_positions,
                     jnp.where(
+                        # ~jnp.isin(current_player, env.board[env.goal[current_player, x]]), # check if current player has pins in goal area
                         (4 >= x) & (x > 0) & (env.board[env.goal[current_player, x-1]] != current_player) & (current_positions <= env.target[current_player]),
                         env.goal[current_player, x-1], # move to goal position
                         fitted_positions
@@ -251,7 +256,7 @@ def set_pins_on_board(board, pins):
         )
         return board
 
-    board = jax.lax.fori_loop(0, num_players * num_pins, body, board)
+    board = jax.lax.fori_loop(0, num_players * num_pins, body, jnp.ones_like(board, dtype=jnp.int8) * -1)
     return board
 
 def no_step(env:classic_MADN) -> classic_MADN:
@@ -286,7 +291,11 @@ def valid_action(env:classic_MADN) -> chex.Array:
     board = env.board
     target = env.target[current_player]
     goal = env.goal[current_player]
+    start = env.start
     die = env.die
+    num_players_static = start.shape[0]          # statisch für JIT
+    player_ids = jnp.arange(num_players_static, dtype=board.dtype)
+    pins_on_start = (board[start] == player_ids)#check which players have pins on start positions and block with them
 
     # calculate possible actions
     current_positions = current_pins
@@ -294,8 +303,20 @@ def valid_action(env:classic_MADN) -> chex.Array:
     fitted_positions = moved_positions % env.board_size
     x = moved_positions - target
 
+
     # filter out invalid moves blocked by own pins
     result = (board[fitted_positions] != current_player) # check move to any board position
+
+    # filter actions where a pin on a start spot would block others
+    distance = env.board_size // num_players_static
+    nearest_start_before = ((current_pins//distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
+    nearest_start_after = fitted_positions//distance
+    cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
+    result = jnp.where(
+        env.rules['enable_start_blocking'] & cond,
+        ~pins_on_start[nearest_start_after],
+        result
+    )
 
     result = jax.lax.cond(
         env.rules['enable_circular_board'],
@@ -307,12 +328,15 @@ def valid_action(env:classic_MADN) -> chex.Array:
         )
     )
 
+    # check if goal position is free or on circular board, the other board position is possible 
+    #~jnp.isin(current_player, board[goal[x]])  # check if current player has pins in goal area
     result = jnp.where(
-        (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
-        (env.rules["enable_circular_board"] & result) | (board[goal[x-1]] != current_player), # if goal is possible, check if goal position is free
+        (4 >= x) & (x > 0) & (current_positions <= target),
+        (env.rules["enable_circular_board"] & result) | (board[goal[x-1]] != current_player),
         result
     )
     # filter actions for pins in goal area
+    #~jnp.isin(current_player, board[(current_pins+1):(current_pins+die+1)])
     result = jnp.where(
         jnp.isin(current_pins, goal),
         (moved_positions <= goal[-1]) & (board[moved_positions%env.total_board_size] != current_player),
@@ -327,7 +351,7 @@ def valid_action(env:classic_MADN) -> chex.Array:
     )
     result = jnp.where(
         (current_pins == -1),
-        jnp.isin(die, start_moves) & (env.board[env.start[current_player]] != env.current_player),
+        jnp.isin(die, start_moves) & (~pins_on_start[current_player]),
         result
     )
 

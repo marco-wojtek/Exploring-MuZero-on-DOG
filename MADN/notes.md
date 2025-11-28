@@ -100,3 +100,7 @@ Wichtig für MuZero:
     a) no-step als eigenes Action-label
     b) vor policy aufruf, automatisch weiterleiten und kein branching dort einfügen
 3. policy kann verzerrt lernen (lernen verlangsamt) wenn es in Zugzwang-Zuständen die policy lernt
+
+# DOG Regeln
+- Figuren auf dem eigenen Startfeld dürfen nicht getauscht werden
+- Startfeld blockiert alle Figuren; d.h. man kommt nicht ins eigene Ziel wenn eine Figur dort steht

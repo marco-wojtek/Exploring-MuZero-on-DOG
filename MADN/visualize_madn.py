@@ -20,8 +20,8 @@ def board_to_matrix(env):
         board_matrix = board_matrix.at[-1, -1].set(jnp.where(start_area[1]==-1, 11, start_area[1]))
 
         board_matrix = jnp.pad(board_matrix, ((1,1),(1,1)), constant_values=9)
-        board_matrix = board_matrix.at[-1, 2:6].set(jnp.where(goal_area[0]==-1, 10, goal_area[0]))
-        board_matrix = board_matrix.at[0, -6: -2].set(jnp.flip(jnp.where(goal_area[1]==-1, 11, goal_area[1])))
+        board_matrix = board_matrix.at[-1, 1:5].set(jnp.where(goal_area[0]==-1, 10, goal_area[0]))
+        board_matrix = board_matrix.at[0, -5: -1].set(jnp.flip(jnp.where(goal_area[1]==-1, 11, goal_area[1])))
     elif num_players == 3:
         board_matrix = jnp.ones((n+1, n+1))*8
         board_matrix = board_matrix.at[0, :].set(board[0:n+1])
@@ -98,7 +98,11 @@ def matrices_to_gif(matrices, path="madn_run.gif", scale=32):
          0: (50,120,255),
          1: (255,60,60),
          2: (255,200,40),
-         3: (60,200,60)
+         3: (60,200,60),
+         10: (0,80,150),
+         11: (140,0,0),
+         12: (140,100,0),
+         13: (0,100,0)
     }
     frames = []
     for M in matrices:
