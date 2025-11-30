@@ -39,6 +39,7 @@ def env_reset(
         enable_initial_free_pin = False,
         enable_circular_board = True,
         enable_start_blocking = False,
+        enable_jump_in_goal_area = True,
         enable_friendly_fire = False,
         enable_start_on_1 = True,
         enable_bonus_turn_on_6 = True
@@ -79,12 +80,12 @@ def env_reset(
         'enable_initial_free_pin':enable_initial_free_pin,
         'enable_circular_board':enable_circular_board,
         'enable_start_blocking':enable_start_blocking,
+        'enable_jump_in_goal_area':enable_jump_in_goal_area,
         'enable_friendly_fire':enable_friendly_fire,
         'enable_start_on_1':enable_start_on_1,
         'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
         }
     )
-
 
 def get_winner(board, goal_area) -> Player:
     '''
@@ -93,6 +94,18 @@ def get_winner(board, goal_area) -> Player:
     goals = board[goal_area]
     player_goals = jnp.all(goals >= 0, axis=1)
     return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals), -1)
+
+def check_goal_path_for_pin(start, x_val, goal, board, current_player):
+    goal_area = jnp.arange(len(goal))[None, :] # shape (1, 4)
+
+    return jnp.all(
+        jnp.where(
+            (start[:, None] < goal_area) & (goal_area < x_val[:, None]),
+            board[goal[goal_area]]!=current_player,
+            True
+        ),
+        axis=1
+    )
 
 @jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
@@ -218,7 +231,7 @@ def no_step(env:deterministic_MADN) -> deterministic_MADN:
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
-@jax.jit
+# @jax.jit
 def valid_action(env:deterministic_MADN) -> chex.Array:
     '''
     Returns a mask of shape (4, 6) indicating which actions are valid for each pin of the current player
@@ -252,7 +265,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
     result = jnp.where(
         env.rules['enable_start_blocking'] & cond,
-        ~pins_on_start[nearest_start_after],
+        ~pins_on_start[nearest_start_after] & result,
         result
     )
 
@@ -266,18 +279,29 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
         )
     )
 
+    # check if goal position is free or on circular board, the other board position is possible 
+    check_all_pins = jax.vmap(check_goal_path_for_pin, in_axes=(0, 0, None, None, None))
+    A = (env.rules["enable_circular_board"] & result) # if rule enabled, consider circle rotation, else only goal area
+    B = (board[goal[x-1]] != current_player)
+    # Entweder man darf im Ziel überspringen oder auf dem Weg (im Zielbereich) ist kein eigener Pin 
+    # wenn C true ist ist B auch true da B eine Teil-Bedingung davon ist
+    ones_x_shape = jnp.ones_like(x, dtype=jnp.int8)
+    C = (env.rules['enable_jump_in_goal_area'] | check_all_pins(- ones_x_shape, x, goal, board, current_player))
+    
     result = jnp.where(
-        (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
-        (env.rules["enable_circular_board"] & result) | (board[goal[x-1]] != current_player), # if goal is possible, check if goal position is free
+        (4 >= x) & (x > 0) & (current_positions <= target),
+        A | (B & C),
         result
     )
+    
     # filter actions for pins in goal area
+    # Entweder man darf im Ziel überspringen oder auf dem Weg (im Zielbereich) ist kein eigener Pin 
+    D = (env.rules['enable_jump_in_goal_area'] | check_all_pins(ones_x_shape * (current_positions - goal[0]), moved_positions - goal[0] +1, goal, board, current_player))
     result = jnp.where(
-        jnp.isin(current_pins, goal)[:, None],
-        (moved_positions <= goal[-1]) & (board[moved_positions%env.total_board_size] != current_player),
+        jnp.isin(current_positions, goal),
+        (moved_positions <= goal[-1]) & (board[moved_positions] != current_player) & D,
         result
     )
-
     # filter actions for pins in start area
     start_moves = jax.lax.cond(
         env.rules['enable_start_on_1'],

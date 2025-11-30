@@ -338,7 +338,7 @@ def valid_action(env:classic_MADN) -> chex.Array:
     cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
     result = jnp.where(
         env.rules['enable_start_blocking'] & cond,
-        ~pins_on_start[nearest_start_after],
+        ~pins_on_start[nearest_start_after] & result, # true if start not blocked and new pos is free
         result
     )
 
