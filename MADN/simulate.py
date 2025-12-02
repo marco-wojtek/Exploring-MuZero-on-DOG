@@ -99,7 +99,7 @@ def simulate_mcts_game(env, key, iterations = 500):
 
 
 '''Simulate a random game'''
-env = env_reset(0, num_players=jnp.int8(2), distance=jnp.int8(10), enable_initial_free_pin=True)
+env = env_reset(0, num_players=jnp.int8(2), layout=jnp.array([True, False, True, False], dtype=jnp.bool_), distance=jnp.int8(10), enable_initial_free_pin=True)
 simulate_mcts_game(env, 999, 300)
 # simulate_game(env, 99)
 

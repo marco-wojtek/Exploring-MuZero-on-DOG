@@ -35,6 +35,7 @@ class deterministic_MADN:
 def env_reset(
         _,
         num_players=jnp.int8(4),
+        layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int8(10),
         enable_initial_free_pin = False,
         enable_circular_board = True,
@@ -45,11 +46,23 @@ def env_reset(
         enable_bonus_turn_on_6 = True
             ) -> deterministic_MADN:
     
-    board_size = num_players * distance
-    total_board_size = board_size + num_players * 4 # add goal areas
+    board_size = 4 * distance
+    total_board_size = board_size + 4 * 4 # add goal areas
     num_pins = 4
 
-    start = jnp.array(jnp.arange(num_players)*distance, dtype=jnp.int8)
+    # board indicator positions
+    # layout must work for number of players
+    layout = jax.lax.cond(
+        (jnp.sum(layout)!=num_players) | (jnp.all(layout) & (num_players < 4)),
+        lambda: jnp.array([False, False, False, False], dtype=jnp.bool_).at[:num_players].set(True),
+        lambda: layout
+    )
+    
+    start = jnp.array(jnp.arange(4)*distance, dtype=jnp.int8)[layout]
+    target = (start - 1)%board_size
+    goal = jnp.reshape(jnp.arange(board_size, board_size + 4*4, dtype=jnp.int8), (4, 4))[layout, :]
+
+
     pins = - jnp.ones((num_players,num_pins), dtype=jnp.int8)
     pins = jax.lax.cond(
         enable_initial_free_pin,
@@ -72,8 +85,8 @@ def env_reset(
         reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
         action_set= num_pins * jnp.ones((num_players, 6), dtype=jnp.int8), # each player starts with 4 actions 1-6
         start = start,
-        target = jnp.array((jnp.arange(num_players)*distance - 1)%board_size, dtype=jnp.int8),
-        goal = jnp.reshape(jnp.arange(board_size, board_size + num_players*4, dtype=jnp.int8), (num_players, 4)),
+        target = target,
+        goal = goal,
         board_size=jnp.array(board_size, dtype=jnp.int8),
         total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
         rules = {
@@ -231,7 +244,7 @@ def no_step(env:deterministic_MADN) -> deterministic_MADN:
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
-# @jax.jit
+@jax.jit
 def valid_action(env:deterministic_MADN) -> chex.Array:
     '''
     Returns a mask of shape (4, 6) indicating which actions are valid for each pin of the current player

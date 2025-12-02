@@ -62,6 +62,7 @@ class DOG:
 def env_reset(
         _,
         num_players=jnp.int8(4),
+        layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int8(10),
         enable_initial_free_pin = False,
         enable_circular_board = True,
@@ -72,11 +73,23 @@ def env_reset(
         disable_joker = False,
             ) -> DOG:
     
-    board_size = num_players * distance
-    total_board_size = board_size + num_players * 4 # add goal areas
+    board_size = 4 * distance
+    total_board_size = board_size + 4 * 4 # add goal areas
     num_pins = 4
 
-    start = jnp.array(jnp.arange(num_players)*distance, dtype=jnp.int8)
+    # board indicator positions
+    # layout must work for number of players
+    layout = jax.lax.cond(
+        (jnp.sum(layout)!=num_players) | (jnp.all(layout) & (num_players < 4)),
+        lambda: jnp.array([False, False, False, False], dtype=jnp.bool_).at[:num_players].set(True),
+        lambda: layout
+    )
+    
+    start = jnp.array(jnp.arange(4)*distance, dtype=jnp.int8)[layout]
+    target = (start - 1)%board_size
+    goal = jnp.reshape(jnp.arange(board_size, board_size + 4*4, dtype=jnp.int8), (4, 4))[layout, :]
+
+
     pins = - jnp.ones((num_players,num_pins), dtype=jnp.int8)
     pins = jax.lax.cond(
         enable_initial_free_pin,
@@ -103,8 +116,8 @@ def env_reset(
         done = jnp.bool_(False), # whether the game is over
         reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
         start = start,
-        target = jnp.array((jnp.arange(num_players)*distance - 1)%board_size, dtype=jnp.int8),
-        goal = jnp.reshape(jnp.arange(board_size, board_size + num_players*4, dtype=jnp.int8), (num_players, 4)),
+        target = target,
+        goal = goal,
         deck = deck,
         hands = jnp.zeros((num_players, num_cards), dtype=jnp.int8),
         board_size=jnp.array(board_size, dtype=jnp.int8),
