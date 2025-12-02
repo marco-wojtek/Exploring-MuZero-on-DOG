@@ -37,6 +37,7 @@ def env_reset(
         num_players=jnp.int8(4),
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int8(10),
+        enable_teams = False,
         enable_initial_free_pin = False,
         enable_circular_board = True,
         enable_start_blocking = False,
@@ -50,6 +51,7 @@ def env_reset(
     total_board_size = board_size + 4 * 4 # add goal areas
     num_pins = 4
 
+    enable_teams = enable_teams & (num_players == 4)
     # board indicator positions
     # layout must work for number of players
     layout = jax.lax.cond(
@@ -90,6 +92,7 @@ def env_reset(
         board_size=jnp.array(board_size, dtype=jnp.int8),
         total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
         rules = {
+        'enable_teams':enable_teams,
         'enable_initial_free_pin':enable_initial_free_pin,
         'enable_circular_board':enable_circular_board,
         'enable_start_blocking':enable_start_blocking,
@@ -150,13 +153,14 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     # pin at new position
     pin_at_pos = env.board[new_position]
     # if a player is at the new position and it's not the current player, send that pin back to start area
-    pins = env.pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
     pins = jax.lax.cond(
-        (pin_at_pos != -1) & (pin_at_pos != current_player) & ~invalid_action, # if a player was at the new position and it's not the current player and the action is valid
+        (pin_at_pos != -1) & ((pin_at_pos != current_player) | env.rules['enable_friendly_fire']) & ~invalid_action, # if a player was at the new position and it's not the current player and the action is valid
         lambda p: p.at[pin_at_pos].set(jnp.where(p[pin_at_pos] == new_position, -1, p[pin_at_pos])), # send the pin of that player back to start area
         lambda p: p,
-        pins
+        env.pins
     )
+    pins = pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
+
     board = jax.lax.cond(
         ~invalid_action,
         lambda b: set_pins_on_board(-jnp.ones_like(b, dtype=jnp.int8), pins),
@@ -269,7 +273,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     x = moved_positions - target
 
     # filter out invalid moves blocked by own pins
-    result = (board[fitted_positions] != current_player) # check move to any board position
+    result = (board[fitted_positions] != current_player) | env.rules['enable_friendly_fire'] # check move to any board position
 
     # filter actions where a pin on a start spot would block others
     distance = env.board_size // num_players_static
