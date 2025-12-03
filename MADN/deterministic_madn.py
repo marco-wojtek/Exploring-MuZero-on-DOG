@@ -103,13 +103,38 @@ def env_reset(
         }
     )
 
-def get_winner(board, goal_area) -> Player:
+def is_player_done(env: deterministic_MADN, player: Player) -> chex.Array:
     '''
-    returns the index of the winning player or 0 if tie or not Done
+    returns winner as jnp.array to support multiple winners in team mode    
     '''
-    goals = board[goal_area]
-    player_goals = jnp.all(goals >= 0, axis=1)
-    return jnp.where(jnp.any(player_goals), jnp.argmax(player_goals), -1)
+    return jax.lax.cond(player >= env.num_players,
+                 lambda: False,
+                 lambda: jnp.all(env.board[env.goal[player]] >= 0)
+                 )
+
+def get_winner(env: deterministic_MADN) -> chex.Array:
+    num_players = env.num_players
+    collect_winners = jax.vmap(is_player_done, in_axes=(None, 0))
+    players_done = collect_winners(env, jnp.arange(4, dtype=jnp.int8))  # (4,)
+
+    def four_players_case():
+        team_0 = players_done[0] & players_done[2]  # Team 0&2 fertig
+        team_1 = players_done[1] & players_done[3]  # Team 1&3 fertig
+        both = team_0 & team_1  # Beide Teams fertig (unentschieden)
+        none = ~(team_0 | team_1)  # Kein Team fertig
+        
+        return jax.lax.cond(
+            both | none,  # Bei Unentschieden oder keinem Gewinner
+            lambda: jnp.full(players_done.shape, False, dtype=jnp.bool_),  # [-1, -1]
+            lambda: jax.lax.cond(
+                team_0,  # Falls Team 0&2 gewonnen hat
+                lambda:jnp.array([False, True, False, True], dtype=jnp.bool_),  # [0, 2]
+                lambda: jnp.array([True, False, True, False], dtype=jnp.bool_)   # [1, 3]
+            )
+        )
+
+
+    return jax.lax.cond(env.rules['enable_teams'], four_players_case, lambda: players_done)
 
 def check_goal_path_for_pin(start, x_val, goal, board, current_player):
     goal_area = jnp.arange(len(goal))[None, :] # shape (1, 4)
@@ -127,7 +152,9 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     pin = action[0].astype(jnp.int8)
     move = action[1].astype(jnp.int8) # action is in {1, 2, 3, 4, 5, 6}
+    
     current_player = env.current_player
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env, current_player), (current_player + 2)%4, current_player)
     # check if the action is valid
     invalid_action = ~valid_action(env)[pin, move-1]
 
@@ -178,9 +205,9 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
         action_set
     )
     winner = get_winner(board, env.goal)
-    reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner==current_player)), dtype=jnp.int8) # reward is 0 if game is done, -1 if action is invalid, else the index of the winning player (1-4) or 0 if no winner yet
+    reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, jnp.isin(current_player, winner))), dtype=jnp.int8) # reward is 0 if game is done, -1 if action is invalid, else the index of the winning player (1-4) or 0 if no winner yet
     # check if the game is done
-    done = env.done | jnp.where(winner != -1, True, False)
+    done = env.done | jnp.any(winner)
     # player changes on invalid action
     current_player = jnp.where(done | (env.rules['enable_bonus_turn_on_6'] & (move == 6)), current_player, (current_player + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
 
@@ -255,6 +282,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     '''
     #return valid_action for each pin of the current player
     current_player = env.current_player
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env, current_player), (current_player + 2)%4, current_player)
     current_pins = env.pins[current_player]
     board = env.board
     target = env.target[current_player]
@@ -440,10 +468,10 @@ def rollout(env:deterministic_MADN, rng_key:chex.PRNGKey) -> tuple[deterministic
         return env, key, steps + 1
 
     leaf, key, steps = jax.lax.while_loop(cond, step, (env, rng_key, 0))
-    winner = get_winner(leaf.board, leaf.goal)
+    winner = get_winner(leaf)
     root_player = env.current_player
     # +1 für Sieg, -1 für Niederlage, 0 sonst
-    return jnp.where(winner == -1, 0.0, jnp.where(winner == root_player, 1.0, -1.0))
+    return jnp.where(winner == -1, 0.0, jnp.where(winner[root_player], 1.0, -1.0))
 
 def value_function(env:deterministic_MADN, rng_key:chex.PRNGKey) -> chex.Array:
     return rollout(env, rng_key).astype(jnp.float32)

@@ -76,16 +76,16 @@
     - hot_7_enabled
     - swap_enabled
     - neg_4_enabled
-- enable_start_block
-- enable_teams
-- enable_jumping_in_goal
+- enable_start_block XXXXXXXXXXXXX
+- enable_teams 
+- enable_jumping_in_goal XXXXXXXXXXXXXXXXXXXXXX
 - enable_initial_free_pin XXXXXXXXXXXXXXX
 - enable_extra_move_on_6 (only dMADN and MADN) XXXXXXXXXXXXXXXXXXXX
 - enable_start_on_1_and_6 (dMADN, MADN) XXXXXXXXXXXXXXXXX
 - enable_rethrow (up to 3 throws if all pins in start, MADN only) XXXXXXXXXXXXXXXXX
-- enable_forced_start (only MADN)
-- enable_forced_attack
-- enable_friendly_fire (on team member pins)
+- ~enable_forced_start (only MADN)~
+- ~enable_forced_attack~
+- enable_friendly_fire (on team member pins) XXXXXXXXXXXXXXXXXXXXXXXX
 - enable_circular_board XXXXXXXXXXXXXXXXX
 
 # stochastic MuZero (mctx)
