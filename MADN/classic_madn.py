@@ -110,19 +110,18 @@ def env_reset(
         }
     )
 
-def is_player_done(env: classic_MADN, player: Player) -> chex.Array:
+def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.Array:
     '''
     returns winner as jnp.array to support multiple winners in team mode    
     '''
-    return jax.lax.cond(player >= env.num_players,
+    return jax.lax.cond(player >= num_players,
                  lambda: False,
-                 lambda: jnp.all(env.board[env.goal[player]] >= 0)
+                 lambda: jnp.all(board[goal[player]] >= 0)
                  )
 
-def get_winner(env: classic_MADN) -> chex.Array:
-    num_players = env.num_players
-    collect_winners = jax.vmap(is_player_done, in_axes=(None, 0))
-    players_done = collect_winners(env, jnp.arange(4, dtype=jnp.int8))  # (4,)
+def get_winner(env: classic_MADN, board: Board) -> chex.Array:
+    collect_winners = jax.vmap(is_player_done, in_axes=(None, None, None, 0))
+    players_done = collect_winners(env.num_players, board, env.goal, jnp.arange(4, dtype=jnp.int8))  # (4,)
 
     def four_players_case():
         team_0 = players_done[0] & players_done[2]  # Team 0&2 fertig
@@ -232,8 +231,10 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
 def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
     pin = pin.astype(jnp.int8)
     move = env.die.astype(jnp.int8)
-    current_player = env.current_player
-    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env, current_player), (current_player + 2)%4, current_player)
+    # currently player ID
+    player_id = env.current_player
+    # ID of the players' pins to be moved (important for teams)
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
     # check if the action is valid
     invalid_action = ~valid_action(env)[pin]
 
@@ -283,12 +284,12 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
         env.board
     )
 
-    winner = get_winner(env)
+    winner = get_winner(env, board)
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8) # reward is 0 if game is done, -1 if action is invalid, else the index of the winning player (1-4) or 0 if no winner yet
     # check if the game is done
     done = env.done | jnp.any(winner)
     # player changes on invalid action
-    current_player = jnp.where(done | (env.rules['enable_bonus_turn_on_6'] & (move == 6)), current_player, (current_player + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
+    current_player = jnp.where(done | (env.rules['enable_bonus_turn_on_6'] & (move == 6)), player_id, (player_id + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
 
     env = classic_MADN(
         board=board,
@@ -354,7 +355,7 @@ def valid_action(env:classic_MADN) -> chex.Array:
     '''
     #return valid_action for each pin of the current player
     current_player = env.current_player
-    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env, current_player), (current_player + 2)%4, current_player)
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, current_player), (current_player + 2)%4, current_player)
     current_pins = env.pins[current_player]
     board = env.board
     target = env.target[current_player]
@@ -553,7 +554,7 @@ def rollout(env:classic_MADN, rng_key:chex.PRNGKey) -> tuple[classic_MADN, chex.
         return env, key, steps + 1
 
     leaf, key, steps = jax.lax.while_loop(cond, step, (env, rng_key, 0))
-    winner = get_winner(leaf)
+    winner = get_winner(leaf, leaf.board)
     root_player = env.current_player
     # +1 für Sieg, -1 für Niederlage, 0 sonst
     return jnp.where(winner == -1, 0.0, jnp.where(winner[root_player], 1.0, -1.0))

@@ -5,3 +5,5 @@ dist/
 wheels/
 *.egg-info/
 MADN/a.py
+team_simulation.txt
+madn_trajectories.txt
