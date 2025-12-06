@@ -43,6 +43,8 @@ def env_reset(
         num_players=jnp.int8(4),
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int8(10),
+        starting_player = jnp.int8(0), # -1, 0, 1, 2, 3
+        key = jax.random.PRNGKey(0),
         enable_teams = False,
         enable_initial_free_pin = False,
         enable_circular_board = True,
@@ -53,6 +55,9 @@ def env_reset(
         enable_bonus_turn_on_6 = True,
         enable_dice_rethrow = False,
             ) -> classic_MADN:
+    
+    subkey, _ = jax.random.split(key)
+    starting_player = jnp.where((starting_player < 0) | (starting_player >= num_players), jax.random.randint(subkey, (), 0, num_players), starting_player)
     
     board_size = 4 * distance
     total_board_size = board_size + 4 * 4 # add goal areas
@@ -88,7 +93,7 @@ def env_reset(
         board = board, # board is filled with -1 (empty) or 0-3 (player index)
         num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
         pins = pins,
-        current_player=jnp.array(0, dtype=jnp.int8), # index of current player, 0-3
+        current_player=jnp.array(starting_player, dtype=jnp.int8), # index of current player, 0-3
         done = jnp.bool_(False), # whether the game is over
         reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
         start = start,
@@ -114,10 +119,11 @@ def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.
     '''
     returns winner as jnp.array to support multiple winners in team mode    
     '''
-    return jax.lax.cond(player >= num_players,
-                 lambda: False,
-                 lambda: jnp.all(board[goal[player]] >= 0)
-                 )
+    return jax.lax.cond(
+        player >= num_players,
+        lambda: False,
+        lambda: jnp.all(board[goal[player]] >= 0)
+    )
 
 def get_winner(env: classic_MADN, board: Board) -> chex.Array:
     collect_winners = jax.vmap(is_player_done, in_axes=(None, None, None, 0))
@@ -431,9 +437,6 @@ def valid_action(env:classic_MADN) -> chex.Array:
         result
     )
 
-    # Falls board_size +1 großes action space
-    # result2 = jnp.full(env.total_board_size+1, False)
-    # result2 = result2.at[current_pins].set(result) 
     return result # filter possible actions with available actions
 
 

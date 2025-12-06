@@ -37,6 +37,8 @@ def env_reset(
         num_players=jnp.int8(4),
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int8(10),
+        starting_player = jnp.int8(0), # -1, 0, 1, 2, 3
+        key = jax.random.PRNGKey(0),
         enable_teams = False,
         enable_initial_free_pin = False,
         enable_circular_board = True,
@@ -47,6 +49,8 @@ def env_reset(
         enable_bonus_turn_on_6 = True
             ) -> deterministic_MADN:
     
+    subkey, _ = jax.random.split(key)
+    starting_player = jnp.where((starting_player < 0) | (starting_player >= num_players), jax.random.randint(subkey, (), 0, num_players), starting_player)
     board_size = 4 * distance
     total_board_size = board_size + 4 * 4 # add goal areas
     num_pins = 4
@@ -82,7 +86,7 @@ def env_reset(
         board = board, # board is filled with -1 (empty) or 0-3 (player index)
         num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
         pins = pins,
-        current_player=jnp.array(0, dtype=jnp.int8), # index of current player, 0-3
+        current_player=jnp.array(starting_player, dtype=jnp.int8), # index of current player, 0-3
         done = jnp.bool_(False), # whether the game is over
         reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
         action_set= num_pins * jnp.ones((num_players, 6), dtype=jnp.int8), # each player starts with 4 actions 1-6
@@ -147,6 +151,16 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
         axis=1
     )
 
+def check_goal_path_for_pin2(start, x_val, goal, board, current_player):
+    goal_area = jnp.arange(len(goal))
+    return jnp.all(
+            jnp.where(
+                (start < goal_area) & (goal_area < x_val),
+                board[goal] != current_player,
+                True  # Positionen außerhalb von x_val ignorieren
+            )
+        )
+
 @jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     pin = action[0].astype(jnp.int8)
@@ -162,13 +176,20 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     fitted_positions = moved_positions % env.board_size
     x = moved_positions - env.target[current_player]
 
+    a = jax.lax.cond(
+        jnp.isin(current_positions, env.goal[current_player]),
+        lambda: check_goal_path_for_pin2(current_positions - env.goal[current_player,0], moved_positions - env.goal[current_player,0] +1, env.goal[current_player], env.board, current_player),
+        lambda: check_goal_path_for_pin2(- jnp.ones(4, dtype=jnp.int8), x, env.goal[current_player], env.board, current_player)
+    )
+    A = (env.board[env.goal[current_player, x-1]] != current_player) & (env.rules['enable_jump_in_goal_area'] | a)
+    
     new_position = jnp.where(
         current_positions == -1,
         env.start[current_player], # move from start area to starting position
         jnp.where(jnp.isin(current_positions, env.goal[current_player]),
                     moved_positions,
                     jnp.where(
-                        (4 >= x) & (x > 0) & (env.board[env.goal[current_player, x-1]] != current_player) & (current_positions <= env.target[current_player]),
+                        (4 >= x) & (x > 0) & A & (current_positions <= env.target[current_player]),
                         env.goal[current_player, x-1], # move to goal position
                         fitted_positions
                     )
@@ -280,8 +301,8 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     Returns a mask of shape (4, 6) indicating which actions are valid for each pin of the current player
     '''
     #return valid_action for each pin of the current player
-    player_id = env.current_player
-    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+    current_player = env.current_player
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, current_player), (current_player + 2)%4, current_player)
     current_pins = env.pins[current_player]
     board = env.board
     target = env.target[current_player]
