@@ -84,8 +84,8 @@ def board_to_mat(env, layout):
         lambda: layout
     )
 
-    start = env.start
-    start_area = replace_rows_simple(layout, board[start])
+    start = jnp.arange(4)*n
+    start_area = board[start]
     goal = env.goal
     goal_area = replace_rows_simple(layout, board[goal])
 
@@ -95,7 +95,6 @@ def board_to_mat(env, layout):
         14,
         colour_ids
     )
-
     board_matrix = jnp.ones((n+1, n+1))*8
     board_matrix = board_matrix.at[0, :].set(board[0:n+1])
     board_matrix = board_matrix.at[:, -1].set(board[n:2*n+1])

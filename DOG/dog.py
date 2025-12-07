@@ -175,6 +175,7 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
         current_player: Aktueller Spieler
         """
     goal_area = jnp.arange(len(goal))
+    print("check_goal_path_for_pin:", start, x_val, goal, board, current_player)
     return jnp.all(
             jnp.where(
                 (start < goal_area) & (goal_area < x_val),
@@ -199,7 +200,7 @@ def val_swap(env):
     swap_mat = jnp.tile(board[:board_size], (4,1))
     
     condA = jnp.where(~jnp.isin(swap_mat, jnp.array([-1, current_player])), True, False)
-    condA = condA & condA.at[:,start].set(board[start] != player_ids)
+    condA = condA & condA.at[:,start].set(board[start] != player_ids)# players on their own start positions cannot be swapped
 
     condB = (~jnp.isin(current_pins, jnp.array([-1, start[current_player]])))[:, None] 
     return  condA & condB
@@ -228,9 +229,15 @@ def val_action_7(env:DOG, seven_dist) -> chex.Array:
         lambda: jnp.ones_like(current_positions, dtype=bool),
         lambda: ~((current_positions <= target) & (moved_positions > (target + 4)))
     )
+    check_all_pins = jax.vmap(check_goal_path_for_pin, in_axes=(0, 0, None, None, None))
+    A = (env.rules["enable_circular_board"] & result) # if rule enabled, consider circle rotation, else only goal area
+    B = (board[goal[x-1]] != current_player)
+    # Entweder man darf im Ziel überspringen oder auf dem Weg (im Zielbereich) ist kein eigener Pin 
+    # wenn C true ist ist B auch true da B eine Teil-Bedingung davon ist
+    C = (env.rules['enable_jump_in_goal_area'] | check_all_pins(- jnp.ones(4, dtype=jnp.int8), x, goal, board, current_player))
     result = jnp.where(
-        (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
-        (env.rules["enable_circular_board"] | result),#(env.rules["enable_circular_board"] & result) | (board[goal[x-1]] != current_player), # if goal is possible, check if goal position is free
+        (4 >= x) & (x > 0) & (current_positions <= target),
+        A | (B & C),
         result
     )
     # filter actions for pins in goal area
