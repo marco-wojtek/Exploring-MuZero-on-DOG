@@ -3,6 +3,116 @@ import jax
 import jax.numpy as jnp
 import mctx
 
+def get_all_paths_compact(start, end, N):
+    """
+    Berechnet alle Pfadpositionen zwischen start und end Positionen.
+    Bei gegebenem N wird modulo N gerechnet für Rundbretter.
+    
+    Args:
+        start: Array der Startpositionen
+        end: Array der Endpositionen  
+        N: Board-Größe für Modulo-Rechnung (optional)
+    
+    Returns:
+        Array aller Pfadpositionen zwischen start und end (exklusive start, inklusive end)
+    """
+    valid_mask = end != start
+
+    use_modulo = (start < N) & (end < N)
+
+    # Modulo-Logik für Rundbrett
+    distance = (end - start) % N
+    distance = jnp.where(distance == 0, N, distance)  # Vollrunde = N Schritte
+    distance = jnp.where(valid_mask, distance, 0)  # Keine Bewegung wenn start == end
+    
+    max_len = jnp.max(distance)
+    
+    # Erstelle alle möglichen Pfade für alle start/end Paare
+    i, j = jnp.meshgrid(jnp.arange(len(start)), jnp.arange(max_len), indexing='ij')
+    path_values_normal = start[i] + j + 1
+    path_values_modulo = (start[i] + j + 1) % N
+    path_values = jnp.where(use_modulo[i], path_values_modulo, path_values_normal)
+    
+    valid_positions = valid_mask[i] & (j < distance[i])
+    
+    return path_values, valid_positions
+
+def calc_paths(start, end, goal, target, N):
+    '''
+    Berechnet alle Pfadpositionen für Pins, die sich von start zu end bewegen.
+    
+    Args:
+        start: (4,) Array der Startpositionen
+        end: (4,) Array der Endpositionen  
+        goal: (4,) Array der Goal-Positionen
+        target: int Target-Position (Eingang zum Goal-Bereich)
+        N: int Board-Größe
+    '''
+    A = jnp.isin(start, goal)  # start in goal
+    B = jnp.isin(end, goal)    # end in goal  
+
+    # Berechne alle Pfade für same area (both in goal or both not in goal)
+    same_area_condition = A == B
+    same_area_paths, same_area_mask = get_all_paths_compact(start, end, N)
+    same_area_valid = same_area_condition[:, None] & same_area_mask
+    
+    # Berechne Pfade für different area (traverse to goal)
+    diff_area_condition = A != B
+    
+    # Pfade bis zum Target für Pins die ins Goal wechseln
+    target_array = jnp.full_like(end, target)
+    diff_area_paths_to_target, diff_area_to_target_mask = get_all_paths_compact(start, target_array, N)
+    diff_area_to_target_valid = diff_area_condition[:, None] & diff_area_to_target_mask
+    
+    # Kombiniere alle gültigen Pfadpositionen
+    all_same_area = same_area_paths[same_area_valid]
+    all_diff_area_to_target = diff_area_paths_to_target[diff_area_to_target_valid]
+    
+    # Goal-Positionen für Übergänge ins Goal
+    transition_to_goal = diff_area_condition
+    if jnp.any(transition_to_goal):
+        goal_start = goal[0]
+        goal_end = jnp.max(jnp.where(transition_to_goal, end, goal[0]))
+        goal_range = jnp.arange(goal_start, goal_end + 1, dtype=jnp.int8)
+        all_path_positions = jnp.concatenate([all_same_area, all_diff_area_to_target, goal_range])
+    else:
+        all_path_positions = jnp.concatenate([all_same_area, all_diff_area_to_target])
+    
+    return jnp.unique(all_path_positions)
+
+def prototype(start, end, goal, target, N):
+    '''
+    start: (4,) Array der Startpositionen
+    end: (4,) Array der Endpositionen
+    goal: (4,) Array der Goal-Positionen
+    target: int Target-Position (Eingang zum Goal-Bereich)
+    N: int Board-Größe
+    '''
+    x = jnp.array([start, end])
+    A = jnp.isin(start, goal)  # start in goal
+    B = jnp.isin(end, goal)    # end in goal
+    
+    paths = []
+    for i in range(4):
+        if A[i] == B[i]:
+            p, _ = get_all_paths_compact(jnp.array([start[i]]), jnp.array([end[i]]), N)
+            paths.append(p[0])
+        else:
+            p, _ = get_all_paths_compact(jnp.array([start[i]]), jnp.array([target]), N)
+            goal_range = jnp.arange(goal[0], end[i] + 1, dtype=jnp.int8)
+            paths.append(jnp.concatenate([p[0], goal_range]))
+
+    other_paths_0 = jnp.concatenate([jnp.concatenate(paths[1:3]), paths[3]])
+    other_paths_1 = jnp.concatenate([paths[0], jnp.concatenate(paths[2:])])
+    other_paths_2 = jnp.concatenate([jnp.concatenate(paths[:2]), paths[3]])
+    other_paths_3 = jnp.concatenate(paths[:3])
+    
+    a = jnp.all(jnp.isin(jnp.array([start[0], end[0]]), other_paths_0))
+    b = jnp.all(jnp.isin(jnp.array([start[1], end[1]]), other_paths_1))
+    c = jnp.all(jnp.isin(jnp.array([start[2], end[2]]), other_paths_2))
+    d = jnp.all(jnp.isin(jnp.array([start[3], end[3]]), other_paths_3))
+    return jnp.array([a,b,c,d])
+
 def all_pin_distributions(total=7):
     # Erzeuge alle möglichen Werte für die ersten drei Pins
     a = jnp.arange(total + 1)
@@ -207,6 +317,7 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
         current_player: Aktueller Spieler
         """
     goal_area = jnp.arange(len(goal))
+
     return jnp.all(
             jnp.where(
                 (start < goal_area) & (goal_area < x_val),
@@ -275,21 +386,32 @@ def val_swap(env):
     board = env.board
     board_size = env.board_size
     target = env.target[current_player]
-    goal = env.goal[current_player]
+    goal = env.goal
     start = env.start
     num_players_static = start.shape[0]
     player_ids = jnp.arange(num_players_static, dtype=board.dtype)
 
     swap_mat = jnp.tile(board[:board_size], (4,1))
     condA = jnp.where(~jnp.isin(swap_mat, jnp.array([-1, current_player])), True, False)
-    condA = condA & condA.at[:,start].set(board[start] != player_ids)
-    condB = (~jnp.isin(current_pins, jnp.array([-1, start[current_player]])))[:, None]
+    condA = condA & condA.at[:,start].set((board[start] != player_ids) | env.rules["enable_start_blocking"])  # start positions cannot be swapped if blocked except the rule is disabled
+    
+    disallowed_pos = jax.lax.cond(
+        env.rules['enable_start_blocking'],
+        lambda: jnp.concatenate([jnp.array([-1]), jnp.array([start[current_player]]), goal[current_player]]),
+        lambda: jnp.concatenate([jnp.array([-1]), jnp.array([-1]), goal[current_player]])
+    )
+    condB = (~jnp.isin(current_pins, disallowed_pos))[:, None]
     return condA & condB
 
-@jax.jit
+# @jax.jit
 def val_action_7(env:DOG, seven_dist) -> chex.Array:
     '''
     Returns a mask of shape (4, ) indicating which actions are valid for each pin of the current player
+
+    Die 7 Aktion ist ein Sonderfall. Normalerweise können Figuren im Ziel nicht geschlagen werden. Wenn aber die Regel, dass im 
+    Ziel übersrungen werden darf, aktiviert ist, kann eine Figur im Ziel übersprungen werden und somit auch durch die 7 geschlagen werden.
+    Will ein Spieler nicht das eine Figur auf Feld 40 von einer auf Feld 38 mit einer 4 geschlagen wird, so muss die auf 40 1-2 bewegt werden und die andere entsprechend weniger.
+    Die 7 Aktion wird nur beschränkt wenn start-Block oder Jump im Ziel Verbot gilt.
     '''
     #return valid_action for each pin of the current player
     player_id = env.current_player
@@ -307,16 +429,16 @@ def val_action_7(env:DOG, seven_dist) -> chex.Array:
     current_positions = env.pins[current_player]
     moved_positions = current_positions + seven_dist
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - target
+    x = moved_positions - target -1
 
-    pins_on_start = pins_on_start.at[current_player].set(jnp.all(jnp.where(seven_dist == 0, moved_positions == start[current_player], True))) # if any pin does not move, check if it is on start
+    pins_on_start = pins_on_start.at[current_player].set(jnp.all(jnp.where(current_positions == start[current_player], moved_positions == start[current_player], True))) # if any pin does not move, check if it is on start
     # Überlaufen der Zielposition verhindern falls kein Rundbrett
     result = jax.lax.cond(
         env.rules['enable_circular_board'],
         lambda: jnp.ones_like(current_positions, dtype=bool),
-        lambda: ~((current_positions <= target) & (moved_positions > (target + 4)))
+        lambda: ~((current_positions <= target) & ((moved_positions > (target + 4)) | (x == 0))) # if moved_pos > target + 4 or x = 0 means overrun and new round start
     )
-
+    # print(result)
     distance = env.board_size // num_players_static
     nearest_start_before = ((current_positions  //distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
     nearest_start_after = fitted_positions//distance
@@ -326,7 +448,7 @@ def val_action_7(env:DOG, seven_dist) -> chex.Array:
         ~pins_on_start[nearest_start_after] & result, # true if start not blocked and new pos is free
         result
     )
-
+    # print(result)
     check_all_pins = jax.vmap(check_goal_path_for_pin, in_axes=(0, 0, None, None, None))
     A = (env.rules["enable_circular_board"] & result) # if rule enabled, consider circle rotation, else only goal area
     # Entweder man darf im Ziel überspringen oder auf dem Weg (im Zielbereich) ist kein eigener Pin 
@@ -334,20 +456,29 @@ def val_action_7(env:DOG, seven_dist) -> chex.Array:
     # Für alle pins die sich im Ziel bewegen sollten die neuen positionen geprüft werden, da die alten nicht blockieren könnten
     tmp_pins = env.pins.at[current_player].set(jnp.where(jnp.isin(current_positions, goal), moved_positions, current_positions))
     tmp_board = set_pins_on_board(board, tmp_pins)
+    # print(tmp_board)
+    # print(result)
     B = (tmp_board[goal[x-1]] != current_player)
     C = (env.rules['enable_jump_in_goal_area'] | check_all_pins(- jnp.ones(4, dtype=jnp.int8), x, goal, tmp_board, current_player))
+    # print("A:", A)
+    # print("B:", B)
+    # print("C:", C)
+    # print(x)
     result = jnp.where(
         (4 >= x) & (x > 0) & (current_positions <= target),
-        A | (B & C),
+        A | C,
         result
     )
+    # print(result)
     # filter actions for pins in goal area
     D = (env.rules['enable_jump_in_goal_area'] | check_relative_order_preserved(current_positions, moved_positions, env.board_size))
     result = jnp.where(
         jnp.isin(current_positions, goal),
-        (moved_positions <= goal[-1]) & D,
+        (moved_positions <= goal[-1])  & D,
         result
     )
+    # print("D:", D)
+    # print(result)
     # alle Aktionen müssenrechenrisch möglich sein und es dürfen keine zwei Pins auf die gleiche Position ziehen
     board_mover = jnp.where(current_positions == -1, moved_positions==-1, True)# prüfe dass kein pin im startbereich bewegt werden würde 
     return jnp.all(result & board_mover) 
@@ -369,7 +500,7 @@ def val_action_normal_move(env:DOG, move: int):
     current_positions = current_pins
     moved_positions = current_pins + move
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - target
+    x = moved_positions - target -1 #(start feld muss auch überlaufen werden)
 
     result = (board[fitted_positions] != current_player) | env.rules['enable_friendly_fire'] # check move to any board position
 
@@ -425,6 +556,47 @@ def val_action_normal_move(env:DOG, move: int):
 
     return result
 
+def val_neg_move(env:DOG, move:int):
+    player_id = env.current_player
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+    current_pins = env.pins[current_player]
+    board = env.board
+    target = env.target[current_player]
+    goal = env.goal[current_player]
+    start = env.start
+    num_players_static = start.shape[0]          # statisch für JIT
+    player_ids = jnp.arange(num_players_static, dtype=board.dtype)
+    pins_on_start = (board[start] == player_ids)
+
+    # calculate possible actions
+    current_positions = current_pins
+    moved_positions = current_pins + move
+    fitted_positions = moved_positions % env.board_size
+
+    result = (board[fitted_positions] != current_player) | env.rules['enable_friendly_fire'] # check move to any board position
+
+    # filter actions where a pin on a start spot would block others
+    distance = env.board_size // num_players_static
+    nearest_start_before = (current_pins//distance) # nearest start before is the next start field behind of a pin
+    nearest_start_after = ((fitted_positions//distance)+1)%num_players_static
+    cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
+    result = jnp.where(
+        env.rules['enable_start_blocking'] & cond,
+        ~pins_on_start[nearest_start_after] & result, # true if start not blocked and new pos is free
+        result
+    )
+
+    result = result & (env.rules['enable_circular_board'] | (current_positions >= (start[current_player] - move))) # if circular board not enabled, prevent moving beyond start position backwards
+
+    # filter actions for pins in start area
+    result = jnp.where(
+        jnp.isin(current_pins, jnp.concatenate([jnp.array([-1]), goal])),
+        False,
+        result
+    )
+
+    return result
+
 # @jax.jit
 def valid_actions(env: DOG) -> chex.Array:
     """
@@ -448,8 +620,9 @@ def valid_actions(env: DOG) -> chex.Array:
     if valid_action[7]: # Card 7: Move 7 with distribution
         traversed_moves = num_swaps + len(DISTS_7_4)
         all_actions = all_actions.at[num_swaps:traversed_moves].set(jax.vmap(val_action_7, in_axes=(None, 0))(env, DISTS_7_4))    
-    normal_actions = jax.vmap(val_action_normal_move, in_axes=(None, 0))(env, jnp.array([1,2,3,4,-4,5,6,8,9,10,11,12,13])).flatten()
-    all_actions = all_actions.at[traversed_moves:].set(normal_actions)
+    normal_actions = jax.vmap(val_action_normal_move, in_axes=(None, 0))(env, jnp.array([1,2,3,4,5,6,8,9,10,11,12,13])).flatten()
+    all_actions = all_actions.at[traversed_moves:-4].set(normal_actions)
+    all_actions = all_actions.at[-4:].set(val_neg_move(env, -4))
     return all_actions
 
 def map_action_to_card(action: Action, env: DOG) -> Card:
@@ -491,6 +664,183 @@ def no_step(env:DOG) ->  DOG:
         rules=env.rules,
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
+
+def step_swap(env, pin_idx, swap_pos):
+    player_id = env.current_player
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+    invalid_action = ~val_swap(env)[pin_idx, swap_pos]
+    print("Swap valid:", ~invalid_action)
+    
+    swapped_player = env.board[swap_pos]
+    pin_pos = env.pins[current_player, pin_idx]
+    board = env.board.at[swap_pos].set(current_player)
+    board = board.at[pin_pos].set(swapped_player)
+    pins = env.pins.at[current_player, pin_idx].set(swap_pos)
+    pins = pins.at[swapped_player, jnp.where(pins[swapped_player] == swap_pos)].set(pin_pos)
+
+    return jax.lax.cond(
+        invalid_action,
+        lambda: (env.board, env.pins),
+        lambda: (board, pins)
+    )
+
+def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
+    pin = pin.astype(jnp.int8)
+    move = move.astype(jnp.int8)
+    # currently player ID
+    player_id = env.current_player
+    # ID of the players' pins to be moved (important for teams)
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+    # check if the action is valid
+    invalid_action = ~val_action_normal_move(env, move)[pin]
+
+    current_positions = env.pins[current_player, pin]
+    moved_positions = current_positions + move
+    fitted_positions = moved_positions % env.board_size
+    x = moved_positions - env.target[current_player] - 1 #(start feld muss auch überaufen werden)
+
+    a = jax.lax.cond(
+        jnp.isin(current_positions, env.goal[current_player]),
+        lambda: check_goal_path_for_pin(current_positions - env.goal[current_player,0], moved_positions - env.goal[current_player,0] +1, env.goal[current_player], env.board, current_player),
+        lambda: check_goal_path_for_pin(- jnp.ones(4, dtype=jnp.int8), x, env.goal[current_player], env.board, current_player)
+    )
+    A = (env.board[env.goal[current_player, x-1]] != current_player) & (env.rules['enable_jump_in_goal_area'] | a)
+    new_position = jnp.where(
+        current_positions == -1,
+        env.start[current_player], # move from start area to starting position
+        jnp.where(jnp.isin(current_positions, env.goal[current_player]),
+                    moved_positions,
+                    jnp.where(
+                        # ~jnp.isin(current_player, env.board[env.goal[current_player, x]]), # check if current player has pins in goal area
+                        (4 >= x) & (x > 0) & A & (current_positions <= env.target[current_player]),
+                        env.goal[current_player, x-1], # move to goal position
+                        fitted_positions
+                    )
+        )
+    )
+    
+    # update pins
+    # pin at new position
+    pin_at_pos = env.board[new_position]
+    # if a player is at the new position and it's not the current player, send that pin back to start area
+    # pins = env.pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
+    pins = jax.lax.cond(
+        (pin_at_pos != -1) & ((pin_at_pos != current_player) | env.rules['enable_friendly_fire']) & ~invalid_action, # if a player was at the new position and it's not the current player and the action is valid
+        lambda p: p.at[pin_at_pos].set(jnp.where(p[pin_at_pos] == new_position, -1, p[pin_at_pos])), # send the pin of that player back to start area
+        lambda p: p,
+        env.pins
+    )
+    #set the moved pin to the new position
+    pins = pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
+
+    board = jax.lax.cond(
+        ~invalid_action,
+        lambda b: set_pins_on_board(-jnp.ones_like(b, dtype=jnp.int8), pins),
+        lambda b: b,
+        env.board
+    )
+    print("Normal move valid:", ~invalid_action)
+    return (board, pins)
+
+def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
+    pin = pin.astype(jnp.int8)
+    move = move.astype(jnp.int8)
+    # currently player ID
+    player_id = env.current_player
+    # ID of the players' pins to be moved (important for teams)
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+    # check if the action is valid
+    invalid_action = ~val_neg_move(env, move)[pin]
+
+    current_positions = env.pins[current_player, pin]
+    moved_positions = current_positions + move
+    fitted_positions = moved_positions % env.board_size
+
+    new_position = fitted_positions
+    
+    # update pins
+    # pin at new position
+    pin_at_pos = env.board[new_position]
+    # if a player is at the new position and it's not the current player, send that pin back to start area
+    # pins = env.pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
+    pins = jax.lax.cond(
+        (pin_at_pos != -1) & ((pin_at_pos != current_player) | env.rules['enable_friendly_fire']) & ~invalid_action, # if a player was at the new position and it's not the current player and the action is valid
+        lambda p: p.at[pin_at_pos].set(jnp.where(p[pin_at_pos] == new_position, -1, p[pin_at_pos])), # send the pin of that player back to start area
+        lambda p: p,
+        env.pins
+    )
+    #set the moved pin to the new position
+    pins = pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
+
+    board = jax.lax.cond(
+        ~invalid_action,
+        lambda b: set_pins_on_board(-jnp.ones_like(b, dtype=jnp.int8), pins),
+        lambda b: b,
+        env.board
+    )
+    print("Backward move valid:", ~invalid_action)
+    return (board, pins)
+
+def step_hot_7(env:DOG, seven_dist):
+    player_id = env.current_player
+    # ID of the players' pins to be moved (important for teams)
+    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+    # check if the action is valid
+    invalid_action = ~jnp.all(val_action_7(env, seven_dist))
+    current_pins = env.pins
+    current_positions = current_pins[current_player]
+    moved_positions = current_positions + seven_dist
+    fitted_positions = moved_positions % env.board_size
+    x = moved_positions - env.target[current_player] - 1 #(start feld muss auch überaufen werden)
+
+    ###########################
+    tmp_pins = env.pins.at[current_player].set(jnp.where(jnp.isin(current_positions, env.goal[current_player]), moved_positions, current_positions))
+    tmp_board = set_pins_on_board(env.board, tmp_pins)
+    a = jax.vmap(
+        lambda pos, xi: jnp.where(
+            jnp.isin(pos, env.goal[current_player]),
+            True,
+            check_goal_path_for_pin(-1, xi, env.goal[current_player], tmp_board, current_player)
+        )
+    )(current_positions, x)
+    A = (env.rules['enable_jump_in_goal_area'] | a) #& (env.board[env.goal[current_player, x-1]] != current_player)
+    new_positions = jnp.where(
+        current_positions == -1,
+        env.start[current_player], # move from start area to starting position
+        jnp.where(jnp.isin(current_positions, env.goal[current_player]),
+                    moved_positions,
+                    jnp.where(
+                        (4 >= x) & (x > 0) & A & (current_positions <= env.target[current_player]),
+                        env.goal[current_player, x-1], # move to goal position
+                        fitted_positions
+                    )
+        )
+    )
+        
+    # update pins
+    # Liste von abgelaufenen Feldern. Jede Figur die in diesen Feldern ist wird zurück geschickt
+    # bei den figuren des aktuellen Spielers muss die alte und neue position abgedeckt werden
+    # Zielbereiche müssen extra behandelt werden
+    pins = current_pins.at[current_player].set(jnp.where(invalid_action, current_pins[current_player], new_positions))
+    hit_paths = calc_paths(current_positions, new_positions, env.goal[current_player], env.target[current_player], env.board_size)
+    hit_pins = jnp.isin(env.pins, hit_paths)
+    curr_pins_hit = prototype(current_positions, new_positions, env.goal[current_player], env.target[current_player], env.board_size)
+    hit_pins = hit_pins.at[current_player].set(curr_pins_hit)
+    # if a player is at the new position and it's not the current player, send that pin back to start area
+    pins = jnp.where(
+        hit_pins & ~invalid_action,
+        pins.at[jnp.where(hit_pins)].set(-1),
+        pins
+    )
+    
+    board = jax.lax.cond(
+        ~invalid_action,
+        lambda b: set_pins_on_board(-jnp.ones_like(b, dtype=jnp.int8), pins),
+        lambda b: b,
+        env.board
+    )
+    print("Hot 7 move valid:", ~invalid_action)
+    return (board, pins)
 
 @jax.jit
 def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
