@@ -383,13 +383,13 @@ def valid_action(env:classic_MADN) -> chex.Array:
     result = (board[fitted_positions] != current_player) | env.rules['enable_friendly_fire'] # check move to any board position
 
     # filter actions where a pin on a start spot would block others
-    distance = env.board_size // num_players_static
+    distance = env.board_size // 4
     nearest_start_before = ((current_pins//distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
     nearest_start_after = fitted_positions//distance
     cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
     result = jnp.where(
         env.rules['enable_start_blocking'] & cond,
-        ~pins_on_start[nearest_start_after] & result, # true if start not blocked and new pos is free
+        (~pins_on_start[nearest_start_after] | (current_pins == start[current_player])) & result, # true if start not blocked and new pos is free
         result
     )
 
@@ -444,7 +444,7 @@ def valid_action(env:classic_MADN) -> chex.Array:
 def encode_board(env: classic_MADN) -> chex.Array:
     num_players = env.num_players
     board = env.board
-    distance = env.board_size // num_players
+    distance = env.board_size // 4
     current_player = env.current_player
     current_pins = env.pins[current_player]
     
