@@ -109,7 +109,14 @@ def env_reset(
 
 def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.Array:
     '''
-    returns winner as jnp.array to support multiple winners in team mode    
+      Überprüft, ob ein Spieler das Spiel beendet hat, indem alle seine Pins im Zielbereich sind.
+        Args:
+            num_players: Anzahl der Spieler im Spiel
+            board: Das aktuelle Spielfeld
+            goal: Die Zielpositionen der Spieler
+            player: Der zu überprüfende Spieler
+        Returns:
+            Ein boolescher Wert, der angibt, ob der Spieler das Spiel beendet hat.
     '''
     return jax.lax.cond(player >= num_players,
                  lambda: False,
@@ -117,6 +124,14 @@ def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.
                  )
 
 def get_winner(env: deterministic_MADN, board: Board) -> chex.Array:
+    '''
+    Bestimmt den Gewinner des Spiels basierend auf dem aktuellen Spielfeld und den Spielregeln.
+        Args:
+            env: Die aktuelle Spielumgebung
+            board: Das aktuelle Spielfeld
+        Returns:
+            Ein Array, das angibt, welche Spieler gewonnen haben.
+    '''
     collect_winners = jax.vmap(is_player_done, in_axes=(None, None, None, 0))
     players_done = collect_winners(env.num_players, board, env.goal, jnp.arange(4, dtype=jnp.int8))  # (4,)
 
@@ -140,6 +155,17 @@ def get_winner(env: deterministic_MADN, board: Board) -> chex.Array:
     return jax.lax.cond(env.rules['enable_teams'], four_players_case, lambda: players_done)
 
 def check_goal_path_for_pin(start, x_val, goal, board, current_player):
+    '''
+    Überprüft, ob der Pfad eines Pins im Zielbereich frei von eigenen Pins ist.
+        Args:
+            start: Startposition des Pins
+            x_val: Zielposition des Pins
+            goal: Zielpositionen des Spielers
+            board: Das aktuelle Spielfeld
+            current_player: Der aktuelle Spieler
+        Returns:
+            Ein boolescher Wert, der angibt, ob der Pfad frei von eigenen Pins ist.
+    '''
     goal_area = jnp.arange(len(goal))[None, :] # shape (1, 4)
 
     return jnp.all(
@@ -152,6 +178,17 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
     )
 
 def check_goal_path_for_pin2(start, x_val, goal, board, current_player):
+    '''
+    Überprüft, ob der Pfad eines Pins im Zielbereich frei von eigenen Pins ist.
+        Args:
+            start: Startposition des Pins
+            x_val: Zielposition des Pins
+            goal: Zielpositionen des Spielers
+            board: Das aktuelle Spielfeld
+            current_player: Der aktuelle Spieler
+        Returns:
+            Ein boolescher Wert, der angibt, ob der Pfad frei von eigenen Pins ist.
+    '''
     goal_area = jnp.arange(len(goal))
     return jnp.all(
             jnp.where(
@@ -161,8 +198,16 @@ def check_goal_path_for_pin2(start, x_val, goal, board, current_player):
             )
         )
 
-# @jax.jit
+@jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
+    '''
+    Führt einen Schritt im MADN-Spiel basierend auf der gegebenen Aktion aus.
+        Args:
+            env: Die aktuelle Spielumgebung
+            action: Die Aktion, die ausgeführt werden soll
+        Returns:
+            Aktualisiertes MADN environment
+    '''
     pin = action[0].astype(jnp.int8)
     move = action[1].astype(jnp.int8) # action is in {1, 2, 3, 4, 5, 6}
     
@@ -250,6 +295,14 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
 
 @jax.jit
 def set_pins_on_board(board, pins):
+    '''
+    Sets the pins on the board based on their positions.
+        Args:
+            board: Das aktuelle Spielfeld
+            pins: Die Positionen der Pins der Spieler
+        Returns:
+            Aktualisiertes Spielfeld mit den Pins gesetzt.
+    '''
     num_players, num_pins = pins.shape
 
     def body(idx, board):
@@ -269,13 +322,21 @@ def set_pins_on_board(board, pins):
 
 def refill_action_set(env:deterministic_MADN) -> chex.Array:
     '''
-    Refills the action set for the current player if all actions are used up.
+    Füllt das Action Set des aktuellen Spielers auf.
+        Args:
+            env: MADN environment 
+        Returns:
+            Aktualisiertes Action Set für den aktuellen Spieler.
     '''
     return env.action_set.at[env.current_player].set(env.pins.shape[1] * jnp.ones(6, dtype=jnp.int8))
 
 def no_step(env:deterministic_MADN) -> deterministic_MADN:
     """
-    No-op step function for the environment.
+    Führt keinen Schritt aus und wechselt zum nächsten Spieler.
+    Args:
+        env: MADN environment
+    Returns:
+        Aktualisiertes MADN environment mit dem nächsten Spieler.
     """
     act_set = refill_action_set(env)
     env = deterministic_MADN(
@@ -295,10 +356,14 @@ def no_step(env:deterministic_MADN) -> deterministic_MADN:
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
-# @jax.jit
+@jax.jit
 def valid_action(env:deterministic_MADN) -> chex.Array:
     '''
-    Returns a mask of shape (4, 6) indicating which actions are valid for each pin of the current player
+    Gibt eine Maske der Form (4, 6) zurück, die angibt, welche Aktionen für jeden Pin des aktuellen Spielers gültig sind.
+        Args:
+            env: MADN environment
+        Returns:
+            Ein Array der Form (4, 6), das angibt, welche Aktionen für jeden Pin des aktuellen Spielers gültig sind.
     '''
     #return valid_action for each pin of the current player
     current_player = env.current_player
@@ -381,6 +446,15 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     return result & valid_actions # filter possible actions with available actions
 
 def encode_board(env: deterministic_MADN) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in eine Form, die von neuronalen Netzwerken verarbeitet werden kann.
+    
+    Args:
+        env: Aktuelle MADN-Umgebung 
+
+    Returns:
+        Ein Array, das die kodierte Spielfelddarstellung enthält.
+    '''
     num_players = env.num_players
     board = env.board
     distance = env.board_size // 4
@@ -410,6 +484,13 @@ def encode_board(env: deterministic_MADN) -> chex.Array:
     return board_encoding
 
 def encode_board_linear(env: deterministic_MADN) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in eine lineare Form, die von neuronalen Netzwerken verarbeitet werden kann.
+        Args:
+            env: Aktuelle MADN-Umgebung 
+        Returns:
+            Ein Array, das die kodierte lineare Spielfelddarstellung enthält.
+    '''
     num_players = env.num_players
     board = env.board
 
@@ -433,13 +514,24 @@ def encode_board_linear(env: deterministic_MADN) -> chex.Array:
 
 def map_action(action_index: chex.Array) -> Action:
     '''
-    Maps an action index (0-23) to an Action (pin, move)
+    Mappt einen Aktionsindex auf eine Aktion im MADN-Spiel.
+        Args:
+            action_index: Index der Aktion
+        Returns:    
+            Die entsprechende Aktion als Array [pin, move].
     '''
     pin = (action_index // 6).astype(jnp.int8)
     move = (action_index % 6 + 1).astype(jnp.int8)
     return jnp.array([pin, move], dtype=jnp.int8)
 
 def winning_action(env:deterministic_MADN) -> chex.Array:
+    '''
+    Gibt eine Maske der Form (4, 6) zurück, die angibt, welche Aktionen für jeden Pin des aktuellen Spielers zum Sieg führen.
+        Args:
+            env: MADN environment
+        Returns:
+            Ein Array der Form (4, 6), das angibt, welche Aktionen für jeden Pin des aktuellen Spielers zum Sieg führen.
+    '''
     env_copy = deterministic_MADN(
         board=env.board,
         num_players=env.num_players,
@@ -461,6 +553,13 @@ def winning_action(env:deterministic_MADN) -> chex.Array:
     return reward == 1
 
 def policy_function(env:deterministic_MADN) -> chex.Array:
+    '''
+    Berechnet die Prior-Logits für alle möglichen Aktionen im MADN-Spiel.
+        Args:
+            env: MADN environment 
+        Returns:
+            Ein Array der Form (24,), das die Prior-Logits für alle möglichen Aktionen enthält
+    '''
     return sum(
         (valid_action(env).flatten().astype(jnp.float32) * 100,
         winning_action(env).astype(jnp.float32) * 200)
@@ -468,7 +567,14 @@ def policy_function(env:deterministic_MADN) -> chex.Array:
 
 @jax.jit
 def rollout(env:deterministic_MADN, rng_key:chex.PRNGKey) -> tuple[deterministic_MADN, chex.PRNGKey]:
-
+    '''
+    Führt eine Simulation (Rollout) im MADN-Spiel durch, bis das Spiel beendet ist oder eine maximale Anzahl von Schritten erreicht ist.
+        Args:
+            env: MADN environment 
+            rng_key: PRNG-Schlüssel für Zufallszahlen
+        Returns:
+            Der Gewinner des Spiels als Array.
+    '''
     def cond(a):
         env, key, steps = a
         return (~env.done) & (steps < 300)
@@ -494,9 +600,25 @@ def rollout(env:deterministic_MADN, rng_key:chex.PRNGKey) -> tuple[deterministic
     return jnp.where(winner == -1, 0.0, jnp.where(winner[root_player], 1.0, -1.0))
 
 def value_function(env:deterministic_MADN, rng_key:chex.PRNGKey) -> chex.Array:
+    '''
+    Berechnet den Wert des aktuellen MADN-Zustands durch eine Simulation (Rollout).
+        Args:
+            env: MADN environment 
+            rng_key: PRNG-Schlüssel für Zufallszahlen
+        Returns:
+            Der Wert des aktuellen Zustands als Float32.
+    '''
     return rollout(env, rng_key).astype(jnp.float32)
 
 def root_fn(env:deterministic_MADN, rng_key:chex.PRNGKey) -> mctx.RootFnOutput:
+    '''
+    Berechnet die Prior-Logits, den Wert und die Einbettung für den Startzustand im MADN-Spiel.
+        Args:
+            env: MADN environment 
+            rng_key: PRNG-Schlüssel für Zufallszahlen
+        Returns:
+            Ein mctx.RootFnOutput-Objekt mit Prior-Logits, Wert und Einbettung.
+    '''
     return mctx.RootFnOutput(
         prior_logits = policy_function(env),
         value=value_function(env, rng_key),
@@ -504,6 +626,16 @@ def root_fn(env:deterministic_MADN, rng_key:chex.PRNGKey) -> mctx.RootFnOutput:
     )
 
 def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
+    '''
+    Führt einen rekurrenten Schritt im MADN-Spiel durch und berechnet die Prior-Logits, den Wert, die Belohnung und den Abbruchstatus.
+        Args:
+            params: Modellparameter (nicht verwendet)
+            rng_key: PRNG-Schlüssel für Zufallszahlen
+            action: Die Aktion, die ausgeführt werden soll
+            embedding: Die aktuelle Einbettung des MADN-Zustands
+        Returns:
+            Ein Tupel aus mctx.RecurrentFnOutput und der aktualisierten Einbettung.
+    '''
     env = embedding
 
     env, reward, done = env_step(env, map_action(action))
@@ -518,6 +650,14 @@ def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
     return recurrent_fn_output, env    
 
 def all_pin_distributions(total=7, num_pins=4):
+    '''
+    Generiert alle möglichen Verteilungen von `total` Pins auf `num_pins` Pins.
+        Args:
+            total: Gesamtanzahl der Pins
+            num_pins: Anzahl der Pins
+        Returns:
+            Ein Array mit allen möglichen Verteilungen der Pins.
+    '''
     # Erzeuge alle möglichen Werte für die ersten drei Pins
     a = jnp.arange(total + 1)
     b = jnp.arange(total + 1)

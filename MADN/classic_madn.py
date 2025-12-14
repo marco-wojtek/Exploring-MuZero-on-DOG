@@ -3,6 +3,9 @@ import jax
 import jax.numpy as jnp
 import mctx
 
+'''
+Wahrscheinlichkeitsverteilungen für den Würfelwurf
+'''
 NORMAL_DICE_DISTRIBUTION = jnp.array([1/6, 1/6, 1/6, 1/6, 1/6, 1/6])
 # Options for soft-locked players and rethrowing dice
 OUT_ON_SIX_DICE_DISTRIBUTION = jnp.array([25/216, 25/216, 25/216, 25/216, 25/216, 91/216])
@@ -117,15 +120,29 @@ def env_reset(
 
 def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.Array:
     '''
-    returns winner as jnp.array to support multiple winners in team mode    
+      Überprüft, ob ein Spieler das Spiel beendet hat, indem alle seine Pins im Zielbereich sind.
+        Args:
+            num_players: Anzahl der Spieler im Spiel
+            board: Das aktuelle Spielfeld
+            goal: Die Zielpositionen der Spieler
+            player: Der zu überprüfende Spieler
+        Returns:
+            Ein boolescher Wert, der angibt, ob der Spieler das Spiel beendet hat.
     '''
-    return jax.lax.cond(
-        player >= num_players,
-        lambda: False,
-        lambda: jnp.all(board[goal[player]] >= 0)
-    )
+    return jax.lax.cond(player >= num_players,
+                 lambda: False,
+                 lambda: jnp.all(board[goal[player]] >= 0)
+                 )
 
 def get_winner(env: classic_MADN, board: Board) -> chex.Array:
+    '''
+    Bestimmt den Gewinner des Spiels basierend auf dem aktuellen Spielfeld und den Spielregeln.
+        Args:
+            env: Die aktuelle Spielumgebung
+            board: Das aktuelle Spielfeld
+        Returns:
+            Ein Array, das angibt, welche Spieler gewonnen haben.
+    '''
     collect_winners = jax.vmap(is_player_done, in_axes=(None, None, None, 0))
     players_done = collect_winners(env.num_players, board, env.goal, jnp.arange(4, dtype=jnp.int8))  # (4,)
 
@@ -150,8 +167,11 @@ def get_winner(env: classic_MADN, board: Board) -> chex.Array:
 
 def is_soft_locked(env: classic_MADN) -> chex.Array:
     '''
-    Checks if the current player is in a soft locked position
-    A soft locked position is defined as having all pins either in the start area or in the goal area and not being able to move any pin out of the start area or within the goal area.
+    Überprüft, ob der aktuelle Spieler soft-locked ist, d.h. alle seine Pins im Zielbereich sind und blockiert werden.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Ein boolescher Wert, der angibt, ob der aktuelle Spieler soft-locked ist
     '''
     current_player = env.current_player
     pins = env.pins[current_player]
@@ -167,6 +187,13 @@ def is_soft_locked(env: classic_MADN) -> chex.Array:
     return locked_condition
 
 def dice_probabilities(env:classic_MADN) -> chex.Array:
+    '''
+    Berechnet die Wahrscheinlichkeitsverteilung für den Würfelwurf basierend auf der aktuellen Regeleinstellungen.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Ein Array mit den Wahrscheinlichkeiten für jeden Würfelwert (1-6)
+    '''
     soft_locked = is_soft_locked(env)
     #print("Soft locked: ", soft_locked)
     a= jax.lax.cond(
@@ -182,6 +209,14 @@ def dice_probabilities(env:classic_MADN) -> chex.Array:
     return a
 
 def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> classic_MADN:
+    '''
+    Simuliert einen Würfelwurf und aktualisiert den Zustand der Umgebung mit dem neuen Würfelwert.
+        Args:
+            env: Die aktuelle Spielumgebung
+            rng_key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:
+            Die aktualisierte Spielumgebung mit dem neuen Würfelwert.
+    '''
     return classic_MADN(
         board=env.board,
         num_players=env.num_players,
@@ -199,6 +234,14 @@ def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> classic_MADN:
     )
 
 def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
+    '''
+    Setzt den Würfelwert im Zustand der Umgebung.
+        Args:
+            env: Die aktuelle Spielumgebung
+            die_value: Der Würfelwert, der gesetzt werden soll
+        Returns:
+            Die aktualisierte Spielumgebung mit dem neuen Würfelwert.
+    '''
     return classic_MADN(
         board=env.board,
         num_players=env.num_players,
@@ -216,14 +259,17 @@ def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
     )
 
 def check_goal_path_for_pin(start, x_val, goal, board, current_player):
-    """Prüft für einen einzelnen Pin ob der Pfad im Goal frei ist
-    Args:
-        start: Position im Ziel, falls Pin im Ziel ist, sonst -1 wenn pin nicht im Ziel Startet
-        x_val: Anzahl der Felder im Ziel die begangen werden sollen
-        goal: Array der Goal Positionen für den aktuellen Spieler
-        board: Aktuelles Spielfeld
-        current_player: Aktueller Spieler
-        """
+    '''
+    Überprüft, ob der Pfad im Zielbereich für einen Pin frei ist.
+        Args:
+            start: Die Startposition des Pins im Zielbereich
+            x_val: Die Zielposition des Pins im Zielbereich
+            goal: Die Zielpositionen der Spieler
+            board: Das aktuelle Spielfeld
+            current_player: Der aktuelle Spieler
+        Returns:
+            Ein boolescher Wert, der angibt, ob der Pfad frei ist.
+    '''
     goal_area = jnp.arange(len(goal))
     return jnp.all(
             jnp.where(
@@ -235,6 +281,14 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
 
 @jax.jit
 def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
+    '''
+    Führt einen Spielzug im MADN-Spiel aus, indem der angegebene Pin des aktuellen Spielers bewegt wird.
+        Args:
+            env: Die aktuelle Spielumgebung
+            pin: Der Index des Pins, der bewegt werden soll
+        Returns:
+            Die aktualisierte Spielumgebung nach dem Zug, die Belohnung für den aktuellen Spieler und ein boolescher Wert, der angibt, ob das Spiel beendet ist.
+    '''
     pin = pin.astype(jnp.int8)
     move = env.die.astype(jnp.int8)
     # currently player ID
@@ -317,12 +371,12 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
 @jax.jit
 def set_pins_on_board(board, pins):
     '''
-    Sets the pins on the board based on their positions.
-    0-3 for player indices, -1 for empty
-    
-    Args:
-        board: jnp.array of shape (total_board_size,)
-        pins: jnp.array of shape (num_players, num_pins)
+    Setzt die Positionen der Pins auf dem Spielfeld basierend auf den Pin-Positionen.
+        Args:
+            board: Das aktuelle Spielfeld
+            pins: Die Positionen der Pins der Spieler
+        Returns:
+            Das aktualisierte Spielfeld mit den Positionen der Pins.
     '''
     num_players, num_pins = pins.shape
 
@@ -342,9 +396,13 @@ def set_pins_on_board(board, pins):
     return board
 
 def no_step(env:classic_MADN) -> classic_MADN:
-    """
-    No-op step function for the environment.
-    """                  
+    '''
+    Führt keinen Spielzug aus und wechselt zum nächsten Spieler.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Die aktualisierte Spielumgebung mit dem nächsten Spieler.
+    '''                 
     env = classic_MADN(
         board=env.board,
         num_players=env.num_players,
@@ -365,7 +423,11 @@ def no_step(env:classic_MADN) -> classic_MADN:
 @jax.jit
 def valid_action(env:classic_MADN) -> chex.Array:
     '''
-    Returns a mask of shape (4, ) indicating which actions are valid for each pin of the current player
+    Gibt eine Maske der Form (4, ) zurück, die angibt, welche Aktionen für jeden Pin des aktuellen Spielers gültig sind.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Ein Array der Form (4, ), das angibt, welche Aktionen für jeden Pin des aktuellen Spielers gültig sind.
     '''
     #return valid_action for each pin of the current player
     current_player = env.current_player
@@ -450,6 +512,13 @@ def valid_action(env:classic_MADN) -> chex.Array:
 
 
 def encode_board(env: classic_MADN) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in ein Feature-Array für die Eingabe in ein neuronales Netzwerk.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Ein Array mit den kodierten Spielfeld-Features.
+    '''
     num_players = env.num_players
     board = env.board
     distance = env.board_size // 4
@@ -486,6 +555,14 @@ def encode_board(env: classic_MADN) -> chex.Array:
     return board_encoding
 
 def encode_board_linear(env: classic_MADN) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in ein lineares Feature-Array für die Eingabe in ein
+    neuronales Netzwerk.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Ein Array mit den kodierten Spielfeld-Features.
+    '''
     num_players = env.num_players
     board = env.board
 
@@ -510,13 +587,25 @@ def encode_board_linear(env: classic_MADN) -> chex.Array:
 
 def map_action(env:classic_MADN, board_position: chex.Array) -> Action:
     '''
-    Returns the pin index (0-3) corresponding to the board position
+    Mappt eine Board-Position zu einer Pin-Aktion für den aktuellen Spieler.
+        Args:
+            env: Die aktuelle Spielumgebung
+            board_position: Die Board-Position, die gemappt werden soll
+        Returns:
+            Die Pin-Aktion, die der Board-Position entspricht.
     '''
     pins = env.pins[env.current_player]
     pin_index = jnp.argwhere(pins == board_position)
     return pin_index[0][0]
 
 def winning_action(env:classic_MADN) -> chex.Array:
+    '''
+    Gibt eine Maske der Form (4, ) zurück, die angibt, welche Aktionen für jeden Pin des aktuellen Spielers zum Sieg führen.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Ein Array der Form (4, ), das angibt, welche Aktionen für jeden Pin des aktuellen Spielers zum Sieg führen.
+    '''
     env_copy = classic_MADN(
         board=env.board,
         num_players=env.num_players,
@@ -538,6 +627,13 @@ def winning_action(env:classic_MADN) -> chex.Array:
     return reward == 1
 
 def policy_function(env:classic_MADN) -> chex.Array:
+    '''
+    Berechnet die Aktionslogits für den aktuellen Zustand der Umgebung.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Ein Array mit den Aktionslogits für jeden Pin des aktuellen Spielers.
+    '''
     return sum(
         (valid_action(env).flatten().astype(jnp.float32) * 100,
         winning_action(env).astype(jnp.float32) * 200)
@@ -545,6 +641,14 @@ def policy_function(env:classic_MADN) -> chex.Array:
 
 @jax.jit
 def rollout(env:classic_MADN, rng_key:chex.PRNGKey) -> tuple[classic_MADN, chex.PRNGKey]:
+    '''
+    Führt eine Rollout-Simulation im MADN-Spiel durch, um den Wert des aktuellen Zustands zu schätzen.
+        Args:
+            env: Die aktuelle Spielumgebung
+            rng_key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:    
+            Der geschätzte Wert des aktuellen Zustands.
+    '''
 
     def cond(a):
         env, key, steps = a
@@ -571,12 +675,27 @@ def rollout(env:classic_MADN, rng_key:chex.PRNGKey) -> tuple[classic_MADN, chex.
     return jnp.where(winner == -1, 0.0, jnp.where(winner[root_player], 1.0, -1.0))
 
 def value_function(env:classic_MADN, rng_key:chex.PRNGKey) -> chex.Array:
+    '''
+    Schätzt den Wert des aktuellen Zustands der Umgebung durch Rollout-Simulationen.
+        Args:
+            env: Die aktuelle Spielumgebung
+            rng_key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:
+            Der geschätzte Wert des aktuellen Zustands.
+    '''
     return rollout(env, rng_key).astype(jnp.float32)
 
 def recurrent_chance_fn(params, rng_key, chance_outcome, afterstate: classic_MADN):
-    """
-    Chance node: Würfelwurf simulieren, für jeden Würfelwert einen neuen Zustand erzeugen.
-    """
+    '''
+    Simuliert einen Würfelwurf als Chance-Knoten im MCTS.
+        Args:
+            params: Die Parameter des Modells (nicht verwendet)
+            rng_key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+            chance_outcome: Der Würfelwert (0-5)
+            afterstate: Der Zustand nach der Spieleraktion, aber vor dem Würfelwurf
+        Returns:
+            Ein Tuple mit den Aktionslogits, dem Zustandswert, der Belohnung und dem Discount-Faktor sowie dem neuen Zustand der Umgebung.
+    '''
     dice_value = chance_outcome + 1  # Konvertiere 0-5 zu 1-6
     
     # Setze den Würfelwert im Afterstate
@@ -597,9 +716,17 @@ def recurrent_chance_fn(params, rng_key, chance_outcome, afterstate: classic_MAD
 
 # Angepasste recurrent_fn ohne Würfelwurf
 def recurrent_fn(params, rng_key, action: Action, embedding: classic_MADN):
-    """
-    Recurrent function - führt nur die Spieleraktion aus, kein Würfelwurf
-    """
+    '''
+    Recurrent function für MCTS - Zustand nach einer Aktion, aber vor dem nächsten Würfelwurf
+    ändert den Zustand basierend auf der Aktion (Pin-Bewegung)
+    Args:
+        params: Modellparameter (nicht verwendet)
+        rng_key: Zufallsschlüssel für JAX
+        action: Aktion (Pin-Index)
+        embedding: Aktueller Zustand der Umgebung (classic_MADN)
+    Returns:
+        Ein Tuple mit den Chance-Logits, dem Afterstate-Wert und dem neuen Zustand der Umgebung.
+    '''
     env = embedding
     
     # Prüfe ob gültige Aktionen verfügbar sind
@@ -623,9 +750,14 @@ def recurrent_fn(params, rng_key, action: Action, embedding: classic_MADN):
 
 # Root function anpassen
 def root_fn(env: classic_MADN, rng_key: chex.PRNGKey) -> mctx.RootFnOutput:
-    """
-    Root function für MCTS - Startzustand ohne Würfelwurf
-    """
+    '''
+    Root function für MCTS - Zustand vor der Aktion und dem Würfelwurf
+    Args:
+        env: Aktueller Zustand der Umgebung (classic_MADN)
+        rng_key: Zufallsschlüssel für JAX
+    Returns:
+        Ein Tuple mit den Prior-Logits, dem Root-Wert und dem aktuellen Zustand der
+    '''
 
     # if env.die <= 0:
     #     # Keine Aktionen möglich ohne Würfelwert
@@ -640,6 +772,14 @@ def root_fn(env: classic_MADN, rng_key: chex.PRNGKey) -> mctx.RootFnOutput:
     )
 
 def all_pin_distributions(total=7, num_pins=4):
+    '''
+    Generiert alle möglichen Verteilungen von `total` Einheiten auf `num_pins` Pins.
+        Args:
+            total: Die Gesamtanzahl der Einheiten, die verteilt werden sollen
+            num_pins: Die Anzahl der Pins, auf die die Einheiten verteilt werden sollen
+        Returns:
+            Ein Array mit allen möglichen Verteilungen der Einheiten auf die Pins.
+    '''
     # Erzeuge alle möglichen Werte für die ersten drei Pins
     a = jnp.arange(total + 1)
     b = jnp.arange(total + 1)

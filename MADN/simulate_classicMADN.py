@@ -7,6 +7,14 @@ import time, sys, os
 
 
 def simulate_game(env, key):
+    '''
+    Simuliert ein Spiel und gibt den Spielverlauf aus
+        Args:
+            env: Die Spielumgebung
+            key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung  
+        Returns:
+            None
+    '''
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     while not env.done:
@@ -39,9 +47,15 @@ def simulate_game(env, key):
 
 @functools.partial(jax.jit, static_argnums=(2,))
 def run_mcts_search(env: classic_MADN, rng_key: chex.PRNGKey, num_simulations: int = 100):
-    """
-    Führt MCTS Suche mit stochastic MuZero aus
-    """
+    '''
+    Führt eine MCTS-Suche im MADN-Spiel durch.
+        Args:
+            env: Die aktuelle Spielumgebung
+            rng_key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+            num_simulations: Die Anzahl der MCTS-Simulationen
+        Returns:
+            Die Ausgabe der MCTS-Politik, einschließlich Aktionsgewichte.
+    '''
     batch_size = 1
     key1, key2 = jax.random.split(rng_key)
     # MCTS Policy mit chance function
@@ -60,6 +74,11 @@ def run_mcts_search(env: classic_MADN, rng_key: chex.PRNGKey, num_simulations: i
     return mcts_policy
 
 def madn_mcts_example():
+    '''
+    Führt ein Beispiel für eine MCTS-Suche im MADN-Spiel durch.
+        Returns:
+            Die gewählte Aktion und die Aktionsgewichte aus der MCTS-Suche.
+    '''
     rng_key = jax.random.PRNGKey(1)
     env = env_reset(0, num_players=2, distance=10, enable_circular_board=False)
     pins = jnp.array([[3,2,6,18],
@@ -88,6 +107,14 @@ def madn_mcts_example():
 
 # print(madn_mcts_example())
 def step(env, key):
+    '''
+    Führt einen Schritt im MADN-Spiel aus und gibt den neuen Zustand zurück.
+        Args:
+            env: Die aktuelle Spielumgebung
+            key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:
+            Der neue Zustand der Spielumgebung nach dem Schritt.
+    '''
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     print("Current player: ", env.current_player)
@@ -110,8 +137,15 @@ def step(env, key):
         env, reward, done = env_step(env, chosen)
     return env
 
-
 def get_trajectory(env, key):
+    '''
+    Generiert eine Trajektorie eines Spiels im MADN-Umfeld.
+        Args:
+            env: Die aktuelle Spielumgebung
+            key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:
+            Der Endzustand der Spielumgebung, die Spieler, Aktionen, Trajektorie und Würfelergebnisse.
+    '''
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     trajectory = [board_to_matrix(env)]
@@ -140,6 +174,14 @@ def get_trajectory(env, key):
     return env, player, action, trajectory, dices
 
 def get_game(env, key):
+    '''
+    Generiert ein Spiel im MADN-Umfeld.
+        Args:
+            env: Die aktuelle Spielumgebung
+            key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:
+            Der Endzustand der Spielumgebung, die Spieler, Aktionen, Pins und Würfelergebnisse.
+    '''
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     dices = []
@@ -170,6 +212,15 @@ def get_game(env, key):
     return env, player, action, pins, dices
 
 def save_games(num_games=100, filename="madn_trajectories.txt", show_progress=True):
+    '''
+    Speichert mehrere Spiele im MADN-Umfeld in einer Datei.
+        Args:
+            num_games: Die Anzahl der zu simulierenden Spiele
+            filename: Der Name der Datei, in der die Spiele gespeichert werden sollen
+            show_progress: Ob der Fortschritt angezeigt werden soll
+        Returns:
+            None
+    '''
     with open(filename, "w") as f:
         for game_idx in range(num_games):
             env = env_reset(0, num_players=4, distance=10, 
@@ -199,7 +250,13 @@ if __name__ == "__main__":
     save_games(num_games=10, filename="team_simulation.txt", show_progress=True)
 
 def simulate_games_fast(num_games=100):
-    ''' Simuliert ein Spiel ohne Ausgabe '''
+    '''
+    Simuliert mehrere Spiele im MADN-Umfeld und gibt die Gewinner zurück.
+        Args:
+            num_games: Die Anzahl der zu simulierenden Spiele
+        Returns:
+            Ein Array mit den Gewinnern der Spiele.
+    '''
     winners = jnp.full((num_games,), -1)
     def simulate_single_game(game_idx, winners):
         env = env_reset(game_idx, num_players=4, distance=10, 

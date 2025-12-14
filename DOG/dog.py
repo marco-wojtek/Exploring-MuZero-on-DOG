@@ -5,8 +5,7 @@ import mctx
 
 def get_all_paths_compact(start, end, N):
     """
-    Berechnet alle Pfadpositionen zwischen start und end Positionen.
-    Bei gegebenem N wird modulo N gerechnet für Rundbretter.
+    Berechnet alle Pfadpositionen zwischen start und end Positionen für mehrere Pins gleichzeitig.
     
     Args:
         start: Array der Startpositionen
@@ -39,7 +38,8 @@ def get_all_paths_compact(start, end, N):
 
 def calc_paths(start, end, goal, target, N):
     '''
-    Berechnet alle Pfadpositionen für Pins, die sich von start zu end bewegen.
+    Berechnet alle Pfadpositionen zwischen start und end Positionen. 
+    Bei Übergang ins Goal wird der Pfad bis zum Target berechnet und anschließend alle Goal-Positionen hinzugefügt.
     
     Args:
         start: (4,) Array der Startpositionen
@@ -82,11 +82,13 @@ def calc_paths(start, end, goal, target, N):
 
 def prototype(start, end, goal, target, N):
     '''
-    start: (4,) Array der Startpositionen
-    end: (4,) Array der Endpositionen
-    goal: (4,) Array der Goal-Positionen
-    target: int Target-Position (Eingang zum Goal-Bereich)
-    N: int Board-Größe
+    Prototype-Funktion zur Validierung der Pfadberechnung.
+    Args:
+        start: (4,) Array der Startpositionen
+        end: (4,) Array der Endpositionen  
+        goal: (4,) Array der Goal-Positionen
+        target: int Target-Position (Eingang zum Goal-Bereich)
+        N: int Board-Größe
     '''
     x = jnp.array([start, end])
     A = jnp.isin(start, goal)  # start in goal
@@ -114,6 +116,11 @@ def prototype(start, end, goal, target, N):
     return jnp.array([a,b,c,d])
 
 def all_pin_distributions(total=7):
+    '''
+    Erzeugt alle möglichen Verteilungen von `total` Pins auf 4 Pins (a0, a1, a2, a3).
+    Returns:
+        Ein Array der Form (num_distributions, 4) mit allen möglichen Verteilungen.
+    '''
     # Erzeuge alle möglichen Werte für die ersten drei Pins
     a = jnp.arange(total + 1)
     b = jnp.arange(total + 1)
@@ -130,9 +137,23 @@ def all_pin_distributions(total=7):
 DISTS_7_4 = all_pin_distributions(7)  # (120,4), lex nach a0,a1,a2
 
 def index_to_dist(idx: int) -> jnp.ndarray:
+    '''
+    Wandelt einen Index in die entsprechende Pin-Verteilung um.
+    Args:
+        idx: Index der Verteilung
+    Returns:
+        Ein Array der Form (4,) mit der Pin-Verteilung.
+    '''
     return DISTS_7_4[idx]  # (4,)
 
 def dist_to_index(dist: jnp.ndarray):
+    '''
+    Wandelt eine Pin-Verteilung in den entsprechenden Index um.
+    Args:
+        dist: Ein Array der Form (4,) mit der Pin-Verteilung.
+    Returns:
+        Der Index der Verteilung.
+    '''
     # JAX-kompatibel: lineare Suche über konstante Tabelle
     mask = jnp.all(DISTS_7_4 == dist[None, :], axis=1)
     return jnp.int32(jnp.argmax(mask)) 
@@ -254,11 +275,25 @@ def env_reset(
     )
 
 def distribute_cards(env: DOG, quantity: int):
+    '''
+    Distributes `quantity` cards to each player's hand from the deck.
+    Args:
+        env: DOG environment
+        quantity: Number of cards to distribute to each player
+
+    '''
     pass
 
 def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.Array:
     '''
-    returns winner as jnp.array to support multiple winners in team mode    
+    Prüft ob ein Spieler fertig ist (alle Pins im Goal).
+    Args:
+        num_players: Anzahl der Spieler im Spiel
+        board: Aktuelles Spielfeld
+        goal: Array der Goal Positionen für alle Spieler
+        player: Spielerindex der geprüft werden soll
+    Returns:
+        Boolean, ob der Spieler fertig ist
     '''
     return jax.lax.cond(
         player >= num_players,
@@ -267,6 +302,14 @@ def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.
     )
 
 def get_winner(env: DOG, board: Board) -> chex.Array:
+    '''
+    Bestimmt die Gewinner des Spiels basierend auf dem aktuellen Board-Zustand.
+    Args:
+        env: DOG environment
+        board: Aktuelles Spielfeld
+    Returns:
+        Ein boolean-Array der Form (4,), das für jeden Spieler angibt, ob er gewonnen hat.
+    '''
     collect_winners = jax.vmap(is_player_done, in_axes=(None, None, None, 0))
     players_done = collect_winners(env.num_players, board, env.goal, jnp.arange(4, dtype=jnp.int8))  # (4,)
 
@@ -285,11 +328,18 @@ def get_winner(env: DOG, board: Board) -> chex.Array:
                 lambda: jnp.array([True, False, True, False], dtype=jnp.bool_)   # [1, 3]
             )
         )
-
-
     return jax.lax.cond(env.rules['enable_teams'], four_players_case, lambda: players_done)
+
 @jax.jit
 def set_pins_on_board(board, pins):
+    '''
+    Setzt die Pins auf dem Spielfeld.
+    Args:
+        board: Aktuelles Spielfeld
+        pins: Array der Pin-Positionen für alle Spieler
+    Returns:
+        Aktualisiertes Spielfeld mit gesetzten Pins
+    '''
     num_players, num_pins = pins.shape
 
     def body(idx, board):
@@ -308,14 +358,17 @@ def set_pins_on_board(board, pins):
     return board
 
 def check_goal_path_for_pin(start, x_val, goal, board, current_player):
-    """Prüft für einen einzelnen Pin ob der Pfad im Goal frei ist
+    """
+    Prüft, ob der Pfad eines Pins im Zielbereich frei von eigenen Pins ist.
     Args:
-        start: Position im Ziel, falls Pin im Ziel ist, sonst -1 wenn pin nicht im Ziel Startet
-        x_val: Anzahl der Felder im Ziel die begangen werden sollen
-        goal: Array der Goal Positionen für den aktuellen Spieler
-        board: Aktuelles Spielfeld
-        current_player: Aktueller Spieler
-        """
+        start: Startposition des Pins im Zielbereich.
+        x_val: Zielposition des Pins im Zielbereich.
+        goal: Array der Goal-Positionen für den aktuellen Spieler.
+        board: Aktuelles Spielfeld.
+        current_player: Index des aktuellen Spielers.
+    Returns:
+        Boolean, ob der Pfad frei von eigenen Pins ist.
+    """
     goal_area = jnp.arange(len(goal))
 
     return jnp.all(
@@ -379,6 +432,13 @@ def check_relative_order_preserved(old_pos: jnp.ndarray, new_pos: jnp.ndarray, b
 # returns a boolean array indicating valid swap positions
 # @jax.jit
 def val_swap(env):
+    '''
+    Gibt eine Maske zurück, die gültige Swap-Positionen für den aktuellen Spieler angibt.
+    Args:
+        env: DOG environment
+    Returns:
+        Ein boolean-Array der Form (board_size, ), das für jede Position angibt, ob sie für einen Swap gültig ist.
+    '''
     player_id = env.current_player
     current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
     Num_players = env.num_players
@@ -405,7 +465,13 @@ def val_swap(env):
 @jax.jit
 def val_action_7(env:DOG, seven_dist) -> chex.Array:
     '''
-    Returns a mask of shape (4, ) indicating which actions are valid for each pin of the current player
+    Gibt eine Maske zurück, die gültige Aktionen für die 7 Aktion des aktuellen Spielers angibt.
+
+    Args:
+        env: DOG environment
+        seven_dist: Die Distanz, die mit der 7 Aktion bewegt werden soll (1-7)
+    Returns:
+        Ein boolean-Array der Form (4,), das für jeden Pin angibt, ob die 7 Aktion gültig ist.
 
     Die 7 Aktion ist ein Sonderfall. Normalerweise können Figuren im Ziel nicht geschlagen werden. Wenn aber die Regel, dass im 
     Ziel übersrungen werden darf, aktiviert ist, kann eine Figur im Ziel übersprungen werden und somit auch durch die 7 geschlagen werden.
@@ -488,6 +554,14 @@ def val_action_7(env:DOG, seven_dist) -> chex.Array:
 
 @jax.jit
 def val_action_normal_move(env:DOG, move: int):
+    '''
+    Gibt eine Maske zurück, die gültige Aktionen für eine normale Bewegung des aktuellen Spielers angibt.
+    Args:
+        env: DOG environment
+        move: Die Distanz, die bewegt werden soll
+    Returns:
+        Ein boolean-Array der Form (4,), das für jeden Pin angibt, ob die Aktion gültig ist.
+    '''
     player_id = env.current_player
     current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
     current_pins = env.pins[current_player]
@@ -564,6 +638,14 @@ def val_action_normal_move(env:DOG, move: int):
     return result
 @jax.jit
 def val_neg_move(env:DOG, move:int):
+    '''
+    Gibt eine Maske zurück, die gültige Aktionen für eine negative Bewegung des aktuellen Spielers angibt.
+    Args:
+        env: DOG environment
+        move: Die negative Distanz, die bewegt werden soll
+    Returns:
+        Ein boolean-Array der Form (4,), das für jeden Pin angibt, ob die Aktion gültig ist.
+    '''
     player_id = env.current_player
     current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
     current_pins = env.pins[current_player]
@@ -606,8 +688,11 @@ def val_neg_move(env:DOG, move:int):
 @jax.jit
 def valid_actions(env: DOG) -> chex.Array:
     """
-    Returns a boolean array indicating valid actions for the current player.
-    An action is valid if the corresponding card is present in the player's hand.
+    Gibt eine Maske zurück, die alle gültigen Aktionen für den aktuellen Spieler angibt. Berücksichtigt alle valid_action functions.
+    Args:
+        env: DOG environment
+    Returns:
+        Ein boolean-Array der Form (num_total_actions,), das für jede Aktion angibt, ob sie gültig ist.
     """
     current_player = env.current_player
     current_pins = env.pins[current_player]
@@ -633,7 +718,12 @@ def valid_actions(env: DOG) -> chex.Array:
 
 def map_action_to_card(action: Action, env: DOG) -> Card:
     """
-    Maps an action index to a card value based on the current player's hand.
+    Maps a given action index to the corresponding card in the current player's hand.
+    Args:
+        action: The action index to map.
+        env: DOG environment
+    Returns:
+        The card corresponding to the given action index.
     """
     hand = env.hands[env.current_player]
     card_indices = jnp.where(hand > 0, jnp.arange(len(hand)), -1)
@@ -643,8 +733,11 @@ def map_action_to_card(action: Action, env: DOG) -> Card:
 
 def no_step(env:DOG) ->  DOG:
     """
-    No-op step function for the environment.
-    On no step the hand of the current player is emptied and the turn passes to the next player.
+    Führt keinen Schritt aus und setzt die Hand des aktuellen Spielers auf leer.
+    Args:
+        env: DOG environment
+    Returns:
+        Aktualisiertes DOG environment mit leerer Hand für den aktuellen Spieler.
     """               
     hand_cards = jnp.sum(env.hands, axis=1) 
     def body(i, pnext):
@@ -672,6 +765,15 @@ def no_step(env:DOG) ->  DOG:
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
 def step_swap(env, pin_idx, swap_pos):
+    '''
+    Führt einen Swap-Schritt im DOG-Spiel aus.
+    Args:
+        env: DOG environment
+        pin_idx: Index des Pins des aktuellen Spielers, der getauscht werden soll
+        swap_pos: Position auf dem Spielfeld, mit der getauscht werden soll
+    Returns:
+        Aktualisiertes Spielfeld und Pin-Positionen nach dem Swap
+    '''
     player_id = env.current_player
     current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
     invalid_action = ~val_swap(env)[pin_idx, swap_pos]
@@ -691,6 +793,15 @@ def step_swap(env, pin_idx, swap_pos):
     )
 
 def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
+    '''
+    Führt einen normalen Bewegungsschritt im DOG-Spiel aus.
+    Args:
+        env: DOG environment
+        pin: Index des Pins des aktuellen Spielers, der bewegt werden soll
+        move: Die Distanz, die bewegt werden soll
+    Returns:
+        Aktualisiertes Spielfeld und Pin-Positionen nach der Bewegung
+    '''
     pin = pin.astype(jnp.int8)
     move = move.astype(jnp.int8)
     # currently player ID
@@ -749,6 +860,15 @@ def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
     return (board, pins)
 
 def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
+    '''
+    Führt einen negativen Bewegungsschritt im DOG-Spiel aus.
+    Args:
+        env: DOG environment
+        pin: Index des Pins des aktuellen Spielers, der bewegt werden soll
+        move: Die negative Distanz, die bewegt werden soll
+    Returns:
+        Aktualisiertes Spielfeld und Pin-Positionen nach der Bewegung
+    '''
     pin = pin.astype(jnp.int8)
     move = move.astype(jnp.int8)
     # currently player ID
@@ -788,6 +908,14 @@ def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
     return (board, pins)
 
 def step_hot_7(env:DOG, seven_dist):
+    '''
+    Führt einen Hot 7 Bewegungsschritt im DOG-Spiel aus.
+    Args:
+        env: DOG environment
+        seven_dist: Die Distanz, die mit der 7 Aktion bewegt werden soll (1-7)
+    Returns:
+        Aktualisiertes Spielfeld und Pin-Positionen nach der Bewegung
+    '''
     player_id = env.current_player
     # ID of the players' pins to be moved (important for teams)
     current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
@@ -851,8 +979,12 @@ def step_hot_7(env:DOG, seven_dist):
 @jax.jit
 def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
     """
-    Placeholder step function for the environment.
-    Currently implements a no-op step that just passes the turn to the next player.
+    Führt einen Schritt im DOG-Spiel basierend auf der gegebenen Aktion aus.
+    Args:
+        env: DOG environment
+        action: Die Aktion, die ausgeführt werden soll
+    Returns:
+        Aktualisiertes DOG environment, Belohnung und Done-Status
     """               
     # WICHTIG: Wenn dog gespielt wird, muss man über das startfeld ins Ziel gehen, ohne darauf loszugehen. 
     # target ist das feld vor dem startfeld.

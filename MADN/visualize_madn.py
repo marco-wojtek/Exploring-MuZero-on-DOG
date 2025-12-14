@@ -3,6 +3,13 @@ import jax.numpy as jnp
 import sys, os, time
 
 def board_to_matrix(env):
+    '''
+    Wandelt das Brett der MADN-Umgebung in eine Matrix-Darstellung um.
+        Args:
+            env: Die aktuelle Spielumgebung
+        Returns:
+            Eine Matrix-Darstellung des Brettes.
+    '''
     board = env.board
     num_players = int(env.num_players)
     n = int(env.board_size // num_players)
@@ -58,6 +65,14 @@ def board_to_matrix(env):
     return board_matrix
 
 def replace_rows_simple(x, y):
+    '''
+    Ersetzt Zeilen in y basierend auf dem Booleschen Array x.
+        Args:
+            x: Ein Boolesches Array der Form (4,), das angibt, welche Zeilen ersetzt werden sollen
+            y: Eine Matrix der Form (4, m), aus der die Zeilen entnommen werden
+        Returns:
+            Eine Matrix der Form (4, m), in der die Zeilen entsprechend ersetzt wurden.
+    '''
     base_matrix = -jnp.ones_like(y, dtype=jnp.int32)
     
     # Zähle kumulative True-Werte für y-Indexierung
@@ -74,6 +89,14 @@ def replace_rows_simple(x, y):
     return jax.vmap(get_row)(jnp.arange(4))
 
 def board_to_mat(env, layout):
+    '''
+    Wandelt das Brett der MADN-Umgebung in eine Matrix-Darstellung um, basierend auf dem Layout.
+        Args:
+            env: Die aktuelle Spielumgebung
+            layout: Ein Boolesches Array der Form (4,), das angibt, welche Spieler im Spiel sind   
+        Returns:
+            Eine Matrix-Darstellung des Brettes.
+    '''
     board = env.board
     num_players = int(env.num_players)
     n = int(env.board_size // 4)
@@ -117,6 +140,13 @@ def board_to_mat(env, layout):
     return board_matrix
 
 def matrix_to_string(matrix):
+    '''
+    Wandelt eine Matrix-Darstellung des MADN-Bretts in einen String um.
+        Args:
+            matrix: Eine Matrix-Darstellung des Brettes
+        Returns:
+            Ein String, der die Matrix darstellt.
+    '''
     str_repr = ""
     pin_rep = ["♠", "♥", "♦", "♣"]
     pin_colors = ["\033[94m", "\033[91m", "\033[93m", "\033[92m", "\033[90m"]
@@ -141,6 +171,14 @@ def matrix_to_string(matrix):
     return str_repr
 
 def animate_terminal(matrices, delay=0.25):
+    '''
+    Animiert eine Sequenz von Matrix-Darstellungen des MADN-Bretts im Terminal.
+        Args:
+            matrices: Eine Liste von Matrix-Darstellungen des Brettes
+            delay: Die Verzögerung zwischen den Frames in Sekunden
+        Returns:
+            None
+    '''
     for M in matrices:
         s = matrix_to_string(M) # Clear + Home
         sys.stdout.write(s)
@@ -149,6 +187,16 @@ def animate_terminal(matrices, delay=0.25):
         os.system('cls')
 
 def matrices_to_gif(matrices, path="madn_run.gif", scale=32):
+    '''
+    Erstellt ein GIF aus einer Sequenz von Matrix-Darstellungen des MADN-Bretts.
+        Args:
+            matrices: Eine Liste von Matrix-Darstellungen des Brettes
+            path: Der Pfad, unter dem das GIF gespeichert wird
+            scale: Die Skalierung der einzelnen Zellen im GIF
+        
+        Returns:
+            Der Pfad zum gespeicherten GIF.
+    '''
     from PIL import Image
     color_map = {
         -1: (240,240,240),  # leeres Feld

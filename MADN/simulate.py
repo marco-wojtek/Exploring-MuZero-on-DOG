@@ -8,6 +8,15 @@ from visualize_madn import board_to_matrix, matrix_to_string
 
 @functools.partial(jax.jit, static_argnums=(2,))
 def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int):
+    '''
+    Führt eine MCTS-Suche mit Gumbel MuZero im MADN-Spiel durch.
+        Args:
+            rng_key: Der Zufallsschlüssel für die JAX-Zufallszahlengener
+            env: Die aktuelle Spielumgebung
+            num_simulations: Die Anzahl der MCTS-Simulationen
+        Returns:
+            Die Ausgabe der MCTS-Politik, einschließlich Aktionsgewichte.
+    '''
     batch_size = 1
     key1, key2 = jax.random.split(rng_key)
     policy_output = mctx.gumbel_muzero_policy(
@@ -23,6 +32,14 @@ def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int
     return policy_output
 
 def simulate_game(env, key):
+    '''
+    Simuliert ein Spiel im MADN-Umfeld.
+        Args:
+            env: Die aktuelle Spielumgebung
+            key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:
+            None
+    '''
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     while not env.done:
@@ -53,6 +70,15 @@ def simulate_game(env, key):
     print("Final pins:\n", env.pins)
 
 def simulate_mcts_game(env, key, iterations = 500):
+    '''
+    Simuliert ein Spiel im MADN-Umfeld mit MCTS.
+        Args:
+            env: Die aktuelle Spielumgebung
+            key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+            iterations: Die Anzahl der MCTS-Simulationen pro Zug
+        Returns:
+            None
+    '''
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     while not env.done:
@@ -212,6 +238,14 @@ _   _   _   _
 # print(matrix_to_string(board_to_matrix(env)))
 
 def simulate_game_with_visualization(env, key):
+    '''
+    Simuliert ein Spiel im MADN-Umfeld mit visueller Ausgabe.
+        Args:
+            env: Die aktuelle Spielumgebung
+            key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
+        Returns:
+            None
+    '''
     rng_key = jax.random.PRNGKey(key)
     steps = 0
     while not env.done:
