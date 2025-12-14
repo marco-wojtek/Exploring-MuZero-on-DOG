@@ -429,7 +429,7 @@ def valid_action(env:classic_MADN) -> chex.Array:
     start_moves = jax.lax.cond(
         env.rules['enable_start_on_1'],
         lambda: jnp.array([1, 6]),
-        lambda: jnp.array([-1, 6]) # only move out with 1
+        lambda: jnp.array([-1, 6])
     )
     result = jnp.where(
         (current_pins == -1),
