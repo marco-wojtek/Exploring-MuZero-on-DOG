@@ -316,6 +316,14 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
 
 @jax.jit
 def set_pins_on_board(board, pins):
+    '''
+    Sets the pins on the board based on their positions.
+    0-3 for player indices, -1 for empty
+    
+    Args:
+        board: jnp.array of shape (total_board_size,)
+        pins: jnp.array of shape (num_players, num_pins)
+    '''
     num_players, num_pins = pins.shape
 
     def body(idx, board):

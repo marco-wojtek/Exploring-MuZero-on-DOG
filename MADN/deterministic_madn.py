@@ -161,7 +161,7 @@ def check_goal_path_for_pin2(start, x_val, goal, board, current_player):
             )
         )
 
-@jax.jit
+# @jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     pin = action[0].astype(jnp.int8)
     move = action[1].astype(jnp.int8) # action is in {1, 2, 3, 4, 5, 6}
@@ -295,7 +295,7 @@ def no_step(env:deterministic_MADN) -> deterministic_MADN:
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
-@jax.jit
+# @jax.jit
 def valid_action(env:deterministic_MADN) -> chex.Array:
     '''
     Returns a mask of shape (4, 6) indicating which actions are valid for each pin of the current player
@@ -330,7 +330,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
     result = jnp.where(
         env.rules['enable_start_blocking'] & cond,
-        (~pins_on_start[nearest_start_after] | (current_pins == start[current_player])) & result,
+        (~pins_on_start[nearest_start_after] | (current_pins == start[current_player])[:, None]) & result,
         result
     )
 

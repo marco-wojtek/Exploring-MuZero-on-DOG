@@ -1,73 +1,665 @@
-"""
-Tests for deterministic MADN implementation.
-Covers various move scenarios to ensure correctness of game logic.
-"""
-import pytest
 import jax
 import jax.numpy as jnp
-from deterministic_madn import *
+import classic_madn as cm
+import deterministic_madn as dm
+import pytest
 
-'''
-Every move must also test:
-- updating the board state correctly
-    - new board positions
-    - removing hit opponent pins
-    - old board position of moved pins
-- updating the pin positions correctly
-    - new pin positions
-    - removing hit opponent pins
-    - old pin positions of moved pins
-- updating the action set correctly
-- handling turn changes correctly
-- detecting win conditions correctly
-'''
+@pytest.mark.parametrize(
+    "pins, player, pin, move, rules, expected_valid",
+    [
+      # Testfall 1: Figur aus start holen mit Zug 6, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(2),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])),
+      # Testfall 2: Figur aus start holen mit Zug 1, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': True},
+        jnp.array([[-1, 0, -1, -1], [6, 14, 44, -1]])),
+      # Testfall 3: Figur aus start holen mit Zug 1, nicht erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]])),
+      # Testfall 4: Figur aus start holen mit Zug 6 Spieler 1, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, 10]])),
+      # Testfall 5: Figur aus start holen mit Zug 1 Spieler 1, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': True},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, 10]])),
+        # Testfall 6: Figur aus start holen mit Zug 1 Spieler 1, nicht erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]])),
+      # Testfall 7: Figur aus start holen mit Zug 6, start besetzt, nicht erfolgreich
+      (jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])),  
+      # Testfall 8: Figur aus start holen mit Zug 6 Spieler 1, start besetzt, nicht erfolgreich
+      (jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]])),
+      # Testfall 9: Figur aus start holen mit Zug 6, start besetzt von Gegner, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, 0]]),
+        jnp.array(0),
+        jnp.array(2),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])),
+      # Testfall 10: Figur aus start holen mit Zug 6, start besetzt von Gegner, erfolgreich
+      (jnp.array([[-1, -1, 10, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, 10]])), 
+       # Testfall 11: Figur auf dem Feld normal bewegen, kein Gegner auf dem Weg
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[13, 5, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 12: Figur auf dem Feld normal bewegen, eigener, Pin auf dem Weg
+      (jnp.array([[12, 10, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[12, 13, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 13: Figur auf dem Feld normal bewegen, Gegner auf dem Weg
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[17, 5, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 14: Figur auf dem Feld normal bewegen, eigener Pin auf Zielposition, nicht erfolgreich
+      (jnp.array([[11, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[11, 5, 40, -1], [6, 14, 44, -1]])),  
+        # Testfall 15: Figur auf dem Feld normal bewegen, Gegner auf Zielposition, wird geschlagen
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(2),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[14, 5, 40, -1], [6, -1, 44, -1]])),  
+        # Testfall 16: Figur im Ziel Bewegen, gültig
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(2),
+        jnp.array(2),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[12, 5, 40, -1], [6, 14, 46, -1]])),  
+       # Testfall 17: Figur im Ziel Bewegen, zu weit, nicht gültig
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(2),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]])),  
+        # Testfall 18: Figur von Board ins Ziel Bewegen, erfolgreich
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[41, 35, 40, -1], [6, 14, 44, -1]])),
+        # Testfall 19: Figur von Board ins Ziel Bewegen, nicht erfolgreich, pin im weg
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 20: Figur von Board ins Ziel Bewegen, Spieler 1, erfolgreich
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [45, 14, 44, -1]])),   
+        # Testfall 21: Figur von Board ins Ziel Bewegen, Spieler 1, nicht erfolgreich, pin im weg
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]])), 
+        #### AB HIER WERDEN REGELN GETRESTET ####
+        # Testfall 22: Ziel "unterlaufen"
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(2),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[39, 35, 40, -1], [6, 14, 44, -1]])),  
+        # Testfall 23: Ziel "überlaufen"
+      (jnp.array([[38, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[4, 35, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 24: Ins Ziel, aber blockiert durch eigenen Pin
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[0, 35, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 25: Ziel "unterlaufen", Spieler 1
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [9, 14, 44, -1]])),  
+        # Testfall 26: Ziel "überlaufen", Spieler 1
+      (jnp.array([[37, 35, 40, -1], [8, 15, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [14, 15, 44, -1]])), 
+        # Testfall 27: Ins Ziel, aber blockiert durch eigenen Pin, Spieler 1
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [10, 14, 44, -1]])), 
+        # Testfall 28: Ins Ziel
+      (jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[41, 35, 42, -1], [6, 14, 44, -1]])),
+        # Testfall 29: Ins Ziel, blockiert durch eigenen Pin, nicht circular
+      (jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]])),  
+        # Testfall 30: Ins Ziel, blockiert durch eigenen Pin, circular
+      (jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[2, 35, 42, -1], [6, 14, 44, -1]])), 
+        # Testfall 31: Im Ziel, blockiert durch eigenen Pin
+      (jnp.array([[40, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[40, 35, 42, -1], [6, 14, 44, -1]])),  
+      # Testfall 32: Ins Ziel, Spieler 1
+      (jnp.array([[37, 35, 42, -1], [6, 14, 46, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [45, 14, 46, -1]])),
+        # Testfall 33: Ins Ziel, blockiert durch eigenen Pin, nicht circular, Spieler 1
+      (jnp.array([[37, 35, 42, -1], [8, 14, 46, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [8, 14, 46, -1]])),  
+        # Testfall 34: Ins Ziel, blockiert durch eigenen Pin, circular, Spieler 1
+      (jnp.array([[37, 35, 42, -1], [8, 15, 47, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [13, 15, 47, -1]])), 
+        # Testfall 35: Im Ziel, blockiert durch eigenen Pin, Spieler 1
+      (jnp.array([[40, 35, 42, -1], [44, 14, 46, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[40, 35, 42, -1], [44, 14, 46, -1]])), 
+        # Testfall 36: Ziel "überlaufen", start blocked
+      (jnp.array([[38, 35, 40, 0], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[38, 35, 40, 0], [6, 14, 44, -1]])), 
+        # Testfall 37: Ins Ziel, aber blockiert durch eigenen Pin, start blocked
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, 0], [6, 14, 44, -1]])), 
+        # Testfall 38: Ziel "überlaufen", Spieler 1, start blocked
+      (jnp.array([[37, 35, 40, 0], [8, 14, 44, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, 0], [8, 14, 44, 10]])), 
+        # Testfall 39: Ins Ziel, aber blockiert durch eigenen Pin, Spieler 1, start blocked
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]])),  
+        # Testfall 40: Friendly Fire, normal
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(2),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
+        jnp.array([[-1, 37, 40, 0], [6, 14, 44, 10]])),    
+         # Testfall 41: Friendly Fire, start
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
+        jnp.array([[0, 35, 40, -1], [6, 14, 44, 10]])),   
+        # Testfall 42: Friendly Fire, start, start blocked
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
+        jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]])),
+      # Testfall 43: Move Pin on start board when start blocks
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(3),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
+        jnp.array([[37, 35, -1, 3], [6, 14, 44, 10]])),
+        # Testfall 44: Move Pin on start board when start blocks, Spieler 1
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
+        jnp.array([[37, 35, 3, 0], [6, -1, 44, 14]])),
+    ]
+)
+def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid):
+    env = cm.env_reset(0, num_players=len(pins),
+                    distance=jnp.int32(10),
+                    enable_circular_board=rules['enable_circular_board'],
+                    enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
+                    enable_start_blocking=rules['enable_start_blocking'],
+                    enable_friendly_fire=rules['enable_friendly_fire'],
+                    enable_start_on_1=rules.get('enable_start_on_1', False))
+    env.pins = pins
+    env.board = cm.set_pins_on_board(env.board, env.pins)
+    env.current_player = player
+    env = cm.set_die(env, move)
+    env, reward, done = cm.env_step(env, pin)
+    print(env.pins)
+    assert jnp.array_equal(env.pins, expected_valid)
 
-@pytest.mark.parametrize("pin", range(4))
-@pytest.mark.parametrize("move", range(1, 7))
-@pytest.mark.parametrize("player", range(4))
-def test_start_moves(pin, move, player):
-    '''
-    Test moving out of the start area:
-    - moving out of start area to starting position
-    - hitting opponent pin on starting position
-    - blocked by own pin on starting position
-    '''
-    env = env_reset(0, num_players=jnp.int8(4), distance=jnp.int8(10))
-    env.current_player = jnp.int8(player)
-    action = jnp.array([pin, move], dtype=jnp.int8)
-    is_valid = valid_action(env)[pin, move-1]
-    env_new, reward, done = env_step(env, action)
-    
-    # Test: Nach gültigem Zug ist Pin nicht mehr im Startbereich (wenn er vorher draußen war)
-    if is_valid and env.pins[env.current_player, pin] != -1:
-        assert env_new.pins[env.current_player, pin] != -1
-        assert env_new.board[env_new.pins[env.current_player, pin]] == env.current_player
 
-    # Test: Nach ungültigem Zug bleibt alles gleich
-    if not is_valid:
-        assert jnp.all(env_new.board == env.board)
-        assert jnp.all(env_new.pins == env.pins)
-
-    # Test: Keine doppelten Pins auf dem Board
-    unique, counts = jnp.unique(env_new.board[env_new.board != -1], return_counts=True)
-    assert jnp.all(counts == 1)
-
-def normal_move():
-    '''
-    Test normal move cases:
-    - moving on the board
-    - hitting opponent pins
-    - blocked by own pins
-    - moving into goal area
-    '''
-    pass
-
-def goal_move():
-    '''
-    Test goal move cases:
-    - moving within goal area
-    - hitting opponent pins in goal area
-    - blocked by own pins in goal area
-    - overshooting goal area
-    '''
-    pass
+@pytest.mark.parametrize(
+    "pins, player, pin, move, rules, expected_valid",
+    [
+      # Testfall 1: Figur aus start holen mit Zug 6, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(2),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])),
+      # Testfall 2: Figur aus start holen mit Zug 1, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': True},
+        jnp.array([[-1, 0, -1, -1], [6, 14, 44, -1]])),
+      # Testfall 3: Figur aus start holen mit Zug 1, nicht erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]])),
+      # Testfall 4: Figur aus start holen mit Zug 6 Spieler 1, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, 10]])),
+      # Testfall 5: Figur aus start holen mit Zug 1 Spieler 1, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': True},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, 10]])),
+        # Testfall 6: Figur aus start holen mit Zug 1 Spieler 1, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]])),
+      # Testfall 7: Figur aus start holen mit Zug 6, start besetzt, nicht erfolgreich
+      (jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])),  
+      # Testfall 8: Figur aus start holen mit Zug 6 Spieler 1, start besetzt, nicht erfolgreich
+      (jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]])),
+      # Testfall 9: Figur aus start holen mit Zug 6, start besetzt von Gegner, erfolgreich
+      (jnp.array([[-1, -1, -1, -1], [6, 14, 44, 0]]),
+        jnp.array(0),
+        jnp.array(2),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])),
+      # Testfall 10: Figur aus start holen mit Zug 6, start besetzt von Gegner, erfolgreich
+      (jnp.array([[-1, -1, 10, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[-1, -1, -1, -1], [6, 14, 44, 10]])), 
+       # Testfall 11: Figur auf dem Feld normal bewegen, kein Gegner auf dem Weg
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(1),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[13, 5, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 12: Figur auf dem Feld normal bewegen, eigener, Pin auf dem Weg
+      (jnp.array([[12, 10, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[12, 13, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 13: Figur auf dem Feld normal bewegen, Gegner auf dem Weg
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[17, 5, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 14: Figur auf dem Feld normal bewegen, eigener Pin auf Zielposition, nicht erfolgreich
+      (jnp.array([[11, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[11, 5, 40, -1], [6, 14, 44, -1]])),  
+        # Testfall 15: Figur auf dem Feld normal bewegen, Gegner auf Zielposition, wird geschlagen
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(2),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[14, 5, 40, -1], [6, -1, 44, -1]])),  
+        # Testfall 16: Figur im Ziel Bewegen, gültig
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(2),
+        jnp.array(2),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[12, 5, 40, -1], [6, 14, 46, -1]])),  
+       # Testfall 17: Figur im Ziel Bewegen, zu weit, nicht gültig
+      (jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(2),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[12, 5, 40, -1], [6, 14, 44, -1]])),  
+        # Testfall 18: Figur von Board ins Ziel Bewegen, erfolgreich
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[41, 35, 40, -1], [6, 14, 44, -1]])),
+        # Testfall 19: Figur von Board ins Ziel Bewegen, nicht erfolgreich, pin im weg
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 20: Figur von Board ins Ziel Bewegen, Spieler 1, erfolgreich
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [45, 14, 44, -1]])),   
+        # Testfall 21: Figur von Board ins Ziel Bewegen, Spieler 1, nicht erfolgreich, pin im weg
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]])), 
+        #### AB HIER WERDEN REGELN GETRESTET ####
+        # Testfall 22: Ziel "unterlaufen"
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(2),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[39, 35, 40, -1], [6, 14, 44, -1]])),  
+        # Testfall 23: Ziel "überlaufen"
+      (jnp.array([[38, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[4, 35, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 24: Ins Ziel, aber blockiert durch eigenen Pin
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[0, 35, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 25: Ziel "unterlaufen", Spieler 1
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [9, 14, 44, -1]])),  
+        # Testfall 26: Ziel "überlaufen", Spieler 1
+      (jnp.array([[37, 35, 40, -1], [8, 15, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [14, 15, 44, -1]])), 
+        # Testfall 27: Ins Ziel, aber blockiert durch eigenen Pin, Spieler 1
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [10, 14, 44, -1]])), 
+        # Testfall 28: Ins Ziel
+      (jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[41, 35, 42, -1], [6, 14, 44, -1]])),
+        # Testfall 29: Ins Ziel, blockiert durch eigenen Pin, nicht circular
+      (jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]])),  
+        # Testfall 30: Ins Ziel, blockiert durch eigenen Pin, circular
+      (jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[3, 35, 42, -1], [6, 14, 44, -1]])), 
+        # Testfall 31: Im Ziel, blockiert durch eigenen Pin
+      (jnp.array([[40, 35, 42, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[40, 35, 42, -1], [6, 14, 44, -1]])),  
+      # Testfall 32: Ins Ziel, Spieler 1
+      (jnp.array([[37, 35, 42, -1], [6, 14, 46, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [45, 14, 46, -1]])),
+        # Testfall 33: Ins Ziel, blockiert durch eigenen Pin, nicht circular, Spieler 1
+      (jnp.array([[37, 35, 42, -1], [8, 14, 46, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [8, 14, 46, -1]])),  
+        # Testfall 34: Ins Ziel, blockiert durch eigenen Pin, circular, Spieler 1
+      (jnp.array([[37, 35, 42, -1], [8, 15, 46, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 42, -1], [12, 15, 46, -1]])), 
+        # Testfall 35: Im Ziel, blockiert durch eigenen Pin, Spieler 1
+      (jnp.array([[40, 35, 42, -1], [44, 14, 46, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[40, 35, 42, -1], [44, 14, 46, -1]])), 
+        # Testfall 36: Ziel "überlaufen", start blocked
+      (jnp.array([[38, 35, 40, 0], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[38, 35, 40, 0], [6, 14, 44, -1]])), 
+        # Testfall 37: Ins Ziel, aber blockiert durch eigenen Pin, start blocked
+      (jnp.array([[37, 35, 41, 0], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 41, 0], [6, 14, 44, -1]])), 
+        # Testfall 38: Ziel "überlaufen", Spieler 1, start blocked
+      (jnp.array([[37, 35, 40, 0], [8, 14, 44, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(6),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, 0], [8, 14, 44, 10]])), 
+        # Testfall 39: Ins Ziel, aber blockiert durch eigenen Pin, Spieler 1, start blocked
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]])),  
+        # Testfall 40: Friendly Fire, normal
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(1),
+        jnp.array(2),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
+        jnp.array([[-1, 37, 40, 0], [6, 14, 44, 10]])),    
+         # Testfall 41: Friendly Fire, start
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
+        jnp.array([[0, 35, 40, -1], [6, 14, 44, 10]])),   
+        # Testfall 42: Friendly Fire, start, start blocked
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
+        jnp.array([[37, 35, 40, 0], [6, 14, 44, 10]])),
+      # Testfall 43: Move Pin on start board when start blocks
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(3),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
+        jnp.array([[37, 35, -1, 3], [6, 14, 44, 10]])),
+        # Testfall 44: Move Pin on start board when start blocks, Spieler 1
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(1),
+        jnp.array(3),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
+        jnp.array([[37, 35, 3, 0], [6, -1, 44, 14]])),
+    ]
+)
+def test_normal_move_deterministic_MADN(pins, player, pin, move, rules, expected_valid):
+    env = dm.env_reset(0, num_players=len(pins),
+                    distance=jnp.int32(10),
+                    enable_circular_board=rules['enable_circular_board'],
+                    enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
+                    enable_start_blocking=rules['enable_start_blocking'],
+                    enable_friendly_fire=rules['enable_friendly_fire'],
+                    enable_start_on_1=rules.get('enable_start_on_1', False)   )
+    env.pins = pins
+    env.board = dm.set_pins_on_board(env.board, env.pins)
+    env.current_player = player
+    env, reward, done = dm.env_step(env, jnp.array([pin, move]))
+    print(env.pins)
+    assert jnp.array_equal(env.pins, expected_valid)
