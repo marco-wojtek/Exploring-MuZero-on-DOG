@@ -37,3 +37,16 @@ This project addresses several challenges for MuZero:
 - Modeling **team cooperation** between agents
 - Learning **communication strategies** through card exchange
 - Balancing individual and team objectives
+
+## JAX and JIT Compilation
+
+This implementation leverages **JAX**, a high-performance numerical computing library that provides automatic differentiation and XLA (Accelerated Linear Algebra) compilation. 
+
+**Just-In-Time (JIT) compilation** is crucial for this project because:
+
+- **Performance**: JIT compiles Python functions to optimized machine code, dramatically accelerating neural network operations and MCTS simulations
+- **GPU/TPU Acceleration**: Seamlessly executes compiled code on accelerators without code changes
+- **Vectorization**: Enables efficient batch processing of game states and neural network inference
+- **Scalability**: Allows training MuZero through millions of self-play games in reasonable time
+
+JAX's functional programming paradigm and JIT compilation make it ideal for implementing the computationally intensive components of MuZero, particularly the repeated neural network evaluations during Monte Carlo Tree Search.

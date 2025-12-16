@@ -53,10 +53,10 @@ def get_all_paths_compact(start, end, N):
     
     return path_values, valid_positions
 
-def calc_paths(start, end, goal, target, N):
+def calc_paths(start, end, start_idx, goal, target, N, traversal_over_start=False):
     '''
     Berechnet alle Pfadpositionen zwischen start und end Positionen. 
-    Bei Übergang ins Goal wird der Pfad bis zum Target berechnet und anschließend alle Goal-Positionen hinzugefügt.
+    Bei Übergang ins Goal wird der Pfad bis zum Target (ggf. mit dem eigenen Startfeld) berechnet und anschließend alle Goal-Positionen hinzugefügt.
     
     Args:
         start: (4,) Array der Startpositionen
@@ -91,13 +91,15 @@ def calc_paths(start, end, goal, target, N):
         goal_start = goal[0]
         goal_end = jnp.max(jnp.where(transition_to_goal, end, goal[0]))
         goal_range = jnp.arange(goal_start, goal_end + 1, dtype=jnp.int8)
+        if traversal_over_start:
+            goal_range = jnp.concatenate([jnp.array([start_idx]), goal_range])
         all_path_positions = jnp.concatenate([all_same_area, all_diff_area_to_target, goal_range])
     else:
         all_path_positions = jnp.concatenate([all_same_area, all_diff_area_to_target])
     
     return jnp.unique(all_path_positions)
 
-def calc_active_players_pins_hit(starting_position, final_position, goal_area, target, board_size):
+def calc_active_players_pins_hit(starting_position, final_position, start_index, goal_area, target, board_size, traversal_over_start=False):
     '''
     Berechne, welche von den eigenen Pins auf den Pfaden der anderen eigenen Pins liegen und somit geschlagen werden.
     Args:
@@ -119,7 +121,11 @@ def calc_active_players_pins_hit(starting_position, final_position, goal_area, t
         else: # player wechselt in goal area
             p, _ = get_all_paths_compact(jnp.array([starting_position[i]]), jnp.array([target]), board_size)
             goal_range = jnp.arange(goal_area[0], final_position[i] + 1, dtype=jnp.int8)
-            paths.append(jnp.concatenate([p[0], goal_range]))
+            if traversal_over_start:
+                paths.append(jnp.concatenate([p[0], goal_range, jnp.array([start_index])]))
+            else:
+                paths.append(jnp.concatenate([p[0], goal_range]))
+            
 
     other_paths_0 = jnp.concatenate([jnp.concatenate(paths[1:3]), paths[3]])
     other_paths_1 = jnp.concatenate([paths[0], jnp.concatenate(paths[2:])])
@@ -175,3 +181,53 @@ def check_goal_path_for_pin(start, x_val, goal, board, current_player):
                 True  # Positionen außerhalb von x_val ignorieren
             )
         )
+
+def check_relative_order_preserved(old_pos: jnp.ndarray, new_pos: jnp.ndarray, board_size: int) -> jnp.ndarray:
+    """
+    Prüft, ob die relative Reihenfolge der Pins im Zielbereich erhalten bleibt.
+
+    Args:
+        old_pos: Die alten Positionen der Pins.
+        new_pos: Die neuen Positionen der Pins.
+        board_size: Die Größe des Hauptspielbretts (z.B. 40). Alles darüber ist Zielbereich.
+
+    Returns:
+        Ein boolean-Array, das für jeden Pin anzeigt, ob die Bedingung erfüllt ist.
+    """
+    # Bedingung 1: Alle Pins, die nicht im Zielbereich starten, sind immer gültig.
+    # Dies schließt auch Pins im Start (-1) ein.
+    valid_outside_goal = (old_pos < board_size)
+
+    # Bedingung 2: Für Pins im Zielbereich muss die relative Reihenfolge erhalten bleiben.
+    
+    # Erstelle eine Maske für Pins, die sich im Zielbereich befinden.
+    in_goal_mask = (old_pos >= board_size)
+
+    # Erweitere die Dimensionen, um paarweise Vergleiche zu ermöglichen.
+    # Shape: (num_pins, 1) und (1, num_pins)
+    old_pos_col = old_pos[:, None]
+    old_pos_row = old_pos[None, :]
+    new_pos_col = new_pos[:, None]
+    new_pos_row = new_pos[None, :]
+
+    # Berechne die Vorzeichen der Differenzen für alle Paare.
+    # sign(a - b) gibt an, ob a > b (+1), a < b (-1) oder a == b (0).
+    sign_diff_old = jnp.sign(old_pos_col - old_pos_row)
+    sign_diff_new = jnp.sign(new_pos_col - new_pos_row)
+
+    # Die Reihenfolge ist nur dann erhalten, wenn die Vorzeichen aller Vergleiche gleich bleiben.
+    order_preserved_matrix = (sign_diff_old == sign_diff_new)
+
+    # Erstelle eine Maske für die paarweisen Vergleiche, die nur Pins im Zielbereich berücksichtigt.
+    # Ein Paar (i, j) ist relevant, wenn sowohl Pin i als auch Pin j im Ziel sind.
+    goal_pairs_mask = in_goal_mask[:, None] & in_goal_mask[None, :]
+
+    # Ein Pin im Zielbereich ist gültig, wenn für ihn die Reihenfolge zu allen
+    # anderen Pins im Zielbereich erhalten bleibt.
+    # Wir verwenden jnp.where, um nur die relevanten Paare zu prüfen.
+    # jnp.all prüft dann pro Zeile (pro Pin), ob alle seine Vergleiche stimmen.
+    valid_in_goal = jnp.all(jnp.where(goal_pairs_mask, order_preserved_matrix, True), axis=1)
+
+    # Das Endergebnis ist True, wenn der Pin entweder außerhalb des Ziels war
+    # oder wenn er im Ziel war und seine Reihenfolge beibehalten wurde.
+    return valid_outside_goal | valid_in_goal
