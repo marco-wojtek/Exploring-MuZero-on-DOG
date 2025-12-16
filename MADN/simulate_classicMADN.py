@@ -1,9 +1,12 @@
 import functools
-from classic_madn import *
 import jax
 import mctx
-from visualize_madn import *
 import time, sys, os
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+from utils.utility_funcs import *
+from MADN.classic_madn import *
+from utils.visualize import *
 
 
 def simulate_game(env, key):

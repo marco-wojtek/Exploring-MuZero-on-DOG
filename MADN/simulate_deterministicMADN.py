@@ -1,10 +1,13 @@
 import functools
 # from deterministic_madn import *
-from deterministic_madn import *
 import jax
 import jax.numpy as jnp
 from time import time
-from visualize_madn import board_to_matrix, matrix_to_string
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+from utils.utility_funcs import *
+from MADN.deterministic_madn import *
+from utils.visualize import *
 
 @functools.partial(jax.jit, static_argnums=(2,))
 def run_gumbel(rng_key:chex.PRNGKey, env:deterministic_MADN, num_simulations:int):

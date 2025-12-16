@@ -2,6 +2,10 @@ import chex
 import jax
 import jax.numpy as jnp
 import mctx
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+from utils.utility_funcs import *
 
 Board = chex.Array
 Start = chex.Array
@@ -118,10 +122,11 @@ def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.
         Returns:
             Ein boolescher Wert, der angibt, ob der Spieler das Spiel beendet hat.
     '''
-    return jax.lax.cond(player >= num_players,
-                 lambda: False,
-                 lambda: jnp.all(board[goal[player]] >= 0)
-                 )
+    return jax.lax.cond(
+        player >= num_players,
+        lambda: False,
+        lambda: jnp.all(board[goal[player]] >= 0)
+)
 
 def get_winner(env: deterministic_MADN, board: Board) -> chex.Array:
     '''
@@ -154,50 +159,6 @@ def get_winner(env: deterministic_MADN, board: Board) -> chex.Array:
 
     return jax.lax.cond(env.rules['enable_teams'], four_players_case, lambda: players_done)
 
-def check_goal_path_for_pin(start, x_val, goal, board, current_player):
-    '''
-    Überprüft, ob der Pfad eines Pins im Zielbereich frei von eigenen Pins ist.
-        Args:
-            start: Startposition des Pins
-            x_val: Zielposition des Pins
-            goal: Zielpositionen des Spielers
-            board: Das aktuelle Spielfeld
-            current_player: Der aktuelle Spieler
-        Returns:
-            Ein boolescher Wert, der angibt, ob der Pfad frei von eigenen Pins ist.
-    '''
-    goal_area = jnp.arange(len(goal))[None, :] # shape (1, 4)
-
-    return jnp.all(
-        jnp.where(
-            (start[:, None] < goal_area) & (goal_area < x_val[:, None]),
-            board[goal[goal_area]]!=current_player,
-            True
-        ),
-        axis=1
-    )
-
-def check_goal_path_for_pin2(start, x_val, goal, board, current_player):
-    '''
-    Überprüft, ob der Pfad eines Pins im Zielbereich frei von eigenen Pins ist.
-        Args:
-            start: Startposition des Pins
-            x_val: Zielposition des Pins
-            goal: Zielpositionen des Spielers
-            board: Das aktuelle Spielfeld
-            current_player: Der aktuelle Spieler
-        Returns:
-            Ein boolescher Wert, der angibt, ob der Pfad frei von eigenen Pins ist.
-    '''
-    goal_area = jnp.arange(len(goal))
-    return jnp.all(
-            jnp.where(
-                (start < goal_area) & (goal_area < x_val),
-                board[goal] != current_player,
-                True  # Positionen außerhalb von x_val ignorieren
-            )
-        )
-
 @jax.jit
 def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     '''
@@ -223,8 +184,8 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
 
     a = jax.lax.cond(
         jnp.isin(current_positions, env.goal[current_player]),
-        lambda: check_goal_path_for_pin2(current_positions - env.goal[current_player,0], moved_positions - env.goal[current_player,0] +1, env.goal[current_player], env.board, current_player),
-        lambda: check_goal_path_for_pin2(- jnp.ones(4, dtype=jnp.int8), x, env.goal[current_player], env.board, current_player)
+        lambda: check_goal_path_for_pin(current_positions - env.goal[current_player,0], moved_positions - env.goal[current_player,0] +1, env.goal[current_player], env.board, current_player),
+        lambda: check_goal_path_for_pin(- jnp.ones(4, dtype=jnp.int8), x, env.goal[current_player], env.board, current_player)
     )
     A = (env.board[env.goal[current_player, x-1]] != current_player) & (env.rules['enable_jump_in_goal_area'] | a)
     
@@ -410,7 +371,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     )
 
     # check if goal position is free or on circular board, the other board position is possible 
-    check_all_pins = jax.vmap(check_goal_path_for_pin, in_axes=(0, 0, None, None, None))
+    check_all_pins = jax.vmap(check_goal_path_for_pin2, in_axes=(0, 0, None, None, None))
     A = (env.rules["enable_circular_board"] & result) # if rule enabled, consider circle rotation, else only goal area
     B = (board[goal[x-1]] != current_player)
     # Entweder man darf im Ziel überspringen oder auf dem Weg (im Zielbereich) ist kein eigener Pin 

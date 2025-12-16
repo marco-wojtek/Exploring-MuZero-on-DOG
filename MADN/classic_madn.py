@@ -2,6 +2,10 @@ import chex
 import jax
 import jax.numpy as jnp
 import mctx
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+from utils.utility_funcs import *
 
 '''
 Wahrscheinlichkeitsverteilungen für den Würfelwurf
@@ -258,27 +262,6 @@ def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
         rules=env.rules,
     )
 
-def check_goal_path_for_pin(start, x_val, goal, board, current_player):
-    '''
-    Überprüft, ob der Pfad im Zielbereich für einen Pin frei ist.
-        Args:
-            start: Die Startposition des Pins im Zielbereich
-            x_val: Die Zielposition des Pins im Zielbereich
-            goal: Die Zielpositionen der Spieler
-            board: Das aktuelle Spielfeld
-            current_player: Der aktuelle Spieler
-        Returns:
-            Ein boolescher Wert, der angibt, ob der Pfad frei ist.
-    '''
-    goal_area = jnp.arange(len(goal))
-    return jnp.all(
-            jnp.where(
-                (start < goal_area) & (goal_area < x_val),
-                board[goal] != current_player,
-                True  # Positionen außerhalb von x_val ignorieren
-            )
-        )
-
 @jax.jit
 def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
     '''
@@ -508,8 +491,6 @@ def valid_action(env:classic_MADN) -> chex.Array:
     )
 
     return result # filter possible actions with available actions
-
-
 
 def encode_board(env: classic_MADN) -> chex.Array:
     '''

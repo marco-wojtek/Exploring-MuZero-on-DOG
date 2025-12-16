@@ -2,137 +2,10 @@ import chex
 import jax
 import jax.numpy as jnp
 import mctx
-
-def get_all_paths_compact(start, end, N):
-    """
-    Berechnet alle Pfadpositionen zwischen start und end Positionen für mehrere Pins gleichzeitig.
-    
-    Args:
-        start: Array der Startpositionen
-        end: Array der Endpositionen  
-        N: Board-Größe für Modulo-Rechnung (optional)
-    
-    Returns:
-        Array aller Pfadpositionen zwischen start und end (exklusive start, inklusive end)
-    """
-    valid_mask = end != start
-
-    use_modulo = (start < N) & (end < N)
-
-    # Modulo-Logik für Rundbrett
-    distance = (end - start) % N
-    distance = jnp.where(distance == 0, N, distance)  # Vollrunde = N Schritte
-    distance = jnp.where(valid_mask, distance, 0)  # Keine Bewegung wenn start == end
-    
-    max_len = jnp.max(distance)
-    
-    # Erstelle alle möglichen Pfade für alle start/end Paare
-    i, j = jnp.meshgrid(jnp.arange(len(start)), jnp.arange(max_len), indexing='ij')
-    path_values_normal = start[i] + j + 1
-    path_values_modulo = (start[i] + j + 1) % N
-    path_values = jnp.where(use_modulo[i], path_values_modulo, path_values_normal)
-    
-    valid_positions = valid_mask[i] & (j < distance[i])
-    
-    return path_values, valid_positions
-
-def calc_paths(start, end, goal, target, N):
-    '''
-    Berechnet alle Pfadpositionen zwischen start und end Positionen. 
-    Bei Übergang ins Goal wird der Pfad bis zum Target berechnet und anschließend alle Goal-Positionen hinzugefügt.
-    
-    Args:
-        start: (4,) Array der Startpositionen
-        end: (4,) Array der Endpositionen  
-        goal: (4,) Array der Goal-Positionen
-        target: int Target-Position (Eingang zum Goal-Bereich)
-        N: int Board-Größe
-    '''
-    A = jnp.isin(start, goal)  # start in goal
-    B = jnp.isin(end, goal)    # end in goal  
-
-    # Berechne alle Pfade für same area (both in goal or both not in goal)
-    same_area_condition = A == B
-    same_area_paths, same_area_mask = get_all_paths_compact(start, end, N)
-    same_area_valid = same_area_condition[:, None] & same_area_mask
-    
-    # Berechne Pfade für different area (traverse to goal)
-    diff_area_condition = A != B
-    
-    # Pfade bis zum Target für Pins die ins Goal wechseln
-    target_array = jnp.full_like(end, target)
-    diff_area_paths_to_target, diff_area_to_target_mask = get_all_paths_compact(start, target_array, N)
-    diff_area_to_target_valid = diff_area_condition[:, None] & diff_area_to_target_mask
-    
-    # Kombiniere alle gültigen Pfadpositionen
-    all_same_area = same_area_paths[same_area_valid]
-    all_diff_area_to_target = diff_area_paths_to_target[diff_area_to_target_valid]
-    
-    # Goal-Positionen für Übergänge ins Goal
-    transition_to_goal = diff_area_condition
-    if jnp.any(transition_to_goal):
-        goal_start = goal[0]
-        goal_end = jnp.max(jnp.where(transition_to_goal, end, goal[0]))
-        goal_range = jnp.arange(goal_start, goal_end + 1, dtype=jnp.int8)
-        all_path_positions = jnp.concatenate([all_same_area, all_diff_area_to_target, goal_range])
-    else:
-        all_path_positions = jnp.concatenate([all_same_area, all_diff_area_to_target])
-    
-    return jnp.unique(all_path_positions)
-
-def prototype(start, end, goal, target, N):
-    '''
-    Prototype-Funktion zur Validierung der Pfadberechnung.
-    Args:
-        start: (4,) Array der Startpositionen
-        end: (4,) Array der Endpositionen  
-        goal: (4,) Array der Goal-Positionen
-        target: int Target-Position (Eingang zum Goal-Bereich)
-        N: int Board-Größe
-    '''
-    x = jnp.array([start, end])
-    A = jnp.isin(start, goal)  # start in goal
-    B = jnp.isin(end, goal)    # end in goal
-    
-    paths = []
-    for i in range(4):
-        if A[i] == B[i]:
-            p, _ = get_all_paths_compact(jnp.array([start[i]]), jnp.array([end[i]]), N)
-            paths.append(p[0])
-        else:
-            p, _ = get_all_paths_compact(jnp.array([start[i]]), jnp.array([target]), N)
-            goal_range = jnp.arange(goal[0], end[i] + 1, dtype=jnp.int8)
-            paths.append(jnp.concatenate([p[0], goal_range]))
-
-    other_paths_0 = jnp.concatenate([jnp.concatenate(paths[1:3]), paths[3]])
-    other_paths_1 = jnp.concatenate([paths[0], jnp.concatenate(paths[2:])])
-    other_paths_2 = jnp.concatenate([jnp.concatenate(paths[:2]), paths[3]])
-    other_paths_3 = jnp.concatenate(paths[:3])
-    
-    a = jnp.all(jnp.isin(jnp.array([start[0], end[0]]), other_paths_0))
-    b = jnp.all(jnp.isin(jnp.array([start[1], end[1]]), other_paths_1))
-    c = jnp.all(jnp.isin(jnp.array([start[2], end[2]]), other_paths_2))
-    d = jnp.all(jnp.isin(jnp.array([start[3], end[3]]), other_paths_3))
-    return jnp.array([a,b,c,d])
-
-def all_pin_distributions(total=7):
-    '''
-    Erzeugt alle möglichen Verteilungen von `total` Pins auf 4 Pins (a0, a1, a2, a3).
-    Returns:
-        Ein Array der Form (num_distributions, 4) mit allen möglichen Verteilungen.
-    '''
-    # Erzeuge alle möglichen Werte für die ersten drei Pins
-    a = jnp.arange(total + 1)
-    b = jnp.arange(total + 1)
-    c = jnp.arange(total + 1)
-    # Erzeuge alle Kombinationen (a, b, c)
-    grid = jnp.array(jnp.meshgrid(a, b, c, indexing='ij')).reshape(3, -1).T
-    # Berechne den vierten Wert
-    d = total - grid[:, 0] - grid[:, 1] - grid[:, 2]
-    # Filtere gültige Kombinationen (d >= 0)
-    mask = d >= 0
-    result = jnp.concatenate([grid[mask], d[mask][:, None]], axis=1)
-    return result
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+from utils.utility_funcs import *
 
 DISTS_7_4 = all_pin_distributions(7)  # (120,4), lex nach a0,a1,a2
 
@@ -356,28 +229,6 @@ def set_pins_on_board(board, pins):
 
     board = jax.lax.fori_loop(0, num_players * num_pins, body, jnp.ones_like(board, dtype=jnp.int8) * -1)
     return board
-
-def check_goal_path_for_pin(start, x_val, goal, board, current_player):
-    """
-    Prüft, ob der Pfad eines Pins im Zielbereich frei von eigenen Pins ist.
-    Args:
-        start: Startposition des Pins im Zielbereich.
-        x_val: Zielposition des Pins im Zielbereich.
-        goal: Array der Goal-Positionen für den aktuellen Spieler.
-        board: Aktuelles Spielfeld.
-        current_player: Index des aktuellen Spielers.
-    Returns:
-        Boolean, ob der Pfad frei von eigenen Pins ist.
-    """
-    goal_area = jnp.arange(len(goal))
-
-    return jnp.all(
-            jnp.where(
-                (start < goal_area) & (goal_area < x_val),
-                board[goal] != current_player,
-                True  # Positionen außerhalb von x_val ignorieren
-            )
-        )
 
 def check_relative_order_preserved(old_pos: jnp.ndarray, new_pos: jnp.ndarray, board_size: int) -> jnp.ndarray:
     """
@@ -907,6 +758,7 @@ def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
     print("Backward move valid:", ~invalid_action)
     return (board, pins)
 
+# @jax.jit
 def step_hot_7(env:DOG, seven_dist):
     '''
     Führt einen Hot 7 Bewegungsschritt im DOG-Spiel aus.
@@ -958,7 +810,7 @@ def step_hot_7(env:DOG, seven_dist):
     pins = current_pins.at[current_player].set(jnp.where(invalid_action, current_pins[current_player], new_positions))
     hit_paths = calc_paths(current_positions, new_positions, env.goal[current_player], env.target[current_player], env.board_size)
     hit_pins = jnp.isin(env.pins, hit_paths)
-    curr_pins_hit = prototype(current_positions, new_positions, env.goal[current_player], env.target[current_player], env.board_size)
+    curr_pins_hit = calc_active_players_pins_hit(current_positions, new_positions, env.goal[current_player], env.target[current_player], env.board_size)
     hit_pins = hit_pins.at[current_player].set(curr_pins_hit)
     # if a player is at the new position and it's not the current player, send that pin back to start area
     pins = jnp.where(
