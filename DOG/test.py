@@ -146,7 +146,14 @@ import pytest
         jnp.array(0),
         jnp.array(3),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
-        jnp.array([[0, 35, 40, -1], [6, 14, 44, -1]])),  
+        jnp.array([[0, 35, 40, -1], [6, 14, 44, -1]])), 
+        # Testfall 20: Ziel "unterlaufen", nicht circular
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]])),  
         # Testfall 21: Ziel "überlaufen"
       (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
         jnp.array(0),
@@ -168,6 +175,13 @@ import pytest
         jnp.array(4),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
         jnp.array([[37, 35, 40, -1], [10, 14, 44, -1]])),  
+        # Testfall 23: Ziel "unterlaufen", nicht circular, Spieler 1
+      (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+        jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]])), 
         # Testfall 24: Ziel "überlaufen", Spieler 1
       (jnp.array([[37, 35, 40, -1], [6, 14, 44, -1]]),
         jnp.array(1),

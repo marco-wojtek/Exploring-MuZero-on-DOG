@@ -132,7 +132,7 @@ def calc_active_players_pins_hit(starting_position, final_position, start_index,
     other_paths_2 = jnp.concatenate([jnp.concatenate(paths[:2]), paths[3]])
     other_paths_3 = jnp.concatenate(paths[:3])
     
-    a = jnp.all(jnp.isin(jnp.array([starting_position[0], final_position[0]]), other_paths_0))
+    a = jnp.all(jnp.isin(jnp.array([starting_position[0], final_position[0]]), other_paths_0))# überprüfe ob der eigene path im path der anderen pins liegt
     b = jnp.all(jnp.isin(jnp.array([starting_position[1], final_position[1]]), other_paths_1))
     c = jnp.all(jnp.isin(jnp.array([starting_position[2], final_position[2]]), other_paths_2))
     d = jnp.all(jnp.isin(jnp.array([starting_position[3], final_position[3]]), other_paths_3))

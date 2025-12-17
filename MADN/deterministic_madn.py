@@ -50,7 +50,8 @@ def env_reset(
         enable_jump_in_goal_area = True,
         enable_friendly_fire = False,
         enable_start_on_1 = True,
-        enable_bonus_turn_on_6 = True
+        enable_bonus_turn_on_6 = True,
+        must_traverse_start = False,
             ) -> deterministic_MADN:
     
     subkey, _ = jax.random.split(key)
@@ -108,6 +109,7 @@ def env_reset(
         'enable_friendly_fire':enable_friendly_fire,
         'enable_start_on_1':enable_start_on_1,
         'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
+        'must_traverse_start': must_traverse_start
         }
     )
 
@@ -180,7 +182,7 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     current_positions = env.pins[current_player, pin]
     moved_positions = current_positions + move
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - env.target[current_player]
+    x = moved_positions - env.target[current_player] - jnp.int8(env.rules['must_traverse_start'])
 
     a = jax.lax.cond(
         jnp.isin(current_positions, env.goal[current_player]),
@@ -344,7 +346,7 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     current_positions = current_pins[:, None]
     moved_positions = current_positions + jnp.arange(1, 7)
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - target
+    x = moved_positions - target - jnp.int8(env.rules['must_traverse_start'])
 
     # filter out invalid moves blocked by own pins
     result = (board[fitted_positions] != current_player) | env.rules['enable_friendly_fire'] # check move to any board position
@@ -353,18 +355,25 @@ def valid_action(env:deterministic_MADN) -> chex.Array:
     distance = env.board_size // 4
     nearest_start_before = ((current_positions//distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
     nearest_start_after = fitted_positions//distance
-    cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
+    traverses_start_position = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
     result = jnp.where(
-        env.rules['enable_start_blocking'] & cond,
+        env.rules['enable_start_blocking'] & traverses_start_position,
         (~pins_on_start[nearest_start_after] | (current_pins == start[current_player])[:, None]) & result,
         result
+    )
+
+    # Wenn start blocked ist, dürfen keine Pins ins Ziel ziehen, d.h. die Ziel traversalmenge x wird auf 0 gesetzt
+    x = jnp.where(
+        env.rules['must_traverse_start'] & env.rules['enable_start_blocking'] & traverses_start_position & pins_on_start[nearest_start_after],
+        0, 
+        x
     )
 
     result = jax.lax.cond(
         env.rules['enable_circular_board'],
         lambda: result,
         lambda: jnp.where(
-            (current_positions <= target) & (moved_positions > (target + len(current_pins))), # if moving beyond target is not allowed
+            (current_positions <= target) & ((x > 4) | ((x == 0) & env.rules['must_traverse_start'])), # if moving beyond target is not allowed
             False,
             result
         )

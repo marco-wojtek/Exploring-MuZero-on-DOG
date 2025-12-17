@@ -316,6 +316,90 @@ import pytest
         jnp.array(4),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
         jnp.array([[37, 35, 3, 0], [6, -1, 44, 14]])),
+        # Testfall 45: Move Pin ins Ziel über Startfeld
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[41, 35, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 46: Ziel unterlaufen über Startfeld
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[0, 35, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 47: Ziel unterlaufen über Startfeld, start blocked
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]])),
+        # Testfall 48: Ziel unterlaufen über Startfeld, nicht circular
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 49: Move Pin ins Ziel über Startfeld, Zielfeld besetzt
+      (jnp.array([[37, 41, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[2, 41, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 50: Move Pin ins Ziel über Startfeld, Start besetzt
+      (jnp.array([[37, 41, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 41, 3, 0], [6, 14, 44, 10]])),
+        # Testfall 51: Move Pin ins Ziel über Startfeld, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [44, 14, 46, 11]])),
+        # Testfall 52: Ziel unterlaufen über Startfeld, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [10, 14, 46, 11]])),
+        # Testfall 53: Ziel unterlaufen über Startfeld, start blocked, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]])),
+        # Testfall 54: Ziel unterlaufen über Startfeld, nicht circular, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]])),
+        # Testfall 55: Move Pin ins Ziel über Startfeld, Zielfeld besetzt, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [11, 14, 44, -1]])),
+        # Testfall 56: Move Pin ins Ziel über Startfeld, Start besetzt, start blocked, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]])),
     ]
 )
 def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid):
@@ -325,7 +409,8 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
                     enable_friendly_fire=rules['enable_friendly_fire'],
-                    enable_start_on_1=rules.get('enable_start_on_1', False))
+                    enable_start_on_1=rules.get('enable_start_on_1', False),
+                    must_traverse_start=rules.get('must_traverse_start', False))
     env.pins = pins
     env.board = cm.set_pins_on_board(env.board, env.pins)
     env.current_player = player
@@ -373,7 +458,7 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
         jnp.array(1),
         {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'enable_start_on_1': True},
         jnp.array([[-1, -1, -1, -1], [6, 14, 44, 10]])),
-        # Testfall 6: Figur aus start holen mit Zug 1 Spieler 1, erfolgreich
+        # Testfall 6: Figur aus start holen mit Zug 1 Spieler 1, nicht erfolgreich
       (jnp.array([[-1, -1, -1, -1], [6, 14, 44, -1]]),
         jnp.array(1),
         jnp.array(3),
@@ -546,9 +631,9 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
       (jnp.array([[37, 35, 42, -1], [6, 14, 44, -1]]),
         jnp.array(0),
         jnp.array(0),
-        jnp.array(6),
+        jnp.array(5),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
-        jnp.array([[3, 35, 42, -1], [6, 14, 44, -1]])), 
+        jnp.array([[2, 35, 42, -1], [6, 14, 44, -1]])), 
         # Testfall 31: Im Ziel, blockiert durch eigenen Pin
       (jnp.array([[40, 35, 42, -1], [6, 14, 44, -1]]),
         jnp.array(0),
@@ -571,12 +656,12 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
         {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
         jnp.array([[37, 35, 42, -1], [8, 14, 46, -1]])),  
         # Testfall 34: Ins Ziel, blockiert durch eigenen Pin, circular, Spieler 1
-      (jnp.array([[37, 35, 42, -1], [8, 15, 46, -1]]),
+      (jnp.array([[37, 35, 42, -1], [8, 15, 47, -1]]),
         jnp.array(1),
         jnp.array(0),
-        jnp.array(4),
+        jnp.array(5),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
-        jnp.array([[37, 35, 42, -1], [12, 15, 46, -1]])), 
+        jnp.array([[37, 35, 42, -1], [13, 15, 47, -1]])), 
         # Testfall 35: Im Ziel, blockiert durch eigenen Pin, Spieler 1
       (jnp.array([[40, 35, 42, -1], [44, 14, 46, -1]]),
         jnp.array(1),
@@ -592,12 +677,12 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
         jnp.array([[38, 35, 40, 0], [6, 14, 44, -1]])), 
         # Testfall 37: Ins Ziel, aber blockiert durch eigenen Pin, start blocked
-      (jnp.array([[37, 35, 41, 0], [6, 14, 44, -1]]),
+      (jnp.array([[37, 35, 40, 0], [6, 14, 44, -1]]),
         jnp.array(0),
         jnp.array(0),
-        jnp.array(4),
+        jnp.array(3),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': False},
-        jnp.array([[37, 35, 41, 0], [6, 14, 44, -1]])), 
+        jnp.array([[37, 35, 40, 0], [6, 14, 44, -1]])), 
         # Testfall 38: Ziel "überlaufen", Spieler 1, start blocked
       (jnp.array([[37, 35, 40, 0], [8, 14, 44, 10]]),
         jnp.array(1),
@@ -647,6 +732,90 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
         jnp.array(4),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
         jnp.array([[37, 35, 3, 0], [6, -1, 44, 14]])),
+        # Testfall 45: Move Pin ins Ziel über Startfeld
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[41, 35, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 46: Ziel unterlaufen über Startfeld
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[0, 35, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 47: Ziel unterlaufen über Startfeld, start blocked
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]])),
+        # Testfall 48: Ziel unterlaufen über Startfeld, nicht circular
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 49: Move Pin ins Ziel über Startfeld, Zielfeld besetzt
+      (jnp.array([[37, 41, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[2, 41, 3, 5], [6, 14, 44, 10]])),
+        # Testfall 50: Move Pin ins Ziel über Startfeld, Start besetzt
+      (jnp.array([[37, 41, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 41, 3, 0], [6, 14, 44, 10]])),
+        # Testfall 51: Move Pin ins Ziel über Startfeld, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [44, 14, 46, 11]])),
+        # Testfall 52: Ziel unterlaufen über Startfeld, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [10, 14, 46, 11]])),
+        # Testfall 53: Ziel unterlaufen über Startfeld, start blocked, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]])),
+        # Testfall 54: Ziel unterlaufen über Startfeld, nicht circular, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(4),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 46, 11]])),
+        # Testfall 55: Move Pin ins Ziel über Startfeld, Zielfeld besetzt, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 44, 11]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [11, 14, 44, -1]])),
+        # Testfall 56: Move Pin ins Ziel über Startfeld, Start besetzt, start blocked, Spieler 1
+      (jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]]),
+        jnp.array(1),
+        jnp.array(0),
+        jnp.array(5),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 46, 10]])),
     ]
 )
 def test_normal_move_deterministic_MADN(pins, player, pin, move, rules, expected_valid):
@@ -656,10 +825,19 @@ def test_normal_move_deterministic_MADN(pins, player, pin, move, rules, expected
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
                     enable_friendly_fire=rules['enable_friendly_fire'],
-                    enable_start_on_1=rules.get('enable_start_on_1', False)   )
+                    enable_start_on_1=rules.get('enable_start_on_1', False),
+                    must_traverse_start=rules.get('must_traverse_start', False))
+                    
     env.pins = pins
     env.board = dm.set_pins_on_board(env.board, env.pins)
     env.current_player = player
     env, reward, done = dm.env_step(env, jnp.array([pin, move]))
     print(env.pins)
     assert jnp.array_equal(env.pins, expected_valid)
+
+test_normal_move_deterministic_MADN(jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
+        jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]))

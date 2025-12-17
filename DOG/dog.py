@@ -396,11 +396,12 @@ def val_action_normal_move(env:DOG, move: int):
         0, # true if start not blocked and new pos is free
         x
     )
+
     result = jax.lax.cond(
         env.rules['enable_circular_board'],
         lambda: result,
         lambda: jnp.where(
-            (current_positions <= target) & (moved_positions > (target + len(current_pins))), # if moving beyond target is not allowed
+            (current_positions <= target) & ((x > 4) | (x == 0)), # if moving beyond target is not allowed
             False,
             result
         )
