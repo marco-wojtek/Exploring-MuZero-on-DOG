@@ -2,7 +2,7 @@ import pygame
 import jax.numpy as jnp
 import jax
 from MADN.classic_madn import *
-from MADN.visualize_madn import board_to_mat
+from utils.visualize import board_to_mat
 
 def draw_board(screen, matrix, scale=60):
     color_map = {
