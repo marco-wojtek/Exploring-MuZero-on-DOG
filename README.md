@@ -20,6 +20,8 @@ Unlike traditional game-playing AI, MuZero learns an internal model of the game 
 
 Classic race board games where 2-4 players move pawns around a track based on dice/card draws. Players aim to move all pawns from start to home while potentially sending opponents' pawns back to start.
 
+![Classic MADN board](images/madn_board.png)
+
 ### DOG
 
 A Swiss team card game (2v2) combining elements of Mensch ärgere dich nicht with card-based movement. Key features:

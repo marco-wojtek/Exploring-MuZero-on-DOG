@@ -944,12 +944,12 @@ def test_normal_move_deterministic_MADN(pins, player, pin, move, rules, expected
     env.board = dm.set_pins_on_board(env.board, env.pins)
     env.current_player = player
     env, reward, done = dm.env_step(env, jnp.array([pin, move]))
-    print(env.pins)
+    print(reward)
     assert jnp.array_equal(env.pins, expected_valid)
 
 test_normal_move_deterministic_MADN(jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]),
         jnp.array(0),
         jnp.array(0),
-        jnp.array(3),
+        jnp.array(1),
         {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': True},
-        jnp.array([[37, 35, 3, 5], [6, 14, 44, 10]]))
+        jnp.array([[38, 35, 3, 5], [6, 14, 44, 10]]))

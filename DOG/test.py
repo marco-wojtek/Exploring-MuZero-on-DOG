@@ -795,9 +795,3 @@ def test_7_move(pins, player, dist, rules, expected_valid):
     board, pins = step_hot_7(env, dist)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
-
-test_7_move(jnp.array([[37, 36, 41, 1], [9, 10, 11, 12]]),
-        jnp.array(0),
-        jnp.array([0, 7, 0, 0]),
-        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': True, 'enable_friendly_fire': False},
-        jnp.array([[37, 36, 41, 1], [9, 10, 11, 12]])),

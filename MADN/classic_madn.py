@@ -330,7 +330,7 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
     )
 
     winner = get_winner(env, board)
-    reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8) # reward is 0 if game is done, -1 if action is invalid, else the index of the winning player (1-4) or 0 if no winner yet
+    reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)# reward is 0 if game is done, -1 if action is invalid, else the index of the winning player (1-4) or 0 if no winner yet
     # check if the game is done
     done = env.done | jnp.any(winner)
     # player changes on invalid action
