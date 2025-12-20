@@ -4,6 +4,7 @@ import sys, os, time
 
 def board_to_matrix(env):
     '''
+    VERALTET -> ERWARTET DYNAMISCHE BRETT-GRÖßE
     Wandelt das Brett der MADN-Umgebung in eine Matrix-Darstellung um.
         Args:
             env: Die aktuelle Spielumgebung
@@ -69,9 +70,9 @@ def replace_rows_simple(x, y):
     Ersetzt Zeilen in y basierend auf dem Booleschen Array x.
         Args:
             x: Ein Boolesches Array der Form (4,), das angibt, welche Zeilen ersetzt werden sollen
-            y: Eine Matrix der Form (4, m), aus der die Zeilen entnommen werden
+            y: Eine Matrix der Form (n, m), aus der die n Zeilen entnommen werden
         Returns:
-            Eine Matrix der Form (4, m), in der die Zeilen entsprechend ersetzt wurden.
+            Eine Matrix der Form (4, m), in der die n Zeilen entsprechend x ersetzt wurden.
     '''
     base_matrix = -jnp.ones_like(y, dtype=jnp.int32)
     
@@ -97,8 +98,13 @@ def board_to_mat(env, layout):
         Returns:
             Eine Matrix-Darstellung des Brettes.
     '''
-    board = env.board
+    # setze pins auf indizierbare werte: Spieler 1 hat pins 10,11,12,13; Spieler 2 hat pins 20,21,22,23; etc.
+    board = jnp.array(jnp.where(env.board!=-1, (env.board+1)*10, -1), dtype=jnp.int32)
     num_players = int(env.num_players)
+    pin_ids = jnp.tile(jnp.arange(1, 5), (num_players,1))
+    pins = env.pins
+    board = board.at[pins].add(jnp.where(pins!=-1, pin_ids, 0))
+
     n = int(env.board_size // 4)
 
     layout = jax.lax.cond(
@@ -111,11 +117,15 @@ def board_to_mat(env, layout):
     start_area = board[start]
     goal = env.goal
     goal_area = replace_rows_simple(layout, board[goal])
+    pin_shape = env.pins.shape[0]
+    idx = jnp.arange(pin_shape)[:, None] + 1 # Shape (n,1) für Broadcasting
+    home = jnp.where(env.pins == -1, pin_ids + (10*idx), -1)
+    home_area = replace_rows_simple(layout, home)
 
-    colour_ids = replace_rows_simple(layout, jnp.arange(10, 14, dtype=jnp.int8))
+    colour_ids = replace_rows_simple(layout, jnp.arange(10, 50, step=10, dtype=jnp.int8)) 
     colour_ids = jnp.where(
         colour_ids == -1,
-        14,
+        7,
         colour_ids
     )
     board_matrix = jnp.ones((n+1, n+1))*8
@@ -137,6 +147,12 @@ def board_to_mat(env, layout):
     board_matrix = board_matrix.at[-6:-2, -1].set(jnp.flip(jnp.where(goal_area[2]==-1, colour_ids[2], goal_area[2])))
     board_matrix = board_matrix.at[-1, 2:6].set(jnp.where(goal_area[3]==-1, colour_ids[3], goal_area[3]))
 
+    board_matrix = jnp.pad(board_matrix, ((1,1),(1,1)), constant_values=9)
+    board_matrix = board_matrix.at[:2, :2].set(jnp.where(home_area[0].reshape((2,2))==-1, jnp.full((2,2), colour_ids[0]), home_area[0].reshape((2,2))))
+    board_matrix = board_matrix.at[:2, -2:].set(jnp.where(home_area[1].reshape((2,2))==-1, jnp.full((2,2), colour_ids[1]), home_area[1].reshape((2,2))))
+    board_matrix = board_matrix.at[-2:, -2:].set(jnp.where(home_area[2].reshape((2,2))==-1, jnp.full((2,2), colour_ids[2]), home_area[2].reshape((2,2))))
+    board_matrix = board_matrix.at[-2:, :2].set(jnp.where(home_area[3].reshape((2,2))==-1, jnp.full((2,2), colour_ids[3]), home_area[3].reshape((2,2))))
+
     return board_matrix
 
 def matrix_to_string(matrix):
@@ -155,18 +171,21 @@ def matrix_to_string(matrix):
         for cell in row:
             if cell == -1:
                 str_repr += " \u25A1 "
+            if cell == 7:
+                str_repr += f" {pin_colors[4]}\u25A1{reset} "
             elif cell == 8:
                 str_repr += " . "
             elif cell == 9:
                 str_repr += "   "
             elif cell >= 10:
-                idx = int(cell-10)
-                color = pin_colors[idx % len(pin_colors)]
-                str_repr += f" {color}\u25A1{reset} "
-            else:
-                idx = int(cell)
-                color = pin_colors[idx % len(pin_colors)]
-                str_repr += f" {color}{pin_rep[idx]}{reset} "
+                idx = int(cell//10) -1
+                is_field = (cell % 10) == 0
+                if is_field:
+                    color = pin_colors[idx % len(pin_colors)]
+                    str_repr += f" {color}\u25A1{reset} "
+                else:
+                    color = pin_colors[idx % len(pin_colors)]
+                    str_repr += f" {color}{pin_rep[idx]}{reset} "
         str_repr += "\n"
     return str_repr
 
@@ -218,7 +237,8 @@ def matrices_to_gif(matrices, path="madn_run.gif", scale=32):
         px = img.load()
         for y in range(h):
             for x in range(w):
-                v = int(M[y,x])
+                mat_val = int(M[y,x])
+                v = mat_val//10 if mat_val >= 10 else mat_val
                 c = color_map.get(v, (0,0,0))
                 for dy in range(scale):
                     for dx in range(scale):
