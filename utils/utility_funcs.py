@@ -23,14 +23,16 @@ def all_pin_distributions(total=7):
 def get_all_paths_compact(start, end, N):
     """
     Berechnet alle Pfadpositionen zwischen start und end Positionen für mehrere Pins gleichzeitig.
+    Die Funktion erwartet dass end finale psoitionen sind.
     
     Args:
         start: Array der Startpositionen
         end: Array der Endpositionen  
-        N: Board-Größe für Modulo-Rechnung (optional)
+        N: Board-Größe für Modulo-Rechnung 
     
     Returns:
-        Array aller Pfadpositionen zwischen start und end (exklusive start, inklusive end)
+        path_values: Array aller möglichen Pfadpositionen
+        valid_positions: Boolesches Array, das gültige Positionen markiert
     """
     valid_mask = end != start
 
@@ -125,7 +127,6 @@ def calc_active_players_pins_hit(starting_position, final_position, start_index,
                 paths.append(jnp.concatenate([p[0], goal_range, jnp.array([start_index])]))
             else:
                 paths.append(jnp.concatenate([p[0], goal_range]))
-            
 
     other_paths_0 = jnp.concatenate([jnp.concatenate(paths[1:3]), paths[3]])
     other_paths_1 = jnp.concatenate([paths[0], jnp.concatenate(paths[2:])])
@@ -231,3 +232,90 @@ def check_relative_order_preserved(old_pos: jnp.ndarray, new_pos: jnp.ndarray, b
     # Das Endergebnis ist True, wenn der Pin entweder außerhalb des Ziels war
     # oder wenn er im Ziel war und seine Reihenfolge beibehalten wurde.
     return valid_outside_goal | valid_in_goal
+
+# @jax.jit(static_argnames=['board_size', 'total_board_size'])
+def get_path_matrix(start, end, start_idx, goal, target, board_size, total_board_size, traversal_over_start=False):
+    '''
+    Berechnet eine Matrix, die für jedes Start-End-Paar die Pfadpositionen enthält.
+    JIT-kompatibel!
+    '''
+    # (4, total_board_size) bool-Matrix
+    matrix = jnp.zeros((4, total_board_size), dtype=jnp.bool_)
+
+    A = jnp.isin(start, goal)  # start in goal
+    B = jnp.isin(end, goal)    # end in goal
+    same_area_condition = A == B
+    valid_mask = end != start
+
+    # Berechne Distanzen für Rundbrett
+    distance = (end - start) % board_size
+    distance = jnp.where(distance == 0, board_size, distance)
+    distance = jnp.where(valid_mask, distance, 0)
+
+    # Vektorisierte Pfadberechnung für alle Pins
+    def get_indices_vec(s, e, N, same_area):
+        # s, e: (4,)
+        # Gibt für jeden Pin ein bool-Array der Länge N zurück, das die Pfadpositionen markiert
+        def single_pin_indices(si, ei):
+            # Leeres Array, falls Pin nicht aktiv
+            def empty():
+                return jnp.zeros(N, dtype=bool)
+            # Normale Bewegung
+            def normal():
+                idxs = jnp.arange(N)
+                return (idxs >= si) & (idxs <= ei)
+            # Wrap-around Bewegung
+            def wrap():
+                idxs = jnp.arange(N)
+                return (idxs >= si) | (idxs <= ei)
+            
+            return jax.lax.cond(
+                (si == -1) | (ei == -1) | (same_area & (si == ei)),
+                empty,
+                lambda: jax.lax.cond(si <= ei, normal, wrap)
+            )
+        return jax.vmap(single_pin_indices)(s, e)  # (4, N)
+
+    # Same area: Pfade berechnen
+    same_area_mask = get_indices_vec(start, end, board_size, True)  # (4, board_size)
+    # Diff area: Pfade berechnen
+    to_target_mask = get_indices_vec(start, jnp.full_like(start, target), board_size, False)  # (4, board_size)
+    goal_mask = get_indices_vec(jnp.full_like(end, goal[0]), end, total_board_size, False)    # (4, total_board_size)
+
+    # Matrix für alle Pins aufbauen
+    def set_matrix(matrix, mask, col_offset=0):
+        # mask: (4, N)
+        N = mask.shape[1]
+        return matrix.at[:, col_offset:col_offset+N].set(mask)
+
+    # Setze same_area und diff_area für alle Pins
+    matrix = jnp.where(
+        same_area_condition[:, None],
+        set_matrix(matrix, same_area_mask, 0),
+        set_matrix(matrix, to_target_mask, 0) | set_matrix(matrix, goal_mask, 0)
+    )
+    matrix = jax.lax.cond(
+        traversal_over_start & jnp.any(A != B),
+        lambda m: m.at[:, start_idx].set(True),
+        lambda m: m,
+        matrix
+    )
+    return matrix
+
+    
+# mat = get_path_matrix(jnp.array([38, 1, 10, -1]), jnp.array([40, 5, 10, -1]), 0, jnp.array([40, 41, 42, 43]), 39, 40, 56, traversal_over_start=True)   
+# print(mat)
+# print(jnp.any(mat, axis=0))
+# print(jnp.arange(56)[jnp.any(mat, axis=0)])
+def check_moving_pins_hit(i, start, end, matrix):
+        """Prüfe ob Start UND End von Pin i in anderen Pfaden liegen"""
+        # Alle anderen Pfade (OR über andere Pins)
+        mask = matrix.at[i].set(False)
+        other_paths = jnp.any(mask, axis=0)
+        # Prüfe Start und End
+        start_hit = other_paths[start]
+        end_hit = other_paths[end]
+        
+        return start_hit & end_hit
+
+# print(jax.vmap(check_moving_pins_hit, in_axes=(0,0,0, None))(jnp.arange(4), jnp.array([38, 37, 1, -1]), jnp.array([39, 39, 8, -1]), mat))

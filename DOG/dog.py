@@ -654,7 +654,7 @@ def no_step(env:DOG) ->  DOG:
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
-# @jax.jit
+@jax.jit
 def step_swap(env: DOG, pin_idx: Action, swap_pos: Action) -> DOG:
     '''
     Führt einen Swap-Schritt im DOG-Spiel aus.
@@ -689,7 +689,7 @@ def step_swap(env: DOG, pin_idx: Action, swap_pos: Action) -> DOG:
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-# @jax.jit
+@jax.jit
 def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
     '''
     Führt einen normalen Bewegungsschritt im DOG-Spiel aus.
@@ -760,7 +760,7 @@ def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-# @jax.jit
+@jax.jit
 def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
     '''
     Führt einen negativen Bewegungsschritt im DOG-Spiel aus.
@@ -812,7 +812,7 @@ def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-# @jax.jit
+@jax.jit
 def step_hot_7(env:DOG, seven_dist):
     '''
     Führt einen Hot 7 Bewegungsschritt im DOG-Spiel aus.
@@ -862,14 +862,15 @@ def step_hot_7(env:DOG, seven_dist):
     # bei den figuren des aktuellen Spielers muss die alte und neue position abgedeckt werden
     # Zielbereiche müssen extra behandelt werden
     pins = current_pins.at[current_player].set(jnp.where(invalid_action, current_positions, new_positions))
-    hit_paths = calc_paths(current_positions, new_positions, env.start[current_player], env.goal[current_player], env.target[current_player], env.board_size, traversal_over_start=True)
-    hit_pins = jnp.isin(env.pins, hit_paths)
-    curr_pins_hit = calc_active_players_pins_hit(current_positions, new_positions, env.start[current_player], env.goal[current_player], env.target[current_player], env.board_size, traversal_over_start=True)
+    hit_paths = get_path_matrix(current_positions, new_positions, env.start[current_player], env.goal[current_player], env.target[current_player], traversal_over_start=True)
+    hit_pins = jnp.any(hit_paths, axis=0)[env.pins]
+    curr_pins_hit = jax.vmap(check_moving_pins_hit, in_axes=(0,0,0,None))(jnp.arange(4), current_positions, new_positions, hit_paths)
     hit_pins = hit_pins.at[current_player].set(curr_pins_hit)
+    # Hit pins ist shape (num_players, 4) mit True an den Positionen die getroffen wurden
     # if a player is at the new position and it's not the current player, send that pin back to start area
     pins = jnp.where(
         hit_pins & ~invalid_action,
-        pins.at[jnp.where(hit_pins)].set(-1),
+        -1,
         pins
     )
     

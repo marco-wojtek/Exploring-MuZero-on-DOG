@@ -355,7 +355,7 @@ def test_normal_move(pins, player, pin, move, rules, expected_valid):
     env.pins = pins
     env.board = set_pins_on_board(env.board, env.pins)
     env.current_player = player
-    board, pins = step_normal_move(env, pin, move)
+    board, pins, reward, done = step_normal_move(env, pin, move)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
 
@@ -494,7 +494,7 @@ def test_neg_move(pins, player, pin, move, rules, expected_valid):
     env.pins = pins
     env.board = set_pins_on_board(env.board, env.pins)
     env.current_player = player
-    board, pins = step_neg_move(env, pin, move)
+    board, pins, reward, done = step_neg_move(env, pin, move)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
 
@@ -611,7 +611,7 @@ def test_swap_move(pins, player, pin, pos, rules, expected_valid):
     env.pins = pins
     env.board = set_pins_on_board(env.board, env.pins)
     env.current_player = player
-    board, pins = step_swap(env, pin, pos)
+    board, pins, reward, done = step_swap(env, pin, pos)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
 
@@ -792,6 +792,10 @@ def test_7_move(pins, player, dist, rules, expected_valid):
     env.pins = pins
     env.board = set_pins_on_board(env.board, env.pins)
     env.current_player = player
-    board, pins = step_hot_7(env, dist)
+    board, pins, reward, done = step_hot_7(env, dist)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
+
+test_7_move(jnp.array([[-1, 37, 38, 6], [7, 14, 44, -1]]), jnp.array(0), jnp.array([0, 6, 1, 3]),
+               {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
+               jnp.array([[-1, 42, -1, 9], [-1, 14, 44, -1]]))
