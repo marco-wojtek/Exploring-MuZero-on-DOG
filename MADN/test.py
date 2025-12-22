@@ -76,7 +76,7 @@ import pytest
         jnp.array(3),
         jnp.array(6),
         {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
-        jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]])), 
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])), 
         # Testfall 10: Figur aus start holen mit Zug 6, start besetzt, start blocking, nicht erfolgreich
       (jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]]),
         jnp.array(0),
@@ -104,7 +104,7 @@ import pytest
         jnp.array(3),
         jnp.array(6),
         {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
-        jnp.array([[-1, -1, 0, -1], [6, -1, 44, 10]])),
+        jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]])),
          # Testfall 14: Figur aus start holen mit Zug 6 Spieler 1, start besetzt, start blocking, nicht erfolgreich
       (jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]]),
         jnp.array(1),
@@ -467,9 +467,7 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
                     enable_friendly_fire=rules['enable_friendly_fire'],
                     enable_start_on_1=rules.get('enable_start_on_1', False),
                     must_traverse_start=rules.get('must_traverse_start', False))
-    env.pins = pins
-    env.board = cm.set_pins_on_board(env.board, env.pins)
-    env.current_player = player
+    env = env.replace(pins=pins, board=cm.set_pins_on_board(env.board, pins), current_player=player)
     env = cm.set_die(env, move)
     env, reward, done = cm.env_step(env, pin)
     print(env.pins)
@@ -548,7 +546,7 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
         jnp.array(3),
         jnp.array(6),
         {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
-        jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]])), 
+        jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]])), 
         # Testfall 10: Figur aus start holen mit Zug 6, start besetzt, start blocking, nicht erfolgreich
       (jnp.array([[-1, -1, 0, -1], [6, 14, 44, -1]]),
         jnp.array(0),
@@ -576,7 +574,7 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
         jnp.array(3),
         jnp.array(6),
         {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': True},
-        jnp.array([[-1, -1, 0, -1], [6, -1, 44, 10]])),
+        jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]])),
          # Testfall 14: Figur aus start holen mit Zug 6 Spieler 1, start besetzt, start blocking, nicht erfolgreich
       (jnp.array([[-1, -1, 0, -1], [6, 10, 44, -1]]),
         jnp.array(1),
@@ -940,10 +938,8 @@ def test_normal_move_deterministic_MADN(pins, player, pin, move, rules, expected
                     enable_start_on_1=rules.get('enable_start_on_1', False),
                     must_traverse_start=rules.get('must_traverse_start', False))
                     
-    env.pins = pins
-    env.board = dm.set_pins_on_board(env.board, env.pins)
-    env.current_player = player
-    env, reward, done = dm.env_step(env, jnp.array([pin, move]))
+    env = env.replace(pins=pins, board=dm.set_pins_on_board(env.board, pins), current_player=player)
+    env, reward, done = dm.env_step(env, [pin, move])
     print(reward)
     assert jnp.array_equal(env.pins, expected_valid)
 

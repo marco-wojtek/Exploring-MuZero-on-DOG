@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 import mctx
 import os, sys
+from flax import struct
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from utils.utility_funcs import *
@@ -29,21 +30,22 @@ Num_players = chex.Array
 Size = chex.Array
 Die = chex.Array
 
-@chex.dataclass
+@struct.dataclass
 class classic_MADN:
     board: Board  # shape (64,), values in {0, 1, 2, 3, 4} for empty, player 1, player 2, player 3, player 4
-    num_players: Num_players
     current_player: Player  # scalar, 1, 2, 3, or 4
     pins : Pins  # shape (num_players,4), positions of the players' pins
     reward: Reward  # scalar, reward for the current player
     done: Done  # scalar, whether the game is over
-    start: Start  # shape (num_players,), starting indices of the players
-    target: Target  # shape (num_players,), positions before the goals of the players
-    goal: Goal  # shape (num_players,4), goal positions of the players
     die: Die
-    board_size: Size  # scalar, size of the board (num_players * distance)
-    total_board_size: Size  # scalar, size of the board + goal areas (num_players * distance + num_players * 4)
-    rules : dict  # game rules
+    num_players: Num_players
+    start: Start
+    target: Target
+    goal: Goal
+
+    board_size: Size = struct.field(pytree_node=False)
+    total_board_size: Size = struct.field(pytree_node=False)
+    rules : dict  = struct.field(pytree_node=False)
 
 def env_reset(
         _,
@@ -108,19 +110,19 @@ def env_reset(
         target = target,
         goal = goal,
         die = jnp.array(0, dtype=jnp.int8),
-        board_size=jnp.array(board_size, dtype=jnp.int8),
-        total_board_size=jnp.array(total_board_size, dtype=jnp.int8),
+        board_size=int(board_size),
+        total_board_size=int(total_board_size),
         rules = {
-        'enable_teams': enable_teams,
-        'enable_initial_free_pin':enable_initial_free_pin,
-        'enable_circular_board':enable_circular_board,
-        'enable_start_blocking':enable_start_blocking,
-        'enable_jump_in_goal_area':enable_jump_in_goal_area,
-        'enable_friendly_fire':enable_friendly_fire,
-        'enable_start_on_1':enable_start_on_1,
-        'enable_bonus_turn_on_6':enable_bonus_turn_on_6,
-        'enable_dice_rethrow':enable_dice_rethrow,
-        'must_traverse_start': must_traverse_start
+        'enable_teams': bool(enable_teams),
+        'enable_initial_free_pin':bool(enable_initial_free_pin),
+        'enable_circular_board':bool(enable_circular_board),
+        'enable_start_blocking':bool(enable_start_blocking),
+        'enable_jump_in_goal_area':bool(enable_jump_in_goal_area),
+        'enable_friendly_fire':bool(enable_friendly_fire),
+        'enable_start_on_1':bool(enable_start_on_1),
+        'enable_bonus_turn_on_6':bool(enable_bonus_turn_on_6),
+        'enable_dice_rethrow':bool(enable_dice_rethrow),
+        'must_traverse_start': bool(must_traverse_start)
         }
     )
 

@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 import mctx
 import os, sys
+from flax import struct
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from utils.utility_funcs import *
@@ -46,22 +47,23 @@ Deck = chex.Array
 Card = chex.Array
 Hand = chex.Array
 
-@chex.dataclass
+@struct.dataclass
 class DOG:
     board: Board
-    num_players: Num_players
     current_player: Player 
     pins : Pins 
     reward: Reward 
-    done: Done  
-    start: Start  
-    target: Target  
-    goal: Goal  
+    done: Done     
     deck: Deck  
     hands: Hand
-    board_size: Size 
-    total_board_size: Size  
-    rules : dict  
+    num_players: Num_players
+    start: Start
+    target: Target
+    goal: Goal
+    
+    board_size: Size = struct.field(pytree_node=False)
+    total_board_size: Size = struct.field(pytree_node=False)
+    rules : dict  = struct.field(pytree_node=False)
 
 def env_reset(
         _,
@@ -132,18 +134,18 @@ def env_reset(
         goal = goal,
         deck = deck,
         hands = jnp.zeros((num_players, num_cards), dtype=jnp.int8),##
-        board_size=jnp.array(board_size, dtype=jnp.int16),
-        total_board_size=jnp.array(total_board_size, dtype=jnp.int16),
+        board_size=int(board_size),
+        total_board_size=int(total_board_size),
         rules = {
-        'enable_teams':enable_teams,
-        'enable_initial_free_pin':enable_initial_free_pin,
-        'enable_circular_board':enable_circular_board,
-        'enable_start_blocking':enable_start_blocking,
-        'enable_jump_in_goal_area':enable_jump_in_goal_area,
-        'enable_friendly_fire':enable_friendly_fire,
-        'disable_swapping': disable_swapping,
-        'disable_hot_seven': disable_hot_seven,
-        'disable_joker': disable_joker,
+        'enable_teams':bool(enable_teams),
+        'enable_initial_free_pin':bool(enable_initial_free_pin),
+        'enable_circular_board':bool(enable_circular_board),
+        'enable_start_blocking':bool(enable_start_blocking),
+        'enable_jump_in_goal_area':bool(enable_jump_in_goal_area),
+        'enable_friendly_fire':bool(enable_friendly_fire),
+        'disable_swapping': bool(disable_swapping),
+        'disable_hot_seven': bool(disable_hot_seven),
+        'disable_joker': bool(disable_joker),
         }
     )
 
@@ -499,10 +501,10 @@ def val_action_normal_move(env:DOG, move: int):
         result
     )
 
-    # filter actions for pins in start area
+    # filter actions for pins in start area; Only with 1|11 card or 13 card
     result = jnp.where(
         (current_pins == -1),
-        jnp.isin(move, jnp.array([11, 13])) & (~pins_on_start[current_player]),
+        jnp.isin(move, jnp.array([1, 11, 13])) & (~pins_on_start[current_player]),
         result
     )
 
@@ -862,7 +864,7 @@ def step_hot_7(env:DOG, seven_dist):
     # bei den figuren des aktuellen Spielers muss die alte und neue position abgedeckt werden
     # Zielbereiche müssen extra behandelt werden
     pins = current_pins.at[current_player].set(jnp.where(invalid_action, current_positions, new_positions))
-    hit_paths = get_path_matrix(current_positions, new_positions, env.start[current_player], env.goal[current_player], env.target[current_player], traversal_over_start=True)
+    hit_paths = get_path_matrix(current_positions, new_positions, env.start[current_player], env.goal[current_player], env.target[current_player], board_size=env.board_size, total_board_size=env.total_board_size, traversal_over_start=True)
     hit_pins = jnp.any(hit_paths, axis=0)[env.pins]
     curr_pins_hit = jax.vmap(check_moving_pins_hit, in_axes=(0,0,0,None))(jnp.arange(4), current_positions, new_positions, hit_paths)
     hit_pins = hit_pins.at[current_player].set(curr_pins_hit)
@@ -886,7 +888,7 @@ def step_hot_7(env:DOG, seven_dist):
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-# @jax.jit
+@jax.jit
 def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
     """
     Führt einen Schritt im DOG-Spiel basierend auf der gegebenen Aktion aus.
@@ -912,7 +914,6 @@ def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
         return step_swap(env, jnp.array(pin_idx), jnp.array(swap_pos))
     
     def hot_7_step():
-        return step_normal_move(env, jnp.array(0), jnp.array(0))
         return step_hot_7(env, move_dists)
     
     def move_step():

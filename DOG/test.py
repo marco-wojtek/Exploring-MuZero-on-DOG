@@ -352,9 +352,7 @@ def test_normal_move(pins, player, pin, move, rules, expected_valid):
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
                     enable_friendly_fire=rules['enable_friendly_fire'])
-    env.pins = pins
-    env.board = set_pins_on_board(env.board, env.pins)
-    env.current_player = player
+    env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=player)
     board, pins, reward, done = step_normal_move(env, pin, move)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
@@ -491,9 +489,7 @@ def test_neg_move(pins, player, pin, move, rules, expected_valid):
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
                     enable_friendly_fire=rules['enable_friendly_fire'])
-    env.pins = pins
-    env.board = set_pins_on_board(env.board, env.pins)
-    env.current_player = player
+    env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=player)
     board, pins, reward, done = step_neg_move(env, pin, move)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
@@ -608,9 +604,7 @@ def test_swap_move(pins, player, pin, pos, rules, expected_valid):
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
                     enable_friendly_fire=rules['enable_friendly_fire'])
-    env.pins = pins
-    env.board = set_pins_on_board(env.board, env.pins)
-    env.current_player = player
+    env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=player)
     board, pins, reward, done = step_swap(env, pin, pos)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
@@ -789,13 +783,35 @@ def test_7_move(pins, player, dist, rules, expected_valid):
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
                     enable_friendly_fire=rules['enable_friendly_fire'])
-    env.pins = pins
-    env.board = set_pins_on_board(env.board, env.pins)
-    env.current_player = player
+    env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=player)
     board, pins, reward, done = step_hot_7(env, dist)
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
 
-test_7_move(jnp.array([[-1, 37, 38, 6], [7, 14, 44, -1]]), jnp.array(0), jnp.array([0, 6, 1, 3]),
-               {'enable_circular_board': False, 'enable_jump_in_goal_area': True, 'enable_start_blocking': False, 'enable_friendly_fire': False},
-               jnp.array([[-1, 42, -1, 9], [-1, 14, 44, -1]]))
+env = env_reset(0, num_players=2,
+                    distance=jnp.int32(10),
+                    enable_circular_board=True,
+                    enable_jump_in_goal_area=True,
+                    enable_start_blocking=True,
+                    enable_friendly_fire=False)
+env = env.replace(pins=jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8]]), board=set_pins_on_board(env.board, jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8]])), current_player=0, hands=jnp.ones_like(env.hands))
+print(env.board)
+print(env.pins)
+print(env.hands)
+print(map_action_to_move(env, jnp.array(740)))
+env, reward, done = env_step(env, jnp.array(740))
+print(reward)
+print(env.board)
+print(env.pins)
+print(env.hands)
+
+env = env.replace(pins=jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8]]), board=set_pins_on_board(env.board, jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8]])), current_player=0)
+print(env.board)
+print(env.pins)
+print(env.hands)
+print(map_action_to_move(env, jnp.array(600)))
+env, reward, done = env_step(env, jnp.array(600))
+print(reward)
+print(env.board)
+print(env.pins)
+print(env.hands)
