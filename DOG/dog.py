@@ -78,6 +78,7 @@ def env_reset(
         enable_start_blocking = False,
         enable_jump_in_goal_area = True,
         enable_friendly_fire = False,
+        must_traverse_start = True,
         disable_swapping = False,
         disable_hot_seven = False,
         disable_joker = False,
@@ -143,6 +144,7 @@ def env_reset(
         'enable_start_blocking':bool(enable_start_blocking),
         'enable_jump_in_goal_area':bool(enable_jump_in_goal_area),
         'enable_friendly_fire':bool(enable_friendly_fire),
+        'must_traverse_start':bool(must_traverse_start),
         'disable_swapping': bool(disable_swapping),
         'disable_hot_seven': bool(disable_hot_seven),
         'disable_joker': bool(disable_joker),
@@ -366,14 +368,14 @@ def val_action_7(env:DOG, seven_dist) -> chex.Array:
     current_positions = env.pins[current_player]
     moved_positions = current_positions + seven_dist
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - target -1
+    x = moved_positions - target - jnp.int8(env.rules['must_traverse_start'])
 
     pins_on_start = pins_on_start.at[current_player].set(jnp.any(jnp.where(current_positions == start[current_player], moved_positions == start[current_player], False))) # if any pin does not move, check if it is on start
     # Überlaufen der Zielposition verhindern falls kein Rundbrett
     result = jax.lax.cond(
         env.rules['enable_circular_board'],
         lambda: jnp.ones_like(current_positions, dtype=bool),
-        lambda: ~((current_positions <= target) & ((moved_positions > (target + 4)) | (x == 0))) # if moved_pos > target + 4 or x = 0 means overrun and new round start
+        lambda: ~((current_positions <= target) & ((moved_positions > (target + 4)) | ((x == 0) & env.rules['must_traverse_start'])) ) # if moved_pos > target + 4 or x = 0 means overrun and new round start
     )
     distance = env.board_size // 4
     nearest_start_before = ((current_positions  //distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
@@ -386,7 +388,7 @@ def val_action_7(env:DOG, seven_dist) -> chex.Array:
     )
     # Wenn start blocked ist, dürfen keine Pins ins Ziel ziehen, d.h. die Ziel traversalmenge x wird auf 0 gesetzt
     x = jnp.where(
-        env.rules['enable_start_blocking'] & traverses_start_position & pins_on_start[nearest_start_after],
+        env.rules['must_traverse_start'] & env.rules['enable_start_blocking'] & traverses_start_position & pins_on_start[nearest_start_after],
         0, 
         x
     )
@@ -449,23 +451,23 @@ def val_action_normal_move(env:DOG, move: int):
     current_positions = current_pins
     moved_positions = current_pins + move
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - target -1 #(start feld muss auch überlaufen werden)
+    x = moved_positions - target - jnp.int8(env.rules['must_traverse_start']) #(start feld muss auch überlaufen werden)
 
     result = (board[fitted_positions] != current_player) | env.rules['enable_friendly_fire'] # check move to any board position
     # filter actions where a pin on a start spot would block others
     distance = env.board_size // 4
     nearest_start_before = ((current_pins//distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
     nearest_start_after = fitted_positions//distance
-    cond = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
+    traverses_start_position = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
     result = jnp.where(
-        env.rules['enable_start_blocking'] & cond,
+        env.rules['enable_start_blocking'] & traverses_start_position,
         (~pins_on_start[nearest_start_after] | (current_pins == start[current_player])) & result, # true if start not blocked and new pos is free
         result
     )
     # every pin that would travers start position when its blocked cannot enter the goal
     x = jnp.where(
-        env.rules['enable_start_blocking'] & cond,
-        0, # true if start not blocked and new pos is free
+        env.rules['must_traverse_start'] & env.rules['enable_start_blocking'] & traverses_start_position & pins_on_start[nearest_start_after],
+        0, 
         x
     )
 
@@ -473,7 +475,7 @@ def val_action_normal_move(env:DOG, move: int):
         env.rules['enable_circular_board'],
         lambda: result,
         lambda: jnp.where(
-            (current_positions <= target) & ((x > 4) | (x == 0)), # if moving beyond target is not allowed
+            (current_positions <= target) & ((x > 4) | ((x == 0) & env.rules['must_traverse_start'])), # if moving beyond target is not allowed
             False,
             result
         )
@@ -714,7 +716,7 @@ def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
     current_positions = env.pins[current_player, pin]
     moved_positions = current_positions + move
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - env.target[current_player] - 1 #(start feld muss auch überaufen werden)
+    x = moved_positions - env.target[current_player] - jnp.int8(env.rules['must_traverse_start']) #(start feld muss auch überaufen werden)
 
     a = jax.lax.cond(
         jnp.isin(current_positions, env.goal[current_player]),
@@ -833,7 +835,7 @@ def step_hot_7(env:DOG, seven_dist):
     current_positions = current_pins[current_player]
     moved_positions = current_positions + seven_dist
     fitted_positions = moved_positions % env.board_size
-    x = moved_positions - env.target[current_player] - 1 #(start feld muss auch überaufen werden)
+    x = moved_positions - env.target[current_player] - jnp.int8(env.rules['must_traverse_start']) #(start feld muss auch überaufen werden)
 
     ###########################
     tmp_pins = env.pins.at[current_player].set(jnp.where(jnp.isin(current_positions, env.goal[current_player]), moved_positions, current_positions))

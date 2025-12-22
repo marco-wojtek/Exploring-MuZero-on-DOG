@@ -343,6 +343,28 @@ import pytest
         jnp.array(4),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True},
         jnp.array([[37, 35, 3, 0], [6, -1, 44, 14]])),
+        # Testfall 48: Regel: Startfeld nicht überlaufen
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(3),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': False},
+        jnp.array([[40, 35, 3, 0], [6, 14, 44, 10]])),
+        # Testfall 49: Regel: Startfeld nicht überlaufen
+      (jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(7),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': False},
+        jnp.array([[37, 35, 3, 0], [6, 14, 44, 10]])),
+        # Testfall 50: Regel: Startfeld nicht überlaufen
+      (jnp.array([[37, 35, 3, 1], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(7),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': False},
+        jnp.array([[4, 35, 3, 1], [6, 14, 44, 10]])),
+        
     ]
 )
 def test_normal_move(pins, player, pin, move, rules, expected_valid):
@@ -351,7 +373,8 @@ def test_normal_move(pins, player, pin, move, rules, expected_valid):
                     enable_circular_board=rules['enable_circular_board'],
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
-                    enable_friendly_fire=rules['enable_friendly_fire'])
+                    enable_friendly_fire=rules['enable_friendly_fire'],
+                    must_traverse_start=rules.get('must_traverse_start', True))
     env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=player)
     board, pins, reward, done = step_normal_move(env, pin, move)
     print(pins)
@@ -774,6 +797,18 @@ def test_swap_move(pins, player, pin, pos, rules, expected_valid):
         jnp.array([1, 0, 0, 0]),
         {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False},
         jnp.array([[37, 36, 41, 1], [9, 2, 45, 12]])),
+        # Testfall 27: Must traverse start
+      (jnp.array([[37, 36, 41, 1], [9, 2, 45, 12]]),
+        jnp.array(0),
+        jnp.array([3, 0, 0, 0]),
+        {'enable_circular_board': False, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'must_traverse_start': False},
+        jnp.array([[40, 36, 41, 1], [9, 2, 45, 12]])),
+        # Testfall 28: Must traverse start
+      (jnp.array([[37, 36, 41, 1], [9, 2, 45, 12]]),
+        jnp.array(0),
+        jnp.array([7, 0, 0, 0]),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': False, 'enable_start_blocking': False, 'enable_friendly_fire': False, 'must_traverse_start': False},
+        jnp.array([[4, 36, 41, -1], [9, -1, 45, 12]])),
     ]
 )
 def test_7_move(pins, player, dist, rules, expected_valid):
@@ -782,7 +817,8 @@ def test_7_move(pins, player, dist, rules, expected_valid):
                     enable_circular_board=rules['enable_circular_board'],
                     enable_jump_in_goal_area=rules['enable_jump_in_goal_area'],
                     enable_start_blocking=rules['enable_start_blocking'],
-                    enable_friendly_fire=rules['enable_friendly_fire'])
+                    enable_friendly_fire=rules['enable_friendly_fire'],
+                    must_traverse_start=rules.get('must_traverse_start', True))
     env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=player)
     board, pins, reward, done = step_hot_7(env, dist)
     print(pins)
