@@ -10,6 +10,49 @@ from utils.utility_funcs import *
 
 DISTS_7_4 = all_pin_distributions(7)  # (120,4), lex nach a0,a1,a2
 
+Board = chex.Array
+Start = chex.Array
+Target = chex.Array
+Goal = chex.Array
+Action = chex.Array
+Player = chex.Array
+Reward = chex.Array
+Done = chex.Array
+Pins = chex.Array
+Num_players = chex.Array
+Size = chex.Array
+Deck = chex.Array
+Card = chex.Array
+Hand = chex.Array
+Choices = chex.Array
+Round_starter = chex.Array
+Phase = chex.Array
+
+@struct.dataclass
+class DOG:
+    board: Board
+    current_player: Player 
+    pins : Pins 
+    reward: Reward 
+    done: Done     
+    deck: Deck  
+    hands: Hand
+    num_players: Num_players
+    start: Start
+    target: Target
+    goal: Goal
+
+    swap_choices: chex.Array  # (4,) speichert die gewählte Karte pro Spieler
+    round_starter: chex.Array # Speichert, wer die Runde begonnen hat
+    phase: chex.Array 
+    
+    board_size: Size = struct.field(pytree_node=False)
+    total_board_size: Size = struct.field(pytree_node=False)
+    rules : dict  = struct.field(pytree_node=False)
+
+def get_play_action_size(env: DOG):
+    return 2 * (4 * (12 + 1 + env.total_board_size) + 120)
+
 def index_to_dist(idx: int) -> jnp.ndarray:
     '''
     Wandelt einen Index in die entsprechende Pin-Verteilung um.
@@ -31,39 +74,6 @@ def dist_to_index(dist: jnp.ndarray):
     # JAX-kompatibel: lineare Suche über konstante Tabelle
     mask = jnp.all(DISTS_7_4 == dist[None, :], axis=1)
     return jnp.int32(jnp.argmax(mask)) 
-
-Board = chex.Array
-Start = chex.Array
-Target = chex.Array
-Goal = chex.Array
-Action = chex.Array
-Player = chex.Array
-Reward = chex.Array
-Done = chex.Array
-Pins = chex.Array
-Num_players = chex.Array
-Size = chex.Array
-Deck = chex.Array
-Card = chex.Array
-Hand = chex.Array
-
-@struct.dataclass
-class DOG:
-    board: Board
-    current_player: Player 
-    pins : Pins 
-    reward: Reward 
-    done: Done     
-    deck: Deck  
-    hands: Hand
-    num_players: Num_players
-    start: Start
-    target: Target
-    goal: Goal
-    
-    board_size: Size = struct.field(pytree_node=False)
-    total_board_size: Size = struct.field(pytree_node=False)
-    rules : dict  = struct.field(pytree_node=False)
 
 def env_reset(
         _,
@@ -135,6 +145,11 @@ def env_reset(
         goal = goal,
         deck = deck,
         hands = jnp.zeros((num_players, num_cards), dtype=jnp.int8),##
+
+        swap_choices = jnp.full(4, -1, dtype=jnp.int8), # for each player, which position to swap with
+        round_starter = jnp.array(starting_player, dtype=jnp.int8),
+        phase = jnp.int8(0),
+
         board_size=int(board_size),
         total_board_size=int(total_board_size),
         rules = {
@@ -213,6 +228,8 @@ def distribute_cards(env: DOG, quantity: int, key: jax.random.PRNGKey) -> DOG:
     # Berechne wie viele Karten insgesamt pro Typ verteilt wurden
     total_distributed = jnp.sum(new_hand_additions, axis=0)
     new_deck = new_deck - total_distributed
+
+    start_swap_phase = env.rules['enable_teams'] & (env.num_players == 4)
     
     return DOG(
         board=env.board,
@@ -226,6 +243,9 @@ def distribute_cards(env: DOG, quantity: int, key: jax.random.PRNGKey) -> DOG:
         goal=env.goal,
         deck=new_deck,
         hands=new_hands,
+        swap_choices = jnp.full(4, -1, dtype=jnp.int8),
+        round_starter = env.current_player, # Merken wer die Runde eigentlich beginnt
+        phase = jnp.where(start_swap_phase, jnp.int8(1), jnp.int8(0)), # 1 = SWAP, 0 = PLAY
         board_size=env.board_size,
         total_board_size=env.total_board_size,
         rules=env.rules,
@@ -561,7 +581,7 @@ def val_neg_move(env:DOG, move:int):
     return result
 
 # @jax.jit
-def valid_actions(env: DOG) -> chex.Array:
+def valid_step_actions(env: DOG) -> chex.Array:
     """
     Gibt eine Maske zurück, die alle gültigen Aktionen für den aktuellen Spieler angibt. Berücksichtigt alle valid_action functions.
     Args:
@@ -577,7 +597,7 @@ def valid_actions(env: DOG) -> chex.Array:
     # valid_actions based on cards in hand
     valid_action = jnp.where(hand > 0, True, False)
     
-    num_total_actions = 4 * (12 + 1 + env.total_board_size) + 120 # actions without joker copy :==>  num_pins * (num_normal_moves + -4 move + swap moves) + move 7 distributions
+    num_total_actions = get_play_action_size(env)  # actions without joker copy :==>  num_pins * (num_normal_moves + -4 move + swap moves) + move 7 distributions
     all_actions = jnp.full((num_total_actions,), False)
 
     # filter actions based on effect (handle special cards seperatly if necessary)
@@ -624,6 +644,26 @@ def valid_actions(env: DOG) -> chex.Array:
         lambda: jnp.zeros_like(all_actions, dtype=bool)
     )
     return jnp.concatenate([valid_joker, all_actions])
+
+def valid_actions(env: DOG) -> chex.Array:
+    '''
+    Gibt eine Maske zurück, die alle gültigen Aktionen für den aktuellen Spieler angibt. Berücksichtigt welche Phase gerade ist.
+    Args:
+        env: DOG environment
+    Returns:
+        Ein boolean-Array der Form (num_total_actions,), das für jede Aktion angibt, ob sie gültig ist.
+    '''
+    valid_cards = env.hands[env.current_player] > 0
+
+    # Zusammenfügen basierend auf Phase
+    # Wenn Phase == 0 (Play): Nur Play Actions erlaubt, Swap Actions False
+    # Wenn Phase == 1 (Swap): Nur Swap Actions erlaubt, Play Actions False
+
+    return jax.lax.cond(
+        env.phase == 0,
+        lambda: jnp.concatenate([valid_step_actions(env), jnp.zeros_like(valid_cards, dtype=bool)]),
+        lambda: jnp.concatenate([jnp.zeros(get_play_action_size(env), dtype=bool), valid_cards])
+    )
 
 def no_step(env:DOG) ->  DOG:
     """
@@ -891,7 +931,7 @@ def step_hot_7(env:DOG, seven_dist):
     return board, pins, reward, done
 
 @jax.jit
-def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
+def env_step_play_phase(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
     """
     Führt einen Schritt im DOG-Spiel basierend auf der gegebenen Aktion aus.
     Args:
@@ -905,6 +945,7 @@ def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
     
     mapped_action = map_action_to_move(env, action)
     card_used = map_action_to_card(mapped_action)
+    valid_card = env.hands[current_player, card_used] > 0
 
     is_joker = mapped_action[0] == 1
     is_swap = mapped_action[1] == 1
@@ -928,13 +969,18 @@ def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
         )
     
     board, pins, reward, done =jax.lax.cond(
-                                    is_swap,
-                                    lambda: swap_step(),
+                                    valid_card,
                                     lambda: jax.lax.cond(
-                                        jnp.sum(move_dists) == 7,
-                                        lambda: hot_7_step(),
-                                        lambda: move_step()
+                                        is_swap,
+                                        lambda: swap_step(),
+                                        lambda: jax.lax.cond(
+                                            jnp.sum(move_dists) == 7,
+                                            lambda: hot_7_step(),
+                                            lambda: move_step()
+                                        )
                                     )
+                                    ,
+                                    lambda: (env.board, env.pins, jnp.array(-1, dtype=jnp.int8), env.done)
                                 )
 
     hands = env.hands.at[current_player, card_used].add(jnp.where(reward == -1, 0, -1))  # only remove card if action was valid
@@ -959,11 +1005,95 @@ def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
         goal=env.goal,
         deck=env.deck,
         hands=hands,
+        swap_choices=env.swap_choices,
+        round_starter=env.round_starter,
+        phase=env.phase,
         board_size=env.board_size,
         total_board_size=env.total_board_size,
         rules=env.rules,
     )
     return env, reward, done
+
+@jax.jit
+def execute_team_swap(hands: Hand, swap_choices: chex.Array) -> Hand:
+    '''Führt den Kartentausch zwischen Partnern aus (0<->2, 1<->3).'''
+    partners = jnp.array([2, 3, 0, 1])
+    
+    received_cards = swap_choices[partners]
+    # Karte hinzufügen (Entfernen passierte bereits bei der Auswahl)
+    cards_received_one_hot = jax.nn.one_hot(received_cards, hands.shape[1], dtype=jnp.int8)
+    
+    # WICHTIG: Slice auf die tatsächliche Spieleranzahl, damit Shapes übereinstimmen (z.B. bei 2 Spielern)
+    # hands: (num_players, 14), cards_received_one_hot: (4, 14) -> Slice auf (num_players, 14)
+    return hands + cards_received_one_hot[:hands.shape[0]]
+
+@jax.jit
+def env_step_swap_phase(env: DOG, card_idx: int) -> tuple[DOG, Reward, Done]:
+    '''
+    Führt einen Auswahlschritt für den Kartentausch aus.
+    card_idx: 0-13 (Kartentyp)
+    '''
+    # Karte aus der Hand entfernen
+    new_hands = env.hands.at[env.current_player, card_idx].add(-1)
+    
+    # Wahl speichern
+    new_swap_choices = env.swap_choices.at[env.current_player].set(card_idx)
+    
+    # Nächster Spieler
+    next_player = (env.current_player + 1) % env.num_players
+    
+    # Prüfen ob Runde einmal komplett durch ist (zurück beim round_starter)
+    cycle_complete = (next_player == env.round_starter)
+    
+    # Wenn alle gewählt haben, Tausch ausführen
+    final_hands = jax.lax.cond(
+        cycle_complete,
+        lambda: execute_team_swap(new_hands, new_swap_choices),
+        lambda: new_hands
+    )
+    
+    # Phase und Current Player updaten
+    new_phase = jnp.where(cycle_complete, jnp.int8(0), env.phase)
+    new_current_player = jnp.where(cycle_complete, env.round_starter, next_player)
+    final_swap_choices = jnp.where(cycle_complete, jnp.full(4, -1, dtype=jnp.int8), new_swap_choices)
+
+    new_env = DOG(
+        board=env.board,
+        num_players=env.num_players,
+        pins=env.pins,
+        current_player=new_current_player,
+        done=env.done,
+        reward=jnp.array(0, dtype=jnp.int8), # Kein Reward für Tauschen
+        start=env.start,
+        target=env.target,
+        goal=env.goal,
+        deck=env.deck,
+        hands=final_hands,
+        swap_choices=final_swap_choices,
+        round_starter=env.round_starter,
+        phase=new_phase,
+        board_size=env.board_size,
+        total_board_size=env.total_board_size,
+        rules=env.rules,
+    )
+    return new_env, jnp.array(0, dtype=jnp.int8), env.done
+
+
+@jax.jit
+def env_step(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
+    """
+    Unified Step Funktion.
+    """
+    play_action_size = get_play_action_size(env)
+    
+    # Wenn wir in der Swap Phase sind, ist die Action ein Offset
+    # Action index für Swap = play_action_size + card_index
+    
+    return jax.lax.cond(
+        env.phase == 1,
+        lambda: env_step_swap_phase(env, action - play_action_size),
+        lambda: env_step_play_phase(env, action)
+    )
 
 # @jax.jit
 def map_action_to_move(env: DOG, action: Action) -> jnp.array:
@@ -975,7 +1105,7 @@ def map_action_to_move(env: DOG, action: Action) -> jnp.array:
     Returns:
         An array indicating the card and corresponding move.
     """
-    action_space = 2* ( 4 * (12 + 1 + env.total_board_size) + 120)  # total action space
+    action_space = get_play_action_size(env) # total action space
     is_joker = (action - (action_space // 2)) < 0
 
     # Aktion ohne Joker-Anteil
@@ -1011,7 +1141,8 @@ def map_action_to_move(env: DOG, action: Action) -> jnp.array:
         normal_act = act - (pins_x_board + 120) # wert im bereich 0 - (4*12 -1)
         pin_idx = normal_act // 12
         move = (normal_act % 12)
-        move = move + 1 + (move >= 7).astype(jnp.int32)  # skip 7
+        move = move + 1 # passe move auf (1-12) an
+        move = move + (move >= 7).astype(jnp.int32)  # skip 7
         dist = jnp.zeros(4, dtype=jnp.int32)
         return dist.at[pin_idx].set(move)
     dist = jax.lax.cond(
