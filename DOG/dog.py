@@ -231,24 +231,12 @@ def distribute_cards(env: DOG, quantity: int, key: jax.random.PRNGKey) -> DOG:
 
     start_swap_phase = env.rules['enable_teams'] & (env.num_players == 4)
     
-    return DOG(
-        board=env.board,
-        num_players=env.num_players,
-        pins=env.pins,
-        current_player=env.current_player,
-        done=env.done,
-        reward=env.reward,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
+    return env.replace(
         deck=new_deck,
         hands=new_hands,
         swap_choices = jnp.full(4, -1, dtype=jnp.int8),
         round_starter = env.current_player, # Merken wer die Runde eigentlich beginnt
         phase = jnp.where(start_swap_phase, jnp.int8(1), jnp.int8(0)), # 1 = SWAP, 0 = PLAY
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
     )
 
 def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.Array:
@@ -680,21 +668,9 @@ def no_step(env:DOG) ->  DOG:
         return jnp.where(take, cand, pnext)
     next_player = jax.lax.fori_loop(0, env.num_players, body, -jnp.array(1, dtype=jnp.int8))  
     print("Next player found:", next_player)
-    env = DOG(
-        board=env.board,
-        num_players=env.num_players,
-        pins=env.pins,
-        current_player=next_player,
-        done=env.done,
-        reward=env.reward,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        deck=env.deck,
+    env = env.replace(
         hands=env.hands.at[env.current_player].set(jnp.zeros(len(env.deck), dtype=jnp.int8)),
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
+        current_player=next_player
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
@@ -993,25 +969,15 @@ def env_step_play_phase(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
     next_player = jax.lax.fori_loop(0, env.num_players, body, -jnp.array(1, dtype=jnp.int8))  
 
     current_player = jnp.where(reward == -1, current_player, next_player)
-    env = DOG(
-        board=board,
-        num_players=env.num_players,
-        pins=pins,
+    env = env.replace(
         current_player=current_player,
-        done=done,
-        reward=reward,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        deck=env.deck,
+        board=board,
+        pins=pins,
         hands=hands,
-        swap_choices=env.swap_choices,
-        round_starter=env.round_starter,
-        phase=env.phase,
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
+        reward=reward,
+        done=done,
     )
+
     return env, reward, done
 
 @jax.jit
@@ -1057,24 +1023,12 @@ def env_step_swap_phase(env: DOG, card_idx: int) -> tuple[DOG, Reward, Done]:
     new_current_player = jnp.where(cycle_complete, env.round_starter, next_player)
     final_swap_choices = jnp.where(cycle_complete, jnp.full(4, -1, dtype=jnp.int8), new_swap_choices)
 
-    new_env = DOG(
-        board=env.board,
-        num_players=env.num_players,
-        pins=env.pins,
+    new_env = env.replace(
         current_player=new_current_player,
-        done=env.done,
-        reward=jnp.array(0, dtype=jnp.int8), # Kein Reward für Tauschen
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        deck=env.deck,
         hands=final_hands,
         swap_choices=final_swap_choices,
-        round_starter=env.round_starter,
         phase=new_phase,
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
+        reward= jnp.array(0, dtype=jnp.int8), # Kein Reward für Tauschen
     )
     return new_env, jnp.array(0, dtype=jnp.int8), env.done
 

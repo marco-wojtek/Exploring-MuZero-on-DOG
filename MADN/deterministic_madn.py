@@ -241,21 +241,15 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
     # player changes on invalid action
     current_player = jnp.where(done | (env.rules['enable_bonus_turn_on_6'] & (move == 6)), player_id, (player_id + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
 
-    env = deterministic_MADN(
+    env = env.replace(
         board=board,
-        num_players=env.num_players,#/
-        pins=pins,#
+        pins=pins,
         current_player=current_player,
-        done= done,#
-        reward=reward,#
-        action_set=action_set,#/
-        start=env.start,#
-        target=env.target,#
-        goal=env.goal,#
-        board_size=env.board_size,#
-        total_board_size=env.total_board_size,#
-        rules=env.rules,#/
+        done= done,
+        reward=reward,
+        action_set=action_set,
     )
+
     return env, reward, done
 
 @jax.jit
@@ -304,21 +298,11 @@ def no_step(env:deterministic_MADN) -> deterministic_MADN:
         Aktualisiertes MADN environment mit dem nächsten Spieler.
     """
     act_set = refill_action_set(env)
-    env = deterministic_MADN(
-        board=env.board,
-        num_players=env.num_players,
-        pins=env.pins,
+    env = env.replace(
+        action_set=act_set,
         current_player=(env.current_player + 1) % env.num_players,
-        done=env.done,
-        reward=env.reward,
-        action_set= act_set,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
     )
+
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
 @jax.jit
@@ -504,21 +488,7 @@ def winning_action(env:deterministic_MADN) -> chex.Array:
         Returns:
             Ein Array der Form (4, 6), das angibt, welche Aktionen für jeden Pin des aktuellen Spielers zum Sieg führen.
     '''
-    env_copy = deterministic_MADN(
-        board=env.board,
-        num_players=env.num_players,
-        current_player=env.current_player,
-        pins=env.pins,
-        done=env.done,
-        reward=env.reward,
-        action_set=env.action_set,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
-    )
+    env_copy = env.replace()
 
     env_copy, reward, done = jax.vmap(env_step, (None, 0))(env_copy, jnp.array([jnp.array([pin, move], dtype=jnp.int8) for pin in range(4) for move in range(1,7)], dtype=jnp.int8))
 

@@ -225,20 +225,8 @@ def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> classic_MADN:
         Returns:
             Die aktualisierte Spielumgebung mit dem neuen Würfelwert.
     '''
-    return classic_MADN(
-        board=env.board,
-        num_players=env.num_players,
-        pins=env.pins,
-        current_player=env.current_player,
-        done=env.done,
-        reward=env.reward,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        die=jax.random.choice(rng_key, jnp.array([1,2,3,4,5,6], dtype=jnp.int8), p = dice_probabilities(env)),
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
+    return env.replace(
+        die=jax.random.choice(rng_key, jnp.array([1,2,3,4,5,6], dtype=jnp.int8), p = dice_probabilities(env))
     )
 
 def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
@@ -250,20 +238,8 @@ def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
         Returns:
             Die aktualisierte Spielumgebung mit dem neuen Würfelwert.
     '''
-    return classic_MADN(
-        board=env.board,
-        num_players=env.num_players,
-        pins=env.pins,
-        current_player=env.current_player,
-        done=env.done,
-        reward=env.reward,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        die=die_value.astype(jnp.int8),
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
+    return env.replace(
+        die=die_value.astype(jnp.int8)
     )
 
 @jax.jit
@@ -338,21 +314,14 @@ def env_step(env: classic_MADN, pin: Action) -> classic_MADN:
     # player changes on invalid action
     current_player = jnp.where(done | (env.rules['enable_bonus_turn_on_6'] & (move == 6)), player_id, (player_id + 1) % env.num_players) # if the game is not done or the player played a 6, switch to the next player
 
-    env = classic_MADN(
+    env = env.replace(
         board=board,
-        num_players=env.num_players,#/
-        pins=pins,#
+        pins=pins,
         current_player=current_player,
-        done= done,#
-        reward=reward,#
-        start=env.start,#
-        target=env.target,#
-        goal=env.goal,#
-        die=env.die,#
-        board_size=env.board_size,#
-        total_board_size=env.total_board_size,#
-        rules=env.rules,#/
+        done= done,
+        reward=reward,
     )
+
     return env, reward, done
 
 @jax.jit
@@ -389,22 +358,11 @@ def no_step(env:classic_MADN) -> classic_MADN:
             env: Die aktuelle Spielumgebung
         Returns:
             Die aktualisierte Spielumgebung mit dem nächsten Spieler.
-    '''                 
-    env = classic_MADN(
-        board=env.board,
-        num_players=env.num_players,
-        pins=env.pins,
+    '''     
+    env = env.replace(
         current_player=(env.current_player + 1) % env.num_players,
-        done=env.done,
-        reward=env.reward,
-        start=env.start,
-        target=env.target,
-        goal=env.goal,
-        die=env.die,
-        board_size=env.board_size,
-        total_board_size=env.total_board_size,
-        rules=env.rules,
-    )
+    )            
+
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
 @jax.jit
