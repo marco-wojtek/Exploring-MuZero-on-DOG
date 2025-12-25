@@ -1,6 +1,9 @@
 import pygame
 import jax.numpy as jnp
 import jax
+import sys, os
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 from MADN.classic_madn import *
 from utils.visualize import board_to_mat, matrix_to_string
 
@@ -26,7 +29,7 @@ COLORS = {
     (2, 2): ROT,     # Rote Figur
     (2, 3): ROT,     # Rote Figur
     (2, 4): ROT,     # Rote Figur
-    (3, 0): (200, 280, 0),     # Gelb Zielfeld
+    (3, 0): (200, 180, 0),     # Gelb Zielfeld
     (3, 1): GELB,     # Gelbe Figur
     (3, 2): GELB,     # Gelbe Figur
     (3, 3): GELB,     # Gelbe Figur
@@ -56,6 +59,7 @@ def create_board_surface(matrix, scale):
             
             color_key = int(v // 10)
             fig_key = int(v % 10)
+            
             if color_key > 0 and fig_key > 0:
                 fig_key = 0  # Nur Felder zeichnen, keine Figuren
             color = COLORS.get((color_key, fig_key), None)
@@ -79,6 +83,7 @@ def draw_pins(screen, matrix, scale):
             color_key = int(v // 10)
             fig_key = int(v % 10)
             color = COLORS.get((color_key, fig_key), None)
+            
             if color and color_key > 0 and fig_key >= 1:
                 center = (x * scale + scale // 2, y * scale + scale // 2)
                 pygame.draw.circle(screen, color, center, radius)
@@ -114,7 +119,7 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
-    env = env_reset(0, num_players=2, distance=10, enable_initial_free_pin=True, layout=layout)
+    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout)
     
     matrix = board_to_mat(env, layout)
     print(matrix)
