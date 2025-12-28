@@ -52,3 +52,8 @@ This implementation leverages **JAX**, a high-performance numerical computing li
 - **Scalability**: Allows training MuZero through millions of self-play games in reasonable time
 
 JAX's functional programming paradigm and JIT compilation make it ideal for implementing the computationally intensive components of MuZero, particularly the repeated neural network evaluations during Monte Carlo Tree Search.
+
+## MuZero Intuition
+An overview of the MuZero by Julian Schrittwieser, a collaborator on the DeepMind project:
+
+[MuZero Intuition](https://www.julian.ac/blog/2020/12/22/muzero-intuition/)

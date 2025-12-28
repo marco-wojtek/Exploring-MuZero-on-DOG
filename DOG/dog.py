@@ -968,7 +968,7 @@ def env_step_play_phase(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
         return jnp.where(take, cand, pnext)
     next_player = jax.lax.fori_loop(0, env.num_players, body, -jnp.array(1, dtype=jnp.int8))  
 
-    current_player = jnp.where(reward == -1, current_player, next_player)
+    current_player = jnp.where(done, current_player, next_player)
     env = env.replace(
         current_player=current_player,
         board=board,

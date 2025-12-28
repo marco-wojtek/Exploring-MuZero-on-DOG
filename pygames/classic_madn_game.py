@@ -157,7 +157,9 @@ def main():
                 if 0 <= grid_y < h and 0 <= grid_x < w:
                     clicked_player_id = (int(matrix[grid_y, grid_x]) // 10 )- 1 
                     clicked_player_pin = (int(matrix[grid_y, grid_x]) % 10 )- 1
-                    if clicked_player_id == env.current_player:
+                    player_id = env.current_player
+                    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+                    if clicked_player_id == current_player:
                         print(f"Spieler {int(env.current_player) + 1} zieht mit Würfel {env.die}")
                         
                         env, _, done = env_step(env, jnp.array(clicked_player_pin))

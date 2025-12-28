@@ -171,7 +171,7 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, False, True, False])  # Alle 4 Spieler aktiv
-    env = env_reset(0, num_players=2, distance=10, enable_initial_free_pin=True, layout=layout)
+    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_teams=True, layout=layout)
     
     matrix = board_to_mat(env, layout)
     print(matrix)
@@ -227,7 +227,9 @@ def main():
                 if 0 <= grid_y < h and 0 <= grid_x < w:
                     clicked_player_id = (int(matrix[grid_y, grid_x]) // 10 )- 1 
                     clicked_player_pin = (int(matrix[grid_y, grid_x]) % 10 )- 1
-                    if clicked_player_id == env.current_player:
+                    player_id = env.current_player
+                    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+                    if clicked_player_id == current_player:
                         print(f"Spieler {int(env.current_player) + 1} zieht mit Zug {action}")
                         
                         env, _, done = env_step(env, jnp.array([clicked_player_pin, action]))

@@ -41,6 +41,93 @@ COLORS = {
     (4, 4): GRUEN,     # Grüne Figur
 }
 
+class Button:
+    def __init__(self, x, y, width, height, text, color=(200, 200, 200), text_color=(0, 0, 0)):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.text = text
+        self.color = color
+        self.text_color = text_color
+        self.font = pygame.font.SysFont("Arial", 16)
+        self.hovered = False
+        
+    def draw(self, screen):
+        color = (180, 180, 180) if self.hovered else self.color
+        pygame.draw.rect(screen, color, self.rect)
+        pygame.draw.rect(screen, (0, 0, 0), self.rect, 2)
+        
+        text_surface = self.font.render(self.text, True, self.text_color)
+        text_rect = text_surface.get_rect(center=self.rect.center)
+        screen.blit(text_surface, text_rect)
+    
+    def is_clicked(self, pos):
+        return self.rect.collidepoint(pos)
+    
+    def update_hover(self, pos):
+        self.hovered = self.rect.collidepoint(pos)
+
+class Hot7Selector:
+    def __init__(self, pins, max_steps=7):
+        self.pins = pins  # Liste der Pin-IDs
+        self.selected_steps = {pin: 0 for pin in pins}
+        self.max_steps = max_steps
+
+    def draw(self, screen, font, scale, start_y):
+        for i, pin in enumerate(self.pins):
+            x = 50
+            y = start_y + i * 40
+            text = font.render(f"Pin {pin+1}: {self.selected_steps[pin]}", True, (0,0,0))
+            screen.blit(text, (x, y))
+            # Buttons für + und -
+            plus_rect = pygame.Rect(x+120, y, 30, 30)
+            minus_rect = pygame.Rect(x+160, y, 30, 30)
+            pygame.draw.rect(screen, (180,180,180), plus_rect)
+            pygame.draw.rect(screen, (180,180,180), minus_rect)
+            screen.blit(font.render("+", True, (0,0,0)), (x+127, y+5))
+            screen.blit(font.render("-", True, (0,0,0)), (x+167, y+5))
+            # Speichere die Button-Rects für Klick-Erkennung
+            setattr(self, f"plus_{pin}", plus_rect)
+            setattr(self, f"minus_{pin}", minus_rect)
+
+    def handle_click(self, pos):
+        for pin in self.pins:
+            if getattr(self, f"plus_{pin}").collidepoint(pos):
+                if self.selected_steps[pin] < self.max_steps:
+                    self.selected_steps[pin] += 1
+            if getattr(self, f"minus_{pin}").collidepoint(pos):
+                if self.selected_steps[pin] > 0:
+                    self.selected_steps[pin] -= 1
+
+def create_dice_buttons(screen_width, screen_height):
+    """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
+    buttons = []
+    button_width = 25
+    button_height = 25
+    spacing = 5
+    
+    # Zentrum berechnen
+    center_x = screen_width // 2
+    center_y = screen_height // 2
+    
+    # Buttons unter dem UI positionieren (UI-Box + Abstand + Button-Höhe)
+    y = center_y + 40 + 20  # UI-Box ist 80px hoch (center_y ± 40), +20px Abstand
+    
+    # Horizontale Zentrierung der 6 Buttons
+    total_width = 6 * button_width + 5 * spacing
+    start_x = center_x - total_width // 2
+    
+    # erste 7 Buttons erstellen
+    for i in range(0, 7):
+        x = start_x + (i-1) * (button_width + spacing)
+        button = Button(x, y, button_width, button_height, str(i))
+        buttons.append(button)
+    # weitere 7 buttons darunter
+    y += button_height + spacing
+    for i in range(7, 14):
+        x = start_x + (i-8) * (button_width + spacing)
+        button = Button(x, y, button_width, button_height, str(i))
+        buttons.append(button)
+    return buttons
+
 def create_board_surface(matrix, scale):
     """
     Erstellt ein Surface mit dem statischen Spielfeld (Hintergrund + Felder).
@@ -93,7 +180,7 @@ def draw_pins(screen, matrix, scale):
                 highlight_pos = (center[0] - radius // 3, center[1] - radius // 3)
                 pygame.draw.circle(screen, (255, 255, 255), highlight_pos, radius // 4)
 
-def draw_ui(screen, font, current_player, dice_roll):
+def draw_ui(screen, font, current_player, hands):
     """
     Zeichnet UI-Elemente (Spieler, Würfel) in die Mitte.
     """
@@ -102,13 +189,13 @@ def draw_ui(screen, font, current_player, dice_roll):
     center_y = screen.get_height() // 2
     
     # Box für UI
-    box_rect = pygame.Rect(center_x - 60, center_y - 40, 120, 80)
+    box_rect = pygame.Rect(center_x - 80, center_y - 40, 160, 80)
     pygame.draw.rect(screen, BACKGROUND_COLOR, box_rect)
     pygame.draw.rect(screen, FIELD_OUTLINE, box_rect, 2)
     
     player_color = COLORS.get((current_player + 1, 1), (0, 0, 0))
     player_text = font.render(f"Spieler {current_player + 1}", True, player_color)
-    dice_text = font.render(f"Würfel: {dice_roll if dice_roll > 0 else '-'}", True, (0, 0, 0))
+    dice_text = font.render(f"Actions: {hands[current_player]}", True, (0, 0, 0))
     
     screen.blit(player_text, (center_x - player_text.get_width() // 2, center_y - 30))
     screen.blit(dice_text, (center_x - dice_text.get_width() // 2, center_y + 5))
@@ -119,8 +206,9 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
-    env = env_reset(0, num_players=4, distance=16, enable_initial_free_pin=True, layout=layout)
-    
+    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout)
+    key = jax.random.PRNGKey(42)
+    env = distribute_cards(env, 6, key)  # Karten verteilen
     matrix = board_to_mat(env, layout)
     print(matrix)
     h, w = matrix.shape
@@ -132,20 +220,35 @@ def main():
     board_surface = create_board_surface(matrix, scale)
     # UI-Elemente
     font = pygame.font.SysFont("Arial", 20)
-    game_phase = 'ROLL'
-    rng_key = jax.random.PRNGKey(42)
+    game_phase = 'CARD'
     running = True
 
+    # Würfel-Buttons erstellen
+    card_buttons = create_dice_buttons(w * scale, h * scale)
+
+    hot7_selector = None
+
     while running:
+
+        mouse_pos = pygame.mouse.get_pos()
+        
+        # Hover-Effekte aktualisieren
+        if game_phase == 'CARD':
+            for button in card_buttons:
+                button.update_hover(mouse_pos)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
 
-            # 1. Würfeln per Leertaste
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and game_phase == 'ROLL':
-                rng_key, subkey = jax.random.split(rng_key)
-                print(f"Spieler {int(env.current_player) + 1} würfelt eine {env.die}")
-                game_phase = 'MOVE'
+            # Button-Klicks für Würfel
+            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD':
+                for i, button in enumerate(card_buttons):
+                    if button.is_clicked(mouse_pos):
+                        action = i
+                        print(f"Spieler {int(env.current_player) + 1} wählt eine {action}")
+                        game_phase = 'MOVE'
+
 
             # 2. Pin auswählen per Mausklick
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'MOVE':
@@ -156,15 +259,16 @@ def main():
                 if 0 <= grid_y < h and 0 <= grid_x < w:
                     clicked_player_id = (int(matrix[grid_y, grid_x]) // 10 )- 1 
                     clicked_player_pin = (int(matrix[grid_y, grid_x]) % 10 )- 1
-                    if clicked_player_id == env.current_player:
-                        print(f"Spieler {int(env.current_player) + 1} zieht mit Würfel {env.die}")
-                        
-                        env, _, done = env_step(env, jnp.array(clicked_player_pin))
+                    player_id = env.current_player
+                    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+                    if clicked_player_id == current_player:
+                        print(map_action_to_move(env, jnp.array(10)))
+                        env, _, done = env_step(env, jnp.array(10))
                         matrix = board_to_mat(env, layout)
-                        game_phase = 'ROLL'
+                        game_phase = 'CARD'
                         
                         if done:
-                            print(f"Spiel vorbei! Gewinner ist Spieler {get_winner(env, env.board)}")
+                            print(f"Spiel vorbei! Gewinner ist Spieler {jnp.argwhere(get_winner(env, env.board))[0][0]+1}")
                             running = False
                     else:
                         print("Das ist nicht dein Pin!")
@@ -177,7 +281,12 @@ def main():
         draw_pins(screen, matrix, scale)
         
         # 3. UI
-        draw_ui(screen, font, int(env.current_player), env.die)
+        draw_ui(screen, font, int(env.current_player), env.hands)
+
+        # Würfel-Buttons zeichnen (nur in CARD-Phase)
+        if game_phase == 'CARD':
+            for button in card_buttons:
+                button.draw(screen)
         
         pygame.display.flip()
         clock.tick(60)
