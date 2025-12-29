@@ -160,7 +160,7 @@ def main():
                     player_id = env.current_player
                     current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
                     if clicked_player_id == current_player:
-                        print(f"Spieler {int(env.current_player) + 1} zieht mit Würfel {env.die}")
+                        print(f"Spieler {int(env.current_player) + 1} zieht mit Würfel {env.die} und Pin {clicked_player_pin}")
                         
                         env, _, done = env_step(env, jnp.array(clicked_player_pin))
                         matrix = board_to_mat(env, layout)

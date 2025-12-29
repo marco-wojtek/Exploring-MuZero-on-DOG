@@ -6,6 +6,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from DOG.dog import *
 from utils.visualize import board_to_mat, matrix_to_string
+# import warnings
+# warnings.filterwarnings("error", category=FutureWarning)
 
 # Farben wie im Bild
 BACKGROUND_COLOR = (250, 235, 180)  # Cremefarbener Hintergrund
@@ -67,37 +69,121 @@ class Button:
 
 class Hot7Selector:
     def __init__(self, pins, max_steps=7):
-        self.pins = pins  # Liste der Pin-IDs
-        self.selected_steps = {pin: 0 for pin in pins}
+        self.pins = [int(p) for p in pins]
+        self.selected_steps = {pin: 0 for pin in self.pins}
         self.max_steps = max_steps
+        self.plus_buttons = {}
+        self.minus_buttons = {}
+        self.confirm_button = None
+        # Kleinere Fonts für das kompakte Fenster
+        self.font = pygame.font.SysFont("Arial", 14)
+        self.title_font = pygame.font.SysFont("Arial", 16, bold=True)
 
-    def draw(self, screen, font, scale, start_y):
+    def draw(self, screen, center_x, center_y):
+        # Layout-Konstanten
+        width = 200
+        row_height = 30
+        header_height = 35
+        footer_height = 45
+        height = header_height + len(self.pins) * row_height + footer_height
+        
+        # Popup Rechteck berechnen
+        popup_rect = pygame.Rect(0, 0, width, height)
+        popup_rect.center = (center_x, center_y)
+        
+        # Schatten (einfach versetztes Rechteck)
+        shadow_rect = popup_rect.copy()
+        shadow_rect.move_ip(3, 3)
+        pygame.draw.rect(screen, (100, 100, 100), shadow_rect)
+        
+        # Hintergrund
+        pygame.draw.rect(screen, (250, 250, 245), popup_rect)
+        pygame.draw.rect(screen, (0, 0, 0), popup_rect, 2)
+        
+        current_sum = sum(self.selected_steps.values())
+        remaining = self.max_steps - current_sum
+        
+        # Header Text
+        title = f"Verteile 7 (Rest: {remaining})"
+        text_surf = self.title_font.render(title, True, (0,0,0))
+        text_rect = text_surf.get_rect(center=(popup_rect.centerx, popup_rect.top + 18))
+        screen.blit(text_surf, text_rect)
+        
+        # Zeilen für Pins
+        start_y = popup_rect.top + header_height
+        btn_size = 22
+        
         for i, pin in enumerate(self.pins):
-            x = 50
-            y = start_y + i * 40
-            text = font.render(f"Pin {pin+1}: {self.selected_steps[pin]}", True, (0,0,0))
-            screen.blit(text, (x, y))
-            # Buttons für + und -
-            plus_rect = pygame.Rect(x+120, y, 30, 30)
-            minus_rect = pygame.Rect(x+160, y, 30, 30)
-            pygame.draw.rect(screen, (180,180,180), plus_rect)
-            pygame.draw.rect(screen, (180,180,180), minus_rect)
-            screen.blit(font.render("+", True, (0,0,0)), (x+127, y+5))
-            screen.blit(font.render("-", True, (0,0,0)), (x+167, y+5))
-            # Speichere die Button-Rects für Klick-Erkennung
-            setattr(self, f"plus_{pin}", plus_rect)
-            setattr(self, f"minus_{pin}", minus_rect)
+            y = start_y + i * row_height
+            # Label
+            label = self.font.render(f"Pin {pin+1}: {self.selected_steps[pin]}", True, (0,0,0))
+            screen.blit(label, (popup_rect.left + 15, y + 4))
+            
+            # Buttons (Rechtsbündig)
+            # Minus
+            minus_rect = pygame.Rect(popup_rect.right - 65, y, btn_size, btn_size)
+            minus_active = self.selected_steps[pin] > 0
+            self._draw_btn(screen, minus_rect, "-", minus_active)
+            self.minus_buttons[pin] = minus_rect
+            
+            # Plus
+            plus_rect = pygame.Rect(popup_rect.right - 35, y, btn_size, btn_size)
+            plus_active = remaining > 0
+            self._draw_btn(screen, plus_rect, "+", plus_active)
+            self.plus_buttons[pin] = plus_rect
+
+        # Confirm Button (nur wenn Summe == 7)
+        if current_sum == self.max_steps:
+            confirm_rect = pygame.Rect(0, 0, 80, 28)
+            confirm_rect.centerx = popup_rect.centerx
+            confirm_rect.bottom = popup_rect.bottom - 10
+            
+            pygame.draw.rect(screen, (100, 200, 100), confirm_rect)
+            pygame.draw.rect(screen, (0, 0, 0), confirm_rect, 1)
+            
+            conf_surf = self.font.render("OK", True, (0,0,0))
+            conf_text_rect = conf_surf.get_rect(center=confirm_rect.center)
+            screen.blit(conf_surf, conf_text_rect)
+            
+            self.confirm_button = confirm_rect
+        else:
+            self.confirm_button = None
+
+    def _draw_btn(self, screen, rect, text, active):
+        color = (220, 220, 220) if active else (240, 240, 240)
+        text_color = (0, 0, 0) if active else (180, 180, 180)
+        pygame.draw.rect(screen, color, rect)
+        pygame.draw.rect(screen, (100, 100, 100), rect, 1)
+        
+        surf = self.font.render(text, True, text_color)
+        text_rect = surf.get_rect(center=rect.center)
+        screen.blit(surf, text_rect)
 
     def handle_click(self, pos):
+        """Returns True if confirmed, False otherwise"""
+        current_sum = sum(self.selected_steps.values())
+        
+        # Check Confirm
+        if self.confirm_button and self.confirm_button.collidepoint(pos):
+            return True
+
         for pin in self.pins:
-            if getattr(self, f"plus_{pin}").collidepoint(pos):
-                if self.selected_steps[pin] < self.max_steps:
+            if self.plus_buttons.get(pin) and self.plus_buttons[pin].collidepoint(pos):
+                if current_sum < self.max_steps:
                     self.selected_steps[pin] += 1
-            if getattr(self, f"minus_{pin}").collidepoint(pos):
+                    return False
+            
+            if self.minus_buttons.get(pin) and self.minus_buttons[pin].collidepoint(pos):
                 if self.selected_steps[pin] > 0:
                     self.selected_steps[pin] -= 1
+                    return False
+        return False
 
-def create_dice_buttons(screen_width, screen_height):
+    def reset(self):
+        for pin in self.pins:
+            self.selected_steps[pin] = 0
+
+def create_all_card_buttons(screen_width, screen_height):
     """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
     buttons = []
     button_width = 25
@@ -125,6 +211,56 @@ def create_dice_buttons(screen_width, screen_height):
     for i in range(7, 14):
         x = start_x + (i-8) * (button_width + spacing)
         button = Button(x, y, button_width, button_height, str(i))
+        buttons.append(button)
+    return buttons
+
+def create_pos_neg_4_buttons(screen_width, screen_height):
+    """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
+    buttons = []
+    button_width = 25
+    button_height = 25
+    spacing = 5
+    
+    # Zentrum berechnen
+    center_x = screen_width // 2
+    center_y = screen_height // 2
+    
+    # Buttons unter dem UI positionieren (UI-Box + Abstand + Button-Höhe)
+    y = center_y + 40 + 20  # UI-Box ist 80px hoch (center_y ± 40), +20px Abstand
+    
+    # Horizontale Zentrierung der 2 Buttons
+    total_width = 2 * button_width + 1 * spacing
+    start_x = center_x - total_width // 2
+    
+    # 2 Buttons erstellen
+    for i in range(0, 2):
+        x = start_x + (i-1) * (button_width + spacing)
+        button = Button(x, y, button_width, button_height, str((-1)**i * 4))
+        buttons.append(button)
+    return buttons
+
+def create_1_or_11_buttons(screen_width, screen_height):
+    """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
+    buttons = []
+    button_width = 25
+    button_height = 25
+    spacing = 5
+    
+    # Zentrum berechnen
+    center_x = screen_width // 2
+    center_y = screen_height // 2
+    
+    # Buttons unter dem UI positionieren (UI-Box + Abstand + Button-Höhe)
+    y = center_y + 40 + 20  # UI-Box ist 80px hoch (center_y ± 40), +20px Abstand
+    
+    # Horizontale Zentrierung der 2 Buttons
+    total_width = 2 * button_width + 1 * spacing
+    start_x = center_x - total_width // 2
+    
+    # 2 Buttons erstellen
+    for i in range(0, 2):
+        x = start_x + (i-1) * (button_width + spacing)
+        button = Button(x, y, button_width, button_height, str(1 if i == 0 else 11))
         buttons.append(button)
     return buttons
 
@@ -173,12 +309,20 @@ def draw_pins(screen, matrix, scale):
             
             if color and color_key > 0 and fig_key >= 1:
                 center = (x * scale + scale // 2, y * scale + scale // 2)
+                id = v - (color_key * 10)
+                # Kreis für Pin zeichnen
                 pygame.draw.circle(screen, color, center, radius)
                 pygame.draw.circle(screen, FIELD_OUTLINE, center, radius, 2)
                 
                 # Glanzeffekt (kleiner weißer Kreis oben links)
                 highlight_pos = (center[0] - radius // 3, center[1] - radius // 3)
                 pygame.draw.circle(screen, (255, 255, 255), highlight_pos, radius // 4)
+
+                # Pin-Nummer in die Mitte zeichnen
+                font = pygame.font.SysFont("Arial", 16)
+                text_surface = font.render(str(id), True, (0, 0, 0))
+                text_rect = text_surface.get_rect(center=center)
+                screen.blit(text_surface, text_rect)
 
 def draw_ui(screen, font, current_player, hands):
     """
@@ -209,7 +353,9 @@ def main():
     env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout)
     key = jax.random.PRNGKey(42)
     env = distribute_cards(env, 6, key)  # Karten verteilen
+    env = env.replace(phase=jnp.int8(0))  # Setze Phase auf Play
     matrix = board_to_mat(env, layout)
+    action_space = get_play_action_size(env)
     print(matrix)
     h, w = matrix.shape
     
@@ -220,13 +366,18 @@ def main():
     board_surface = create_board_surface(matrix, scale)
     # UI-Elemente
     font = pygame.font.SysFont("Arial", 20)
+    # game phasen: 'CARD' zum Karten/Würfel auswählen, 'MOVE' zum Pin bewegen, 'HOT7' zum Hot7 Auswahl, 'SWAP' zum Tauschen, 'JOKER' zum Joker Auswahl
     game_phase = 'CARD'
     running = True
 
-    # Würfel-Buttons erstellen
-    card_buttons = create_dice_buttons(w * scale, h * scale)
+    # Karten-Buttons erstellen
+    card_buttons = create_all_card_buttons(w * scale, h * scale)
+    posneg4_buttons = create_pos_neg_4_buttons(w * scale, h * scale)
+    oneor11_buttons = create_1_or_11_buttons(w * scale, h * scale)
+    hot7_buttons = Hot7Selector(pins=[0,1,2,3])
+    hot7_buttons.reset()
 
-    hot7_selector = None
+    selected_action = jnp.zeros(6, dtype=jnp.int32)
 
     while running:
 
@@ -241,14 +392,81 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
-            # Button-Klicks für Würfel
+            # Button-Klicks für Karten
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD':
                 for i, button in enumerate(card_buttons):
                     if button.is_clicked(mouse_pos):
                         action = i
                         print(f"Spieler {int(env.current_player) + 1} wählt eine {action}")
+                        if action == 7:
+                            game_phase = 'HOT7'
+                            player_id = env.current_player
+                        elif action == 0: # Joker nutzung erwartet neue Kartenauswahl
+                            game_phase = 'CARD'
+                            selected_action = selected_action.at[0].set(1)
+                        elif action == 1:
+                            game_phase = 'SWAP'
+                            selected_action = selected_action.at[1].set(1)
+                        elif action == 11:
+                            game_phase = '1OR11'
+                        elif action == 4:
+                            game_phase = 'POSNEG4'
+                        else:
+                            target_idx = action
+                            game_phase = 'MOVE'
+
+            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'HOT7':
+                confirmed = hot7_buttons.handle_click(mouse_pos)
+                if confirmed:
+                    print(f"Spieler {int(env.current_player) + 1} wählt Hot7 mit Verteilung: {hot7_buttons.selected_steps}")
+                    for pin in hot7_buttons.pins:
+                        selected_action = selected_action.at[pin+2].set(hot7_buttons.selected_steps[pin])
+                    print(map_move_to_action(env, selected_action))
+                    env, r, done = env_step(env, map_move_to_action(env, selected_action))
+                    print(f"Reward: {r}")
+                    matrix = board_to_mat(env, layout)
+                    selected_action = jnp.zeros(6, dtype=jnp.int32)
+                    hot7_buttons.reset()
+                    game_phase = 'CARD'
+                    
+                    if done:
+                        print(f"Spiel vorbei! Gewinner ist Spieler {jnp.argwhere(get_winner(env, env.board))[0][0]+1}")
+                        running = False
+
+            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'POSNEG4':
+                for i, button in enumerate(posneg4_buttons):
+                    if button.is_clicked(mouse_pos):
+                        action = -4 if i == 1 else 4
+                        print(f"Spieler {int(env.current_player) + 1} wählt eine {action}")
+                        target_idx = action
                         game_phase = 'MOVE'
 
+            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == '1OR11':
+                for i, button in enumerate(oneor11_buttons):
+                    if button.is_clicked(mouse_pos):
+                        action = 1 if i == 0 else 11
+                        print(f"Spieler {int(env.current_player) + 1} wählt eine {action}")
+                        target_idx = action
+                        game_phase = 'MOVE'
+
+            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'SWAP':
+                mouse_x, mouse_y = event.pos
+                grid_x = mouse_x // scale
+                grid_y = mouse_y // scale
+                
+                if 0 <= grid_y < h and 0 <= grid_x < w:
+                    clicked_player_id = (int(matrix[grid_y, grid_x]) // 10 )- 1 
+                    clicked_player_pin = (int(matrix[grid_y, grid_x]) % 10 )- 1
+                    player_id = env.current_player
+                    current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
+                    
+                    target_idx = env.pins[clicked_player_id, clicked_player_pin]
+                    
+                    print(f"Spieler {int(env.current_player) + 1} tauscht mit Spieler {clicked_player_id + 1} Pin auf Position {target_idx}")
+                    if clicked_player_id != current_player and target_idx >= 0 and target_idx < env.board_size:
+                        game_phase = 'MOVE'
+                    else:
+                        print("Kein gültiger Tauschpartner!")
 
             # 2. Pin auswählen per Mausklick
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'MOVE':
@@ -262,9 +480,10 @@ def main():
                     player_id = env.current_player
                     current_player = jnp.where(env.rules["enable_teams"] & is_player_done(env.num_players, env.board, env.goal, player_id), (player_id + 2)%4, player_id)
                     if clicked_player_id == current_player:
-                        print(map_action_to_move(env, jnp.array(10)))
-                        env, _, done = env_step(env, jnp.array(10))
+                        selected_action = selected_action.at[clicked_player_pin+2].set(target_idx)
+                        env, _, done = env_step(env, map_move_to_action(env, selected_action))
                         matrix = board_to_mat(env, layout)
+                        selected_action = jnp.zeros(6, dtype=jnp.int32)
                         game_phase = 'CARD'
                         
                         if done:
@@ -286,6 +505,14 @@ def main():
         # Würfel-Buttons zeichnen (nur in CARD-Phase)
         if game_phase == 'CARD':
             for button in card_buttons:
+                button.draw(screen)
+        if game_phase == 'HOT7':
+            hot7_buttons.draw(screen, center_x=screen.get_width()//2, center_y=screen.get_height()//2)
+        if game_phase == 'POSNEG4':
+            for button in posneg4_buttons:
+                button.draw(screen)
+        if game_phase == '1OR11':
+            for button in oneor11_buttons:
                 button.draw(screen)
         
         pygame.display.flip()

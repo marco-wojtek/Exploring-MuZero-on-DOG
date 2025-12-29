@@ -44,6 +44,8 @@ class DOG:
 
     swap_choices: chex.Array  # (4,) speichert die gewählte Karte pro Spieler
     round_starter: chex.Array # Speichert, wer die Runde begonnen hat
+    # Wenn Phase == 0 (Play): Nur Play Actions erlaubt, Swap Actions False
+    # Wenn Phase == 1 (Swap): Nur Swap Actions erlaubt, Play Actions False
     phase: chex.Array 
     
     board_size: Size = struct.field(pytree_node=False)
@@ -51,7 +53,7 @@ class DOG:
     rules : dict  = struct.field(pytree_node=False)
 
 def get_play_action_size(env: DOG):
-    return 2 * (4 * (12 + 1 + env.total_board_size) + 120)
+    return jnp.int32(2 * (4 * (12 + 1 + env.total_board_size) + 120))
 
 def index_to_dist(idx: int) -> jnp.ndarray:
     '''
@@ -148,7 +150,7 @@ def env_reset(
 
         swap_choices = jnp.full(4, -1, dtype=jnp.int8), # for each player, which position to swap with
         round_starter = jnp.array(starting_player, dtype=jnp.int8),
-        phase = jnp.int8(0),
+        phase = jnp.int8(0), # TODO: INITIALE PHASE SETZEN
 
         board_size=int(board_size),
         total_board_size=int(total_board_size),
@@ -674,7 +676,7 @@ def no_step(env:DOG) ->  DOG:
     )
     return env, jnp.array(0, dtype=jnp.int8), env.done
 
-@jax.jit
+# @jax.jit
 def step_swap(env: DOG, pin_idx: Action, swap_pos: Action) -> DOG:
     '''
     Führt einen Swap-Schritt im DOG-Spiel aus.
@@ -709,7 +711,7 @@ def step_swap(env: DOG, pin_idx: Action, swap_pos: Action) -> DOG:
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-@jax.jit
+# @jax.jit
 def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
     '''
     Führt einen normalen Bewegungsschritt im DOG-Spiel aus.
@@ -780,7 +782,7 @@ def step_normal_move(env: DOG, pin: Action, move: Action) -> DOG:
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-@jax.jit
+# @jax.jit
 def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
     '''
     Führt einen negativen Bewegungsschritt im DOG-Spiel aus.
@@ -832,7 +834,7 @@ def step_neg_move(env: DOG, pin: Action, move: Action) -> DOG:
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-@jax.jit
+# @jax.jit
 def step_hot_7(env:DOG, seven_dist):
     '''
     Führt einen Hot 7 Bewegungsschritt im DOG-Spiel aus.
@@ -906,7 +908,7 @@ def step_hot_7(env:DOG, seven_dist):
     reward = jnp.array(jnp.where(env.done, 0, jnp.where(invalid_action, -1, winner[current_player])), dtype=jnp.int8)
     return board, pins, reward, done
 
-@jax.jit
+# @jax.jit
 def env_step_play_phase(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
     """
     Führt einen Schritt im DOG-Spiel basierend auf der gegebenen Aktion aus.
@@ -980,7 +982,7 @@ def env_step_play_phase(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
 
     return env, reward, done
 
-@jax.jit
+# @jax.jit
 def execute_team_swap(hands: Hand, swap_choices: chex.Array) -> Hand:
     '''Führt den Kartentausch zwischen Partnern aus (0<->2, 1<->3).'''
     partners = jnp.array([2, 3, 0, 1])
@@ -993,7 +995,7 @@ def execute_team_swap(hands: Hand, swap_choices: chex.Array) -> Hand:
     # hands: (num_players, 14), cards_received_one_hot: (4, 14) -> Slice auf (num_players, 14)
     return hands + cards_received_one_hot[:hands.shape[0]]
 
-@jax.jit
+# @jax.jit
 def env_step_swap_phase(env: DOG, card_idx: int) -> tuple[DOG, Reward, Done]:
     '''
     Führt einen Auswahlschritt für den Kartentausch aus.
@@ -1003,7 +1005,7 @@ def env_step_swap_phase(env: DOG, card_idx: int) -> tuple[DOG, Reward, Done]:
     new_hands = env.hands.at[env.current_player, card_idx].add(-1)
     
     # Wahl speichern
-    new_swap_choices = env.swap_choices.at[env.current_player].set(card_idx)
+    new_swap_choices = env.swap_choices.at[env.current_player].set(jnp.int8(card_idx))
     
     # Nächster Spieler
     next_player = (env.current_player + 1) % env.num_players
@@ -1113,6 +1115,49 @@ def map_action_to_move(env: DOG, action: Action) -> jnp.array:
         )
     )
     return jnp.concatenate([is_joker[None].astype(jnp.int8), is_swap[None].astype(jnp.int8), dist])
+
+@jax.jit
+def map_move_to_action(env: DOG, move: jnp.array) -> int:
+    """
+    Maps a given move distance to the corresponding action index in the DOG game.
+    Args:
+        move: An array indicating the card and corresponding move.
+        env: DOG environment
+    Returns:
+        The action index corresponding to the given move distance.
+    """
+    is_joker = move[0] == 1
+    is_swap = move[1] == 1
+    move_dists = move[2:]
+
+    action_space = get_play_action_size(env)
+    pins_x_board = (4 * env.total_board_size)
+
+    def swap_action_index(move_dists):
+        pin_idx = jnp.argmax(move_dists >= 0)
+        swap_pos = move_dists[pin_idx]
+        return pin_idx * env.total_board_size + swap_pos
+    
+    def normal_move_action_index(move_dists):
+        pin_idx = jnp.argmax(move_dists != 0)
+        move = move_dists[pin_idx]
+        move_adj = move - 1 - (move > 7).astype(jnp.int32)  # adjust for skipping 7
+        return pins_x_board + 120 + pin_idx * 12 + move_adj
+
+    action_idx = jax.lax.cond(
+        is_swap,
+        lambda: swap_action_index(move_dists),
+        lambda: jax.lax.cond(
+            jnp.sum(move_dists) == 7,
+            lambda: pins_x_board + dist_to_index(move_dists),
+            lambda: jax.lax.cond(
+                jnp.any(move_dists == -4),
+                lambda: (action_space // 2 -4) + jnp.argmax(move_dists == -4),
+                lambda: normal_move_action_index(move_dists)
+            )
+        )
+    )
+    return jnp.int32(jnp.where(is_joker, action_idx, action_idx + (action_space // 2)))
 
 def map_action_to_card(action: Action) -> Card:
     """
