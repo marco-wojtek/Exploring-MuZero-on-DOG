@@ -104,3 +104,15 @@ Wichtig für MuZero:
 # DOG Regeln
 - Figuren auf dem eigenen Startfeld dürfen nicht getauscht werden
 - Startfeld blockiert alle Figuren; d.h. man kommt nicht ins eigene Ziel wenn eine Figur dort steht
+
+# Action overview
+Für distance 10, 2 oder 4 Spieler Immer [a, b[:
+- Joker:
+  - Swap: 0 - 192(=4*40 + 8 oder 16) | 0 - 224
+  - Hot 7: 192 - 312 | 224 - 344
+  - Normal: 312 - 360 | 344 - 392
+  - -4: 360 - 364 | 392 - 396
+- Swap: 364 - 556 | 392 - 616
+- Hot 7: 556 - 676 | 616 - 736
+- Normal: 676 - 724 | 736 - 784
+- -4: 724 - 728 | 784 - 788

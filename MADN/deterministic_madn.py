@@ -590,25 +590,3 @@ def recurrent_fn(params, rng_key, action: Action, embedding:deterministic_MADN):
     )
 
     return recurrent_fn_output, env    
-
-def all_pin_distributions(total=7, num_pins=4):
-    '''
-    Generiert alle möglichen Verteilungen von `total` Pins auf `num_pins` Pins.
-        Args:
-            total: Gesamtanzahl der Pins
-            num_pins: Anzahl der Pins
-        Returns:
-            Ein Array mit allen möglichen Verteilungen der Pins.
-    '''
-    # Erzeuge alle möglichen Werte für die ersten drei Pins
-    a = jnp.arange(total + 1)
-    b = jnp.arange(total + 1)
-    c = jnp.arange(total + 1)
-    # Erzeuge alle Kombinationen (a, b, c)
-    grid = jnp.array(jnp.meshgrid(a, b, c, indexing='ij')).reshape(3, -1).T
-    # Berechne den vierten Wert
-    d = total - grid[:, 0] - grid[:, 1] - grid[:, 2]
-    # Filtere gültige Kombinationen (d >= 0)
-    mask = d >= 0
-    result = jnp.concatenate([grid[mask], d[mask][:, None]], axis=1)
-    return result

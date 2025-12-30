@@ -720,25 +720,3 @@ def root_fn(env: classic_MADN, rng_key: chex.PRNGKey) -> mctx.RootFnOutput:
         value=value_function(env, rng_key),
         embedding=env,
     )
-
-def all_pin_distributions(total=7, num_pins=4):
-    '''
-    Generiert alle möglichen Verteilungen von `total` Einheiten auf `num_pins` Pins.
-        Args:
-            total: Die Gesamtanzahl der Einheiten, die verteilt werden sollen
-            num_pins: Die Anzahl der Pins, auf die die Einheiten verteilt werden sollen
-        Returns:
-            Ein Array mit allen möglichen Verteilungen der Einheiten auf die Pins.
-    '''
-    # Erzeuge alle möglichen Werte für die ersten drei Pins
-    a = jnp.arange(total + 1)
-    b = jnp.arange(total + 1)
-    c = jnp.arange(total + 1)
-    # Erzeuge alle Kombinationen (a, b, c)
-    grid = jnp.array(jnp.meshgrid(a, b, c, indexing='ij')).reshape(3, -1).T
-    # Berechne den vierten Wert
-    d = total - grid[:, 0] - grid[:, 1] - grid[:, 2]
-    # Filtere gültige Kombinationen (d >= 0)
-    mask = d >= 0
-    result = jnp.concatenate([grid[mask], d[mask][:, None]], axis=1)
-    return result

@@ -324,7 +324,7 @@ def draw_pins(screen, matrix, scale):
                 text_rect = text_surface.get_rect(center=center)
                 screen.blit(text_surface, text_rect)
 
-def draw_ui(screen, font, current_player, hands):
+def draw_ui(screen, font, current_player, hands, game_phase):
     """
     Zeichnet UI-Elemente (Spieler, Würfel) in die Mitte.
     """
@@ -333,14 +333,16 @@ def draw_ui(screen, font, current_player, hands):
     center_y = screen.get_height() // 2
     
     # Box für UI
-    box_rect = pygame.Rect(center_x - 80, center_y - 40, 160, 80)
-    pygame.draw.rect(screen, BACKGROUND_COLOR, box_rect)
-    pygame.draw.rect(screen, FIELD_OUTLINE, box_rect, 2)
+    # box_rect = pygame.Rect(center_x - 80, center_y - 40, 160, 80)
+    # pygame.draw.rect(screen, BACKGROUND_COLOR, box_rect)
+    # pygame.draw.rect(screen, FIELD_OUTLINE, box_rect, 2)
     
     player_color = COLORS.get((current_player + 1, 1), (0, 0, 0))
+    game_phase_text = font.render(f"Phase: {game_phase}", True, (0, 0, 0))
     player_text = font.render(f"Spieler {current_player + 1}", True, player_color)
     dice_text = font.render(f"Actions: {hands[current_player]}", True, (0, 0, 0))
     
+    screen.blit(game_phase_text, (center_x - game_phase_text.get_width() // 2, center_y - 55))
     screen.blit(player_text, (center_x - player_text.get_width() // 2, center_y - 30))
     screen.blit(dice_text, (center_x - dice_text.get_width() // 2, center_y + 5))
 
@@ -350,10 +352,11 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
-    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout)
+    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout, enable_teams=True)
     key = jax.random.PRNGKey(42)
     env = distribute_cards(env, 6, key)  # Karten verteilen
-    env = env.replace(phase=jnp.int8(0))  # Setze Phase auf Play
+    # env = env.replace(phase=jnp.int8(0))  # Setze Phase auf Play
+    print("Phase:", env.phase)
     matrix = board_to_mat(env, layout)
     action_space = get_play_action_size(env)
     print(matrix)
@@ -367,7 +370,7 @@ def main():
     # UI-Elemente
     font = pygame.font.SysFont("Arial", 20)
     # game phasen: 'CARD' zum Karten/Würfel auswählen, 'MOVE' zum Pin bewegen, 'HOT7' zum Hot7 Auswahl, 'SWAP' zum Tauschen, 'JOKER' zum Joker Auswahl
-    game_phase = 'CARD'
+    game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
     running = True
 
     # Karten-Buttons erstellen
@@ -392,6 +395,14 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
+            if game_phase == 'CARD' and jnp.sum(env.hands[env.current_player]) == 0:
+                print(f"Spieler {int(env.current_player) + 1} hat keine Karten mehr, überspringe Zug.")
+                env, r, done = no_step(env) # Aktion -1 zum Überspringen
+                matrix = board_to_mat(env, layout)
+                if done:
+                    print(f"Spiel vorbei! Gewinner ist Spieler {jnp.argwhere(get_winner(env, env.board))[0][0]+1}")
+                    running = False
+                    
             # Button-Klicks für Karten
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD':
                 for i, button in enumerate(card_buttons):
@@ -492,6 +503,15 @@ def main():
                     else:
                         print("Das ist nicht dein Pin!")
 
+            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD_EXCHANGE':
+                for i, button in enumerate(card_buttons):
+                    if button.is_clicked(mouse_pos) and env.hands[env.current_player, i] > 0:
+                        action = i + get_play_action_size(env) 
+                        env, _, done = env_step(env, jnp.array(action))
+                        matrix = board_to_mat(env, layout)
+                        selected_action = jnp.zeros(6, dtype=jnp.int32)
+                        game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
+
         # --- Zeichnen ---
         # 1. Statisches Board (nur kopieren, nicht neu zeichnen)
         screen.blit(board_surface, (0, 0))
@@ -500,7 +520,7 @@ def main():
         draw_pins(screen, matrix, scale)
         
         # 3. UI
-        draw_ui(screen, font, int(env.current_player), env.hands)
+        draw_ui(screen, font, int(env.current_player), env.hands, game_phase)
 
         # Würfel-Buttons zeichnen (nur in CARD-Phase)
         if game_phase == 'CARD':
@@ -513,6 +533,9 @@ def main():
                 button.draw(screen)
         if game_phase == '1OR11':
             for button in oneor11_buttons:
+                button.draw(screen)
+        if game_phase == 'CARD_EXCHANGE':
+            for button in card_buttons:
                 button.draw(screen)
         
         pygame.display.flip()
