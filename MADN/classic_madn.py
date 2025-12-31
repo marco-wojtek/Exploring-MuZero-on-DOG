@@ -42,6 +42,7 @@ class classic_MADN:
     start: Start
     target: Target
     goal: Goal
+    key: jax.random.PRNGKey
 
     board_size: Size = struct.field(pytree_node=False)
     total_board_size: Size = struct.field(pytree_node=False)
@@ -53,7 +54,7 @@ def env_reset(
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int8(10),
         starting_player = jnp.int8(0), # -1, 0, 1, 2, 3
-        key = jax.random.PRNGKey(0),
+        seed = 42,
         enable_teams = False,
         enable_initial_free_pin = False,
         enable_circular_board = True,
@@ -66,7 +67,8 @@ def env_reset(
         must_traverse_start = False,
             ) -> classic_MADN:
     
-    subkey, _ = jax.random.split(key)
+    key = jax.random.PRNGKey(seed)
+    key, subkey = jax.random.split(key)
     starting_player = jnp.where((starting_player < 0) | (starting_player >= num_players), jax.random.randint(subkey, (), 0, num_players), starting_player)
     
     board_size = 4 * distance
@@ -110,6 +112,8 @@ def env_reset(
         target = target,
         goal = goal,
         die = jnp.array(0, dtype=jnp.int8),
+        key = key,
+
         board_size=int(board_size),
         total_board_size=int(total_board_size),
         rules = {
@@ -216,17 +220,18 @@ def dice_probabilities(env:classic_MADN) -> chex.Array:
     #print("Dice probabilities: ", a)
     return a
 
-def throw_die(env: classic_MADN, rng_key: chex.PRNGKey) -> classic_MADN:
+def throw_die(env: classic_MADN) -> classic_MADN:
     '''
     Simuliert einen Würfelwurf und aktualisiert den Zustand der Umgebung mit dem neuen Würfelwert.
         Args:
             env: Die aktuelle Spielumgebung
-            rng_key: Der Zufallsschlüssel für die JAX-Zufallszahlengenerierung
         Returns:
             Die aktualisierte Spielumgebung mit dem neuen Würfelwert.
     '''
+    key, rng_key = jax.random.split(env.key)
     return env.replace(
-        die=jax.random.choice(rng_key, jnp.array([1,2,3,4,5,6], dtype=jnp.int8), p = dice_probabilities(env))
+        die=jax.random.choice(rng_key, jnp.array([1,2,3,4,5,6], dtype=jnp.int8), p = dice_probabilities(env)),
+        key=key
     )
 
 def set_die(env: classic_MADN, die_value: chex.Array) -> classic_MADN:
@@ -606,7 +611,7 @@ def rollout(env:classic_MADN, rng_key:chex.PRNGKey) -> tuple[classic_MADN, chex.
     def step(a):
         env, key, steps = a
         key, subkey = jax.random.split(key)
-        env = throw_die(env, subkey)
+        env = throw_die(env)
         def step_env(e):
             action = jax.random.categorical(subkey, policy_function(e)).astype(jnp.int8)
             return env_step(e, action)

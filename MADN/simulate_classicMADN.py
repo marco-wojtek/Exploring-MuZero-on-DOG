@@ -25,7 +25,7 @@ def simulate_game(env, key):
         print("Current board:\n", env.board)
         print("Current pins:\n", env.pins)
         rng_key, subkey = jax.random.split(rng_key)
-        env = throw_die(env, subkey)
+        env = throw_die(env)
         print("Die throw:\n", env.die)
         valid_actions = valid_action(env)
         print("Valid actions:\n", valid_actions)
@@ -91,7 +91,7 @@ def madn_mcts_example():
     print(env.board)    
     # Würfel werfen
     rng_key, subkey = jax.random.split(rng_key)
-    env = throw_die(env, subkey)
+    env = throw_die(env)
     print("Die throw:\n", env.die)
     valid_actions = valid_action(env)
     print("Valid actions:\n", valid_actions)    
@@ -123,7 +123,7 @@ def step(env, key):
     print("Current player: ", env.current_player)
     print(matrix_to_string(board_to_matrix(env)))
     rng_key, subkey = jax.random.split(rng_key)
-    env = throw_die(env, subkey)
+    env = throw_die(env)
     print("Die throw:\n", env.die)
     valid_actions = valid_action(env)
     print("Valid actions:\n", valid_actions)
@@ -158,7 +158,7 @@ def get_trajectory(env, key):
     while not env.done:
         player.append(env.current_player)
         rng_key, subkey = jax.random.split(rng_key)
-        env = throw_die(env, subkey)
+        env = throw_die(env)
         dices.append(env.die)
         valid_actions = valid_action(env)
         if not jnp.any(valid_actions):
@@ -194,7 +194,7 @@ def get_game(env, key):
     while not env.done:
         player.append(env.current_player)
         rng_key, subkey = jax.random.split(rng_key)
-        env = throw_die(env, subkey)
+        env = throw_die(env)
         dices.append(env.die)
         valid_actions = valid_action(env)
         if not jnp.any(valid_actions):
@@ -278,7 +278,7 @@ def simulate_games_fast(num_games=100):
         rng_key = jax.random.PRNGKey(game_idx)
         while not env.done:
             rng_key, subkey = jax.random.split(rng_key)
-            env = throw_die(env, subkey)
+            env = throw_die(env)
             valid_actions = valid_action(env)
             if not jnp.any(valid_actions):
                 env, reward, done = no_step(env)

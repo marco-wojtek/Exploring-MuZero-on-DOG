@@ -33,6 +33,7 @@ class deterministic_MADN:
     start: Start
     target: Target
     goal: Goal
+    key: jax.random.PRNGKey
 
     board_size: Size = struct.field(pytree_node=False)
     total_board_size: Size = struct.field(pytree_node=False)
@@ -44,7 +45,7 @@ def env_reset(
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int8(10),
         starting_player = jnp.int8(0), # -1, 0, 1, 2, 3
-        key = jax.random.PRNGKey(0),
+        seed = 42,
         enable_teams = False,
         enable_initial_free_pin = False,
         enable_circular_board = True,
@@ -56,7 +57,8 @@ def env_reset(
         must_traverse_start = False,
             ) -> deterministic_MADN:
     
-    subkey, _ = jax.random.split(key)
+    key = jax.random.PRNGKey(seed)
+    key, subkey = jax.random.split(key)
     starting_player = jnp.where((starting_player < 0) | (starting_player >= num_players), jax.random.randint(subkey, (), 0, num_players), starting_player)
     board_size = 4 * distance
     total_board_size = board_size + 4 * 4 # add goal areas
@@ -100,6 +102,8 @@ def env_reset(
         start = start,
         target = target,
         goal = goal,
+        key=key,
+        
         board_size=int(board_size),
         total_board_size=int(total_board_size),
         rules = {

@@ -352,9 +352,8 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
-    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout, enable_teams=True)
-    key = jax.random.PRNGKey(42)
-    env = distribute_cards(env, 6, key)  # Karten verteilen
+    env = env_reset(0, seed=42, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout, enable_teams=True)
+    env = distribute_cards(env, 6)  # Karten verteilen
     # env = env.replace(phase=jnp.int8(0))  # Setze Phase auf Play
     print("Phase:", env.phase)
     matrix = board_to_mat(env, layout)

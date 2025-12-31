@@ -119,7 +119,7 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
-    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout)
+    env = env_reset(0, seed=23, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout)
     
     matrix = board_to_mat(env, layout)
     print(matrix)
@@ -133,7 +133,6 @@ def main():
     # UI-Elemente
     font = pygame.font.SysFont("Arial", 20)
     game_phase = 'ROLL'
-    rng_key = jax.random.PRNGKey(42)
     running = True
 
     while running:
@@ -143,8 +142,7 @@ def main():
 
             # 1. Würfeln per Leertaste
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and game_phase == 'ROLL':
-                rng_key, subkey = jax.random.split(rng_key)
-                env = throw_die(env, subkey)
+                env = throw_die(env)
                 print(f"Spieler {int(env.current_player) + 1} würfelt eine {env.die}")
                 game_phase = 'MOVE'
 

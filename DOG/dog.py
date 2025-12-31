@@ -47,6 +47,7 @@ class DOG:
     # Wenn Phase == 0 (Play): Nur Play Actions erlaubt, Swap Actions False
     # Wenn Phase == 1 (Swap): Nur Swap Actions erlaubt, Play Actions False
     phase: chex.Array 
+    key: jax.random.PRNGKey
     
     board_size: Size = struct.field(pytree_node=False)
     total_board_size: Size = struct.field(pytree_node=False)
@@ -83,7 +84,7 @@ def env_reset(
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=jnp.int32(10),
         starting_player = jnp.int8(0), # -1, 0, 1, 2, 3
-        key = jax.random.PRNGKey(0),
+        seed = 42,
         enable_teams = False,
         enable_initial_free_pin = False,
         enable_circular_board = True,
@@ -96,7 +97,8 @@ def env_reset(
         disable_joker = False,
             ) -> DOG:
     
-    subkey, _ = jax.random.split(key)
+    key = jax.random.PRNGKey(seed)
+    key, subkey = jax.random.split(key)
     starting_player = jnp.where((starting_player < 0) | (starting_player >= num_players), jax.random.randint(subkey, (), 0, num_players), starting_player)
     
     board_size = 4 * distance
@@ -151,6 +153,7 @@ def env_reset(
         swap_choices = jnp.full(4, -1, dtype=jnp.int8), # for each player, which position to swap with
         round_starter = jnp.array(starting_player, dtype=jnp.int8),
         phase = jnp.int8(0), # TODO: INITIALE PHASE SETZEN
+        key = key,
 
         board_size=int(board_size),
         total_board_size=int(total_board_size),
@@ -174,7 +177,7 @@ def reset_deck(env: DOG) -> Deck:
     deck = deck.at[0].set(6 + (2*jnp.int8(env.rules['disable_joker'])))
     return deck
 
-def distribute_cards(env: DOG, quantity: int, key: jax.random.PRNGKey) -> DOG:
+def distribute_cards(env: DOG, quantity: int) -> DOG:
     '''
     Distributes `quantity` cards to each player's hand from the deck.
     Args:
@@ -205,7 +208,7 @@ def distribute_cards(env: DOG, quantity: int, key: jax.random.PRNGKey) -> DOG:
     expanded_pool = jnp.repeat(card_indices, new_deck, total_repeat_length=max_deck_size)
     
     # Mische den Pool
-    key, subkey = jax.random.split(key)
+    key, subkey = jax.random.split(env.key)
     shuffled_indices = jax.random.permutation(subkey, max_deck_size)
     shuffled_pool = expanded_pool[shuffled_indices]
     
@@ -239,6 +242,7 @@ def distribute_cards(env: DOG, quantity: int, key: jax.random.PRNGKey) -> DOG:
         swap_choices = jnp.full(4, -1, dtype=jnp.int8),
         round_starter = env.current_player, # Merken wer die Runde eigentlich beginnt
         phase = jnp.where(start_swap_phase, jnp.int8(1), jnp.int8(0)), # 1 = SWAP, 0 = PLAY
+        key=key
     )
 
 def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.Array:
