@@ -100,7 +100,8 @@ def env_reset(
     key = jax.random.PRNGKey(seed)
     key, subkey = jax.random.split(key)
     starting_player = jnp.where((starting_player < 0) | (starting_player >= num_players), jax.random.randint(subkey, (), 0, num_players), starting_player)
-    
+    current_player = jnp.array(starting_player, dtype=jnp.int8)
+
     board_size = 4 * distance
     total_board_size = board_size + 4 * 4 # add goal areas
     num_pins = 4
@@ -141,7 +142,7 @@ def env_reset(
         board = board, # board is filled with -1 (empty) or 0-3 (player index)
         num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
         pins = pins,
-        current_player=jnp.array(starting_player, dtype=jnp.int8), # index of current player, 0-3
+        current_player=current_player, # index of current player, 0-3
         done = jnp.bool_(False), # whether the game is over
         reward=jnp.array(0, dtype=jnp.int8), # reward for the current player
         start = start,
@@ -151,7 +152,7 @@ def env_reset(
         hands = jnp.zeros((num_players, num_cards), dtype=jnp.int8),##
 
         swap_choices = jnp.full(4, -1, dtype=jnp.int8), # for each player, which position to swap with
-        round_starter = jnp.array(starting_player, dtype=jnp.int8),
+        round_starter = current_player,
         phase = jnp.int8(0), # TODO: INITIALE PHASE SETZEN
         key = key,
 

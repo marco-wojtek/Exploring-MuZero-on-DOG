@@ -186,8 +186,7 @@ class Hot7Selector:
 def create_all_card_buttons(screen_width, screen_height):
     """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
     buttons = []
-    button_width = 25
-    button_height = 25
+    button_size = 25
     spacing = 5
     
     # Zentrum berechnen
@@ -198,19 +197,19 @@ def create_all_card_buttons(screen_width, screen_height):
     y = center_y + 40 + 20  # UI-Box ist 80px hoch (center_y ± 40), +20px Abstand
     
     # Horizontale Zentrierung der 6 Buttons
-    total_width = 6 * button_width + 5 * spacing
-    start_x = center_x - total_width // 2
+    total_width = 7 * button_size + 5 * spacing
+    start_x = center_x - (total_width // 2)
     
     # erste 7 Buttons erstellen
     for i in range(0, 7):
-        x = start_x + (i-1) * (button_width + spacing)
-        button = Button(x, y, button_width, button_height, str(i))
+        x = start_x + (i) * (button_size + spacing)
+        button = Button(x, y, button_size, button_size, str(i))
         buttons.append(button)
     # weitere 7 buttons darunter
-    y += button_height + spacing
+    y += button_size + spacing
     for i in range(7, 14):
-        x = start_x + (i-8) * (button_width + spacing)
-        button = Button(x, y, button_width, button_height, str(i))
+        x = start_x + (i-7) * (button_size + spacing)
+        button = Button(x, y, button_size, button_size, str(i))
         buttons.append(button)
     return buttons
 
@@ -340,7 +339,7 @@ def draw_ui(screen, font, current_player, hands, game_phase):
     player_color = COLORS.get((current_player + 1, 1), (0, 0, 0))
     game_phase_text = font.render(f"Phase: {game_phase}", True, (0, 0, 0))
     player_text = font.render(f"Spieler {current_player + 1}", True, player_color)
-    dice_text = font.render(f"Actions: {hands[current_player]}", True, (0, 0, 0))
+    dice_text = font.render(f"Karten: {hands[current_player]}", True, (0, 0, 0))
     
     screen.blit(game_phase_text, (center_x - game_phase_text.get_width() // 2, center_y - 55))
     screen.blit(player_text, (center_x - player_text.get_width() // 2, center_y - 30))
@@ -348,7 +347,7 @@ def draw_ui(screen, font, current_player, hands, game_phase):
 
 def main():
     pygame.init()
-    scale = 30  # Größe pro Feld
+    scale = 40  # Größe pro Feld
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
@@ -405,7 +404,8 @@ def main():
             # Button-Klicks für Karten
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD':
                 for i, button in enumerate(card_buttons):
-                    if button.is_clicked(mouse_pos):
+                    player_hand = env.hands[env.current_player]
+                    if button.is_clicked(mouse_pos) and player_hand[i] > 0:
                         action = i
                         print(f"Spieler {int(env.current_player) + 1} wählt eine {action}")
                         if action == 7:
