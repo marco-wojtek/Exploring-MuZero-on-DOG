@@ -162,7 +162,8 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None):
         dirichlet_alpha=0.3
     )
     
-    return policy_output
+    # Wir geben zusätzlich den rohen Value des Root-Knotens zurück (vom Netzwerk geschätzt)
+    return policy_output, root_output.value
 
 def init_muzero_params(rng_key, input_shape):
     """

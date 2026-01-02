@@ -73,17 +73,80 @@ class ReplayBuffer:
             batch.append(self._extract_sequence(episode, t_start))
             
         # Stacken zu JAX Arrays
-        return jax.tree_map(lambda *x: np.stack(x), *batch)
+        return jax.tree_util.tree_map(lambda *x: np.stack(x), *batch)
 
     def _extract_sequence(self, episode, t_start):
         """Extrahiert eine Sequenz der Länge unroll_steps + 1."""
-        # Wir brauchen unroll_steps + 1 Datenpunkte für das Target Value
-        # (Bootstrap Value am Ende)
+        K = self.unroll_steps + 1
+        end = t_start + K
+        seq = {}
+
+        indices = jnp.arange(t_start, end)
         
-        # Hier Logik implementieren, um Slices aus den Arrays zu schneiden
-        # und mit Nullen aufzufüllen (Padding), wenn das Spiel zu Ende ist.
-        # ...
-        pass
+        # Beobachtungen extrahieren
+        obs = episode.observations[t_start]
+
+        actions = []
+        rewards = []
+        policies = []
+        values = [] # Bootstrap values
+        masks = []
+
+        game_len = len(episode.actions)
+        for k in range(K):
+            idx = t_start + k
+            if idx < game_len:
+                if k < K - 1:
+                    actions.append(episode.actions[idx])
+                    rewards.append(episode.rewards[idx])
+                
+                policies.append(episode.child_visits[idx])
+                values.append(episode.root_values[idx])
+                masks.append(1.0)
+            else:
+                if k < K - 1:
+                    actions.append(0)  # Dummy Aktion
+                    rewards.append(0.0)  # Dummy Reward
+                
+                policies.append(jnp.zeros_like(episode.child_visits[0]))  # Dummy Policy
+                values.append(0.0)  # Dummy Value
+                masks.append(0.0)  # Padding Maske
+                
+        # Target values berechen (Bootstrapping)
+        # z_t = u_{t+1} + gamma * u_{t+2} + ... + gamma^(n-1) * v_{t+n}
+
+        target_values = []
+        gamma = 0.99
+        steps = 5 # Anzahl der Schritte für das Bootstrapping
+
+        for k in range(K):
+            bootstrap_idx = t_start + k + steps
+
+            value = 0
+            current_gamma = 1.0
+
+            for n in range(steps):
+                reward_idx = t_start + k + n
+                if reward_idx < game_len:
+                    reward = episode.rewards[reward_idx]
+                    value += current_gamma * reward
+                    current_gamma *= gamma
+                else:
+                    break
+
+        if bootstrap_idx < game_len:
+            value += current_gamma * episode.root_values[bootstrap_idx]
+        target_values.append(value)
+
+        seq['observations'] = obs
+        seq['actions'] = jnp.array(actions)
+        seq['rewards'] = jnp.array(rewards)
+        seq['policies'] = jnp.array(policies)
+        seq['values'] = jnp.array(values)
+        seq['masks'] = jnp.array(masks)
+        seq['target_values'] = jnp.array(target_values)
+
+        return seq
 
 def play_classic_game_for_training(env, params, rng_key):
     observations = []
@@ -183,11 +246,11 @@ def play_deterministic_game_for_training(env, params, rng_key):
         rng_key, subkey = jax.random.split(rng_key)
         valid_mask = valid_action(env).flatten()  # (24,)
         invalid_mask = ~valid_mask[None, :] 
-        policy_output = run_muzero_mcts(params, subkey, obs, invalid_actions=invalid_mask)
+        policy_output, root_value = run_muzero_mcts(params, subkey, obs, invalid_actions=invalid_mask)
         
         # 4. MCTS Daten speichern
-        #jax.debug.print("Policy: {}", policy_output)
-        #root_values.append(policy_output.value[0])  # Aus dem Batch extrahieren
+        # jax.debug.print("Policy: {}", policy_output)
+        root_values.append(root_value[0])  # Aus dem Batch extrahieren
         child_visits.append(policy_output.action_weights[0])  # Aus dem Batch extrahieren
         
         # 5. Aktion wählen & ausführen
@@ -203,12 +266,12 @@ def play_deterministic_game_for_training(env, params, rng_key):
         
         env = env_next
 
-    print("Final Board:", env.board)
+    # print("Final Board:", env.board)
     return Episode(
         observations=jnp.stack(observations),
         actions=jnp.array(actions),
         rewards=jnp.array(rewards),
-        root_values=jnp.array([0.0]*len(actions)),  # Dummy Werte, da nicht genutzt
+        root_values=jnp.array(root_values),
         child_visits=jnp.stack(child_visits),
         chance_outcomes=jnp.array(chance_outcomes),
         mask=jnp.ones(len(actions))
@@ -216,18 +279,20 @@ def play_deterministic_game_for_training(env, params, rng_key):
 
 
 # test play function with untrained NNs
-env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
-enc = encode_board(env)  # z.B. (8, 56)
-print(enc.shape)
-input_shape = enc.shape  # (8, 56)
-parameters = init_muzero_params(jax.random.PRNGKey(0), input_shape)
+# env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
+# enc = encode_board(env)  # z.B. (8, 56)
+# print(enc.shape)
+# input_shape = enc.shape  # (8, 56)
+# parameters = init_muzero_params(jax.random.PRNGKey(0), input_shape)
 
-eps = play_deterministic_game_for_training(env, parameters, jax.random.PRNGKey(1))
+# eps = play_deterministic_game_for_training(env, parameters, jax.random.PRNGKey(1))
 
-print("Episode observations shape:", eps.observations.shape)
-print("Episode actions shape:", eps.actions.shape)
-print("Episode actions:", eps.actions)
-print("Episode rewards shape:", eps.rewards.shape)
-print("Episode root values shape:", eps.root_values.shape)
-print("Episode child visits shape:", eps.child_visits.shape)
-print("Episode chance outcomes shape:", eps.chance_outcomes.shape)
+# print("Episode observations shape:", eps.observations.shape)
+# print("Episode actions shape:", eps.actions.shape)
+# print("Episode actions:", eps.actions)
+# print("Episode rewards shape:", eps.rewards.shape)
+# print("Episode rewards:", eps.rewards)
+# print("Episode root values shape:", eps.root_values.shape)
+# print("Episode root values:", eps.root_values)
+# print("Episode child visits shape:", eps.child_visits.shape)
+# print("Episode chance outcomes shape:", eps.chance_outcomes.shape)

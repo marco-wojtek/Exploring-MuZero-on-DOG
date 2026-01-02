@@ -352,8 +352,12 @@ def main():
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
     env = env_reset(0, seed=42, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout, enable_teams=True)
-    env = distribute_cards(env, 6)  # Karten verteilen
     # env = env.replace(phase=jnp.int8(0))  # Setze Phase auf Play
+    # env = env.replace(hands=jnp.array([[0,0,0,0,0,2,0,0,0,0,0,0,0,0],
+    #                                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    #                                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    #                                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0]]))
+
     print("Phase:", env.phase)
     matrix = board_to_mat(env, layout)
     action_space = get_play_action_size(env)
@@ -369,6 +373,7 @@ def main():
     font = pygame.font.SysFont("Arial", 20)
     # game phasen: 'CARD' zum Karten/Würfel auswählen, 'MOVE' zum Pin bewegen, 'HOT7' zum Hot7 Auswahl, 'SWAP' zum Tauschen, 'JOKER' zum Joker Auswahl
     game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
+    joker_clicked = False
     running = True
 
     # Karten-Buttons erstellen
@@ -405,7 +410,7 @@ def main():
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD':
                 for i, button in enumerate(card_buttons):
                     player_hand = env.hands[env.current_player]
-                    if button.is_clicked(mouse_pos) and player_hand[i] > 0:
+                    if button.is_clicked(mouse_pos) and ((player_hand[i] > 0) or joker_clicked):
                         action = i
                         print(f"Spieler {int(env.current_player) + 1} wählt eine {action}")
                         if action == 7:
@@ -414,6 +419,7 @@ def main():
                         elif action == 0: # Joker nutzung erwartet neue Kartenauswahl
                             game_phase = 'CARD'
                             selected_action = selected_action.at[0].set(1)
+                            joker_clicked = True
                         elif action == 1:
                             game_phase = 'SWAP'
                             selected_action = selected_action.at[1].set(1)
@@ -494,7 +500,8 @@ def main():
                         env, _, done = env_step(env, map_move_to_action(env, selected_action))
                         matrix = board_to_mat(env, layout)
                         selected_action = jnp.zeros(6, dtype=jnp.int32)
-                        game_phase = 'CARD'
+                        game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
+                        joker_clicked = False
                         
                         if done:
                             print(f"Spiel vorbei! Gewinner ist Spieler {jnp.argwhere(get_winner(env, env.board))[0][0]+1}")

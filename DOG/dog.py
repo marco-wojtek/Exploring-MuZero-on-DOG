@@ -43,12 +43,14 @@ class DOG:
     goal: Goal
 
     swap_choices: chex.Array  # (4,) speichert die gewählte Karte pro Spieler
-    round_starter: chex.Array # Speichert, wer die Runde begonnen hat
+    round_starter: Player # Speichert, wer die Runde begonnen hat
     # Wenn Phase == 0 (Play): Nur Play Actions erlaubt, Swap Actions False
     # Wenn Phase == 1 (Swap): Nur Swap Actions erlaubt, Play Actions False
     phase: chex.Array 
     key: jax.random.PRNGKey
+    hand_size: chex.Array
     
+    num_cards: Size = struct.field(pytree_node=False)
     board_size: Size = struct.field(pytree_node=False)
     total_board_size: Size = struct.field(pytree_node=False)
     rules : dict  = struct.field(pytree_node=False)
@@ -136,9 +138,11 @@ def env_reset(
     # prepare deck
     num_cards = 14 - jnp.int8(disable_joker) - jnp.int8(disable_hot_seven) - jnp.int8(disable_swapping)
     deck = jnp.ones(num_cards, dtype=jnp.int8)*8
-    deck = deck.at[0].set(6 + (2*jnp.int8(disable_joker)))  # Idx 0 ist nur joker wenn dieser enabled ist
+    deck = (deck.at[0].set(6 + (2*jnp.int8(disable_joker)))).astype(jnp.int8)  # Idx 0 ist nur joker wenn dieser enabled ist
 
-    return DOG(
+    hand_size = jnp.int8(6)  # initial hand size
+
+    env = DOG(
         board = board, # board is filled with -1 (empty) or 0-3 (player index)
         num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
         pins = pins,
@@ -152,10 +156,12 @@ def env_reset(
         hands = jnp.zeros((num_players, num_cards), dtype=jnp.int8),##
 
         swap_choices = jnp.full(4, -1, dtype=jnp.int8), # for each player, which position to swap with
-        round_starter = current_player,
-        phase = jnp.int8(0), # TODO: INITIALE PHASE SETZEN
+        round_starter = jnp.array(-1, dtype=jnp.int8),
+        phase = jnp.int8(0),
         key = key,
+        hand_size = hand_size,
 
+        num_cards=int(num_cards),
         board_size=int(board_size),
         total_board_size=int(total_board_size),
         rules = {
@@ -172,13 +178,27 @@ def env_reset(
         }
     )
 
-def reset_deck(env: DOG) -> Deck:
-    num_cards = 14 - jnp.int8(env.rules['disable_joker']) - jnp.int8(env.rules['disable_hot_seven']) - jnp.int8(env.rules['disable_swapping'])
-    deck = jnp.ones(num_cards, dtype=jnp.int8)*8
-    deck = deck.at[0].set(6 + (2*jnp.int8(env.rules['disable_joker'])))
-    return deck
+    return distribute_cards(env)
 
-def distribute_cards(env: DOG, quantity: int) -> DOG:
+def reset_deck(env: DOG) -> Deck:
+    deck = jnp.ones(env.num_cards, dtype=jnp.int8) * 8
+    deck = deck.at[0].set(6 + (2 * jnp.where(env.rules['disable_joker'], 0, 1)))  # Idx 0 ist nur joker wenn dieser enabled ist
+    return deck.astype(jnp.int8)
+
+def get_next_handsize_and_player(env: DOG) -> int:
+    '''
+    Bestimmt die Anzahl der Karten, die an jeden Spieler in der nächsten Runde gezogen werden dürfen.
+    Berechnet auch den Spieler, der als nächstes an der Reihe ist, nachdem die Karten verteilt wurden.
+    Args:
+        env: DOG environment
+    Returns:
+        Die Anzahl der Karten, die gezogen werden dürfen.
+    '''
+    next_hand_size = jnp.where(env.hand_size == 2, jnp.int8(6), env.hand_size-1)
+    next_player_after_deal = (env.player_after_deal + 1) % env.num_players
+    return next_hand_size, next_player_after_deal
+
+def distribute_cards(env: DOG) -> DOG:
     '''
     Distributes `quantity` cards to each player's hand from the deck.
     Args:
@@ -188,63 +208,94 @@ def distribute_cards(env: DOG, quantity: int) -> DOG:
     Returns:
         Updated DOG environment with cards distributed.
     '''
-    num_players = env.num_players
+    # Statische Dimensionen für JAX (JIT-kompatibel)
+    num_players = env.hands.shape[0] 
     num_card_types = len(env.deck)
+    quantity = env.hand_size
     
-    # Erstelle einen "flachen" Pool aller Karten im Deck
-    # deck[i] gibt an, wie oft Karte i vorhanden ist
-    # Wir erstellen einen Index-Array wo jede Karte entsprechend ihrer Häufigkeit vorkommt
-    card_indices = jnp.arange(num_card_types)
+    MAX_CARDS = 120 # Sichere Obergrenze (14 * 8 = 112)
+    MAX_HAND_SIZE = 6
+    DUMMY_CARD_IDX = num_card_types # Index für "keine Karte" (z.B. 14)
     
-    # Wiederhole jeden Kartenindex entsprechend seiner Häufigkeit
-    # Maximale Deckgröße = sum(deck) 
+    # 1. Deck Management (Reset falls nötig)
     max_deck_size = jnp.sum(env.deck)
+    
+    # Wir müssen sicherstellen, dass reset_deck int8 zurückgibt, passend zu env.deck
+    new_deck = jax.lax.cond(
+        max_deck_size < quantity * num_players,
+        lambda: reset_deck(env),
+        lambda: env.deck.astype(jnp.int8)
+    )
 
-    if max_deck_size < quantity * num_players:
-        new_deck = reset_deck(env)
-    else:
-        new_deck = env.deck
+    # 2. Erstelle statischen Pool für JAX
+    # Wir füllen das Deck virtuell auf MAX_CARDS auf, damit die Shapes konstant bleiben.
+    current_deck_size = jnp.sum(new_deck)
+    padding_count = MAX_CARDS - current_deck_size
     
-    # Erstelle expandierten Pool: [0,0,0,0,0,0, 1,1,1,1,1,1,1,1, 2,2,2,2,2,2,2,2, ...]
-    expanded_pool = jnp.repeat(card_indices, new_deck, total_repeat_length=max_deck_size)
+    # counts: [Anzahl Karte 0, ..., Anzahl Karte 13, Anzahl Dummies]
+    counts_padded = jnp.concatenate([new_deck, padding_count[None].astype(jnp.int8)])
     
-    # Mische den Pool
+    # indices: [0, 1, ..., 13, 14]
+    indices_padded = jnp.arange(num_card_types + 1)
+    
+    # repeat erzeugt jetzt immer ein Array der Länge MAX_CARDS
+    expanded_pool = jnp.repeat(indices_padded, counts_padded, total_repeat_length=MAX_CARDS)
+    
+    # 3. Mischen (Shuffling)
+    # Wir wollen nur die echten Karten mischen, die Dummies sollen am Ende bleiben/landen.
     key, subkey = jax.random.split(env.key)
-    shuffled_indices = jax.random.permutation(subkey, max_deck_size)
+    random_vals = jax.random.uniform(subkey, (MAX_CARDS,))
+    
+    # Dummies bekommen unendlich hohe Priorität beim Sortieren -> landen hinten
+    is_dummy = expanded_pool == DUMMY_CARD_IDX
+    priorities = jnp.where(is_dummy, 2.0, random_vals) # 2.0 > 1.0 (max von uniform)
+    
+    shuffled_indices = jnp.argsort(priorities)
     shuffled_pool = expanded_pool[shuffled_indices]
     
-    # Verteile Karten an jeden Spieler
-    total_cards_to_distribute = quantity * num_players
-    cards_to_distribute = shuffled_pool[:total_cards_to_distribute]
+    # 4. Karten verteilen
+    # Wir berechnen für jeden Slot (Spieler, Handkarte), welchen Index im Pool er bekäme
+    player_idx = jnp.arange(num_players)[:, None] # (4, 1)
+    hand_slot_idx = jnp.arange(MAX_HAND_SIZE)[None, :] # (1, 6)
     
-    # Reshape zu (num_players, quantity)
-    cards_per_player = cards_to_distribute.reshape(num_players, quantity)
+    # Der Index im shuffled_pool: Spieler 0 bekommt 0..q-1, Spieler 1 bekommt q..2q-1, etc.
+    pool_idx = player_idx * quantity + hand_slot_idx
     
-    # Zähle Karten pro Spieler und Kartentyp
+    # Maske: Welche Slots bekommen wirklich eine Karte? (z.B. bei quantity=2 sind nur Slots 0,1 true)
+    valid_slot_mask = hand_slot_idx < quantity
+    
+    # Ziehe Karten aus dem Pool oder setze Dummy
+    cards_per_player = jnp.where(valid_slot_mask, shuffled_pool[pool_idx], DUMMY_CARD_IDX)
+    
+    # 5. Hände aktualisieren
     def count_cards_for_player(player_cards):
-        # One-hot encoding und summieren
-        one_hot = jax.nn.one_hot(player_cards, num_card_types, dtype=jnp.int8)
-        return jnp.sum(one_hot, axis=0)
+        # One-hot encoding inkl. Dummy-Klasse
+        one_hot = jax.nn.one_hot(player_cards, num_card_types + 1, dtype=jnp.int8)
+        # Summiere und ignoriere die Dummy-Spalte (letzte Spalte)
+        return jnp.sum(one_hot, axis=0, dtype=jnp.int8)[:num_card_types]
     
     new_hand_additions = jax.vmap(count_cards_for_player)(cards_per_player)
-    
-    # Aktualisiere Hände und Deck
     new_hands = env.hands + new_hand_additions
     
-    # Berechne wie viele Karten insgesamt pro Typ verteilt wurden
-    total_distributed = jnp.sum(new_hand_additions, axis=0)
+    # 6. Deck aktualisieren
+    # Wir ziehen nur die Karten ab, die wir tatsächlich verteilt haben
+    total_distributed = jnp.sum(new_hand_additions, axis=0, dtype=jnp.int8)
     new_deck = new_deck - total_distributed
 
     start_swap_phase = env.rules['enable_teams'] & (env.num_players == 4)
+
+    round_starter = jnp.where(env.round_starter == -1, env.current_player, (env.round_starter+1) % env.num_players)
     
     return env.replace(
+        current_player = round_starter,
         deck=new_deck,
         hands=new_hands,
         swap_choices = jnp.full(4, -1, dtype=jnp.int8),
-        round_starter = env.current_player, # Merken wer die Runde eigentlich beginnt
-        phase = jnp.where(start_swap_phase, jnp.int8(1), jnp.int8(0)), # 1 = SWAP, 0 = PLAY
-        key=key
-    )
+        round_starter = round_starter,
+        phase = jnp.where(start_swap_phase, jnp.int8(1), jnp.int8(0)),
+        key=key,
+        hand_size=jnp.where(quantity == 2, jnp.int8(6), quantity-1)
+        )
 
 def is_player_done(num_players, board:Board, goal:Goal, player: Player) -> chex.Array:
     '''
@@ -660,6 +711,7 @@ def valid_actions(env: DOG) -> chex.Array:
         lambda: jnp.concatenate([jnp.zeros(get_play_action_size(env), dtype=bool), valid_cards])
     )
 
+@jax.jit
 def no_step(env:DOG) ->  DOG:
     """
     Führt keinen Schritt aus und setzt die Hand des aktuellen Spielers auf leer.
@@ -668,18 +720,37 @@ def no_step(env:DOG) ->  DOG:
     Returns:
         Aktualisiertes DOG environment mit leerer Hand für den aktuellen Spieler.
     """               
-    hand_cards = jnp.sum(env.hands, axis=1) 
-    def body(i, pnext):
+    # Hand des aktuellen Spielers leeren
+    hands = env.hands.at[env.current_player].set(jnp.zeros_like(env.hands[env.current_player]))
+
+    # Prüfe, welche Spieler noch Karten haben
+    hand_cards = jnp.sum(hands, axis=1)
+    def find_next(i, pnext):
         cand = (env.current_player + i + 1) % env.num_players
         take = (pnext == -1) & (hand_cards[cand] > 0)
         return jnp.where(take, cand, pnext)
-    next_player = jax.lax.fori_loop(0, env.num_players, body, -jnp.array(1, dtype=jnp.int8))  
-    print("Next player found:", next_player)
-    env = env.replace(
-        hands=env.hands.at[env.current_player].set(jnp.zeros(len(env.deck), dtype=jnp.int8)),
-        current_player=next_player
-    )
-    return env, jnp.array(0, dtype=jnp.int8), env.done
+    next_player = jax.lax.fori_loop(0, env.num_players, find_next, -jnp.int8(1))
+
+    # Prüfe, ob noch jemand Karten hat
+    any_cards_left = jnp.any(hand_cards > 0)
+
+    def continue_game():
+        return (
+            env.replace(
+                hands=hands,
+                current_player=next_player
+            ),
+            jnp.int8(0),
+            env.done
+        )
+
+    def deal_new_cards():
+        # Hand des aktuellen Spielers bleibt leer, dann neue Karten verteilen
+        new_env = env.replace(hands=hands)
+        new_env = distribute_cards(new_env)
+        return new_env, jnp.int8(0), new_env.done
+
+    return jax.lax.cond(any_cards_left & (next_player != -1), continue_game, deal_new_cards)
 
 # @jax.jit
 def step_swap(env: DOG, pin_idx: Action, swap_pos: Action) -> DOG:
@@ -985,7 +1056,11 @@ def env_step_play_phase(env: DOG, action: Action) -> tuple[DOG, Reward, Done]:
         done=done,
     )
 
-    return env, reward, done
+    return jax.lax.cond(
+        (jnp.all(hand_cards == 0) | (next_player == -1)) & ~done,
+        lambda: distribute_cards(env),
+        lambda: env
+    ), reward, done
 
 # @jax.jit
 def execute_team_swap(hands: Hand, swap_choices: chex.Array) -> Hand:

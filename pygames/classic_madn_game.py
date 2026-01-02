@@ -119,7 +119,7 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
-    env = env_reset(0, seed=23, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout)
+    env = env_reset(0, seed=23, num_players=4, distance=7, enable_initial_free_pin=True, enable_teams=True, enable_dice_rethrow=True, layout=layout)
     
     matrix = board_to_mat(env, layout)
     print(matrix)
