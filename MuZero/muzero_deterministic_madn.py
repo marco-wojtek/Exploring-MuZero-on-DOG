@@ -29,21 +29,35 @@ class RepresentationNetwork(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        # x shape: (Batch, Board_Features)
+        # x shape: (Batch, 14, 56)
+        # 1. Sicherstellen, dass es Float ist
+        x = x.astype(jnp.float32)
+        
+        # 2. Channel-Dimension hinzufügen für Conv2D
+        # Shape wird zu: (Batch, 14, 56, 1)
+        x = x[..., None]
+        
+        # 3. Convolutional Layers (Feature Extraction auf dem Board)
+        x = nn.Conv(features=16, kernel_size=(3, 3), padding='SAME')(x)
+        x = nn.relu(x)
+        x = nn.Conv(features=16, kernel_size=(3, 3), padding='SAME')(x)
+        x = nn.relu(x)
+        
+        # 4. Flatten für Dense Layers
+        # Wir behalten die Batch-Dimension (0) und flachen den Rest
         x = x.reshape((x.shape[0], -1))
         
-        # Projektion auf Latent Size
+        # 5. Projektion auf Latent Dim
         x = nn.Dense(self.latent_dim)(x)
         x = nn.relu(x)
         
-        # Residual Blocks zur Feature-Extraktion
+        # Residual Blocks zur weiteren Verarbeitung
         for _ in range(self.num_res_blocks):
             x = ResBlock(self.latent_dim)(x)
             
-        # Normalisierung des Latent States (wichtig für MuZero Stabilität)
-        # Skaliert Werte grob in den Bereich [0, 1] oder [-1, 1]
+        # Normalisierung des Latent States
         x = nn.Dense(self.latent_dim)(x)
-        x = nn.sigmoid(x) 
+        x = nn.sigmoid(x)
         return x
 
 class DynamicsNetwork(nn.Module):
