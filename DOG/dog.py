@@ -37,8 +37,8 @@ class DOG:
     done: Done     
     deck: Deck  
     hands: Hand
-    num_players: Num_players
-    start: Start
+    num_players: Num_players = struct.field(pytree_node=False)
+    start: Start 
     target: Target
     goal: Goal
 

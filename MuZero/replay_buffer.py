@@ -314,7 +314,7 @@ def env_reset_batched(seed):
 # 2. Vektorisierte Funktionen vorbereiten
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_action)
-batch_encode = jax.vmap(encode_board)
+batch_encode = jax.vmap(old_encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_map_action = jax.vmap(map_action)
 
@@ -332,7 +332,7 @@ def actor_step(envs, params, rng_key):
     # Wir erzwingen eine valide Action (z.B. 0) für done-Envs, damit MCTS durchläuft.
     # Das Ergebnis wird später ignoriert.
     
-    val_actions = batch_valid_action(envs).reshape(envs.num_players.shape[0], -1)
+    val_actions = batch_valid_action(envs).reshape(envs.board.shape[0], -1)
     dones = envs.done
 
     def perform_action(env, obs, val_act, done, params, rng_key):
@@ -381,7 +381,7 @@ def actor_step(envs, params, rng_key):
     # next_envs, rewards, next_dones = batch_env_step(envs, mapped_actions)
 
     next_envs, obs, actions, rewards, root_values, policy_output_action_weights, next_dones = jax.vmap(perform_action, in_axes=(0, 0, 0, 0, None, 0))(
-        envs, obs, val_actions, dones, params, jax.random.split(rng_key, envs.num_players.shape[0])
+        envs, obs, val_actions, dones, params, jax.random.split(rng_key, envs.board.shape[0])
     )
     
     # Falls ein Environment schon 'done' war, setzen wir Reward auf 0
@@ -448,19 +448,35 @@ def play_n_games(params, rng_key, num_envs=20):
     return [ep for ep in completed_episodes if ep is not None]
 
 env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
-enc = encode_board(env)  # z.B. (8, 56)
+enc = old_encode_board(env)  # z.B. (8, 56)
 input_shape = enc.shape  # (8, 56)
 print(input_shape)
 parameters = init_muzero_params(jax.random.PRNGKey(0), input_shape)
 batch_size = 1
 print(f"Spiele {batch_size} Spiele parallel...")
 start_time = time()
-eps = play_n_games(parameters, jax.random.PRNGKey(1), num_envs=batch_size)
+eps = play_n_games(parameters, jax.random.PRNGKey(192), num_envs=batch_size)
 print(f"Played {len(eps)} games in parallel.")
 end_time = time()
 print(f"Time taken: {end_time - start_time:.2f} seconds")
 for i, ep in enumerate(eps):
     print(f"Episode {i}, Length: {len(ep.actions)}")
+    print("Actions:", ep.actions)
+    print("Rewards:", ep.rewards)
+
+# for a in ep.actions:
+#     if a == -1:
+#         print(env.action_set)
+#         print(env.current_player)
+#         print(env.board)
+#         env, r, d = no_step(env)
+#         print(f"Action: {a}, No Step executed. Reward: {r}, Done: {d}")
+        
+#         continue
+#     ma = map_action(a)
+#     env, r, d = env_step(env, ma)
+#     print(f"Action: {a}, Mapped: {ma}, Reward: {r}, Done: {d}")
+#     print(env.board)
 # rng_key, subkey = jax.random.split(jax.random.PRNGKey(1))
 # seeds = jax.random.randint(subkey, (batch_size,), 0, 1000000)
 # envs = batch_reset(seeds)

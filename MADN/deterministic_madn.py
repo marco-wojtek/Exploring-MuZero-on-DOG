@@ -29,7 +29,7 @@ class deterministic_MADN:
     reward: Reward  # scalar, reward for the current player
     done: Done  # scalar, whether the game is over
     action_set: Action_set  # available actions, 1-6 each 3x until empty, then refilled
-    num_players: Num_players
+    num_players: Num_players = struct.field(pytree_node=False)
     start: Start
     target: Target
     goal: Goal
@@ -93,7 +93,7 @@ def env_reset(
 
     return deterministic_MADN(
         board = board, # board is filled with -1 (empty) or 0-3 (player index)
-        num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
+        num_players = int(num_players),#jnp.array(num_players, dtype=jnp.int8), # number of players
         pins = pins,
         current_player=jnp.array(starting_player, dtype=jnp.int8), # index of current player, 0-3
         done = jnp.bool_(False), # whether the game is over
@@ -452,6 +452,45 @@ def encode_board(env: deterministic_MADN) -> chex.Array:
     # Spielerposition im Haus
     # home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
     home_positions = get_home_positions(env.pins, board.shape[0])
+    home_positions = home_positions[rolled_idx]  # (4, board_size)
+    # Aktueller Spieler (optional)
+    # current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * current_player  # (1, board_size)
+
+    # Action-Häufigkeit als Kanäle
+    action_counts = env.action_set[current_player]  # shape (6,)
+    action_channels = jnp.repeat(action_counts[:, None], board.shape[0], axis=1)  # (6, board_size)
+
+    # Alles zusammenfügen
+    board_encoding = jnp.concatenate([player_channels, home_positions, action_channels], axis=0)  # (features, board_size)
+    return board_encoding
+
+
+def old_encode_board(env: deterministic_MADN) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in eine Form, die von neuronalen Netzwerken verarbeitet werden kann.
+    
+    Args:
+        env: Aktuelle MADN-Umgebung 
+
+    Returns:
+        Ein Array, das die kodierte Spielfelddarstellung enthält.
+    '''
+    num_players = env.num_players
+    board = env.board
+    distance = env.board_size // 4
+    current_player = env.current_player
+    
+    #rolled idx
+    rolled_idx = (jnp.arange(num_players) + current_player) % num_players
+    # Spielerpositionen (One-hot)
+    # with roll over for current player
+    new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
+    new_pins = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
+    board = jnp.concatenate([new_board, new_pins], axis=0)
+    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
+
+    # Spielerposition im Haus
+    home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
     home_positions = home_positions[rolled_idx]  # (4, board_size)
     # Aktueller Spieler (optional)
     # current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * current_player  # (1, board_size)

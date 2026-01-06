@@ -38,7 +38,7 @@ class classic_MADN:
     reward: Reward  # scalar, reward for the current player
     done: Done  # scalar, whether the game is over
     die: Die
-    num_players: Num_players
+    num_players: Num_players = struct.field(pytree_node=False)
     start: Start
     target: Target
     goal: Goal
@@ -103,7 +103,7 @@ def env_reset(
     )
     return classic_MADN(
         board = board, # board is filled with -1 (empty) or 0-3 (player index)
-        num_players = jnp.array(num_players, dtype=jnp.int8), # number of players
+        num_players = int(num_players), # number of players
         pins = pins,
         current_player=jnp.array(starting_player, dtype=jnp.int8), # index of current player, 0-3
         done = jnp.bool_(False), # whether the game is over
