@@ -54,6 +54,11 @@ class ReplayBuffer:
             self.buffer.append(None)
         self.buffer[self.position] = episode
         self.position = (self.position + 1) % self.capacity
+    
+    def save_games(self, episodes):
+        """Speichert mehrere Episoden."""
+        for episode in episodes:
+            self.save_game(episode)
 
     def sample_batch(self):
         """
@@ -447,22 +452,22 @@ def play_n_games(params, rng_key, num_envs=20):
     # Filtern von None (falls MAX_STEPS erreicht wurde)
     return [ep for ep in completed_episodes if ep is not None]
 
-env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
-enc = old_encode_board(env)  # z.B. (8, 56)
-input_shape = enc.shape  # (8, 56)
-print(input_shape)
-parameters = init_muzero_params(jax.random.PRNGKey(0), input_shape)
-batch_size = 1
-print(f"Spiele {batch_size} Spiele parallel...")
-start_time = time()
-eps = play_n_games(parameters, jax.random.PRNGKey(192), num_envs=batch_size)
-print(f"Played {len(eps)} games in parallel.")
-end_time = time()
-print(f"Time taken: {end_time - start_time:.2f} seconds")
-for i, ep in enumerate(eps):
-    print(f"Episode {i}, Length: {len(ep.actions)}")
-    print("Actions:", ep.actions)
-    print("Rewards:", ep.rewards)
+# env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
+# enc = old_encode_board(env)  # z.B. (8, 56)
+# input_shape = enc.shape  # (8, 56)
+# print(input_shape)
+# parameters = init_muzero_params(jax.random.PRNGKey(0), input_shape)
+# batch_size = 1
+# print(f"Spiele {batch_size} Spiele parallel...")
+# start_time = time()
+# eps = play_n_games(parameters, jax.random.PRNGKey(192), num_envs=batch_size)
+# print(f"Played {len(eps)} games in parallel.")
+# end_time = time()
+# print(f"Time taken: {end_time - start_time:.2f} seconds")
+# for i, ep in enumerate(eps):
+#     print(f"Episode {i}, Length: {len(ep.actions)}")
+#     print("Actions:", ep.actions)
+#     print("Rewards:", ep.rewards)
 
 # for a in ep.actions:
 #     if a == -1:

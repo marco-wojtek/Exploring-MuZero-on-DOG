@@ -1,14 +1,16 @@
+from time import time
 import jax
 import jax.numpy as jnp
 import optax
 from functools import partial
 import os, sys
+import pickle
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 # Annahme: Deine Netzwerk-Klassen und init-Funktionen sind importiert
-from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, run_muzero_mcts
-from MADN.deterministic_madn import env_reset, encode_board
-from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training
+from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, run_muzero_mcts, load_params_from_file
+from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
+from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training, play_n_games, batch_encode, batch_env_step, batch_map_action, batch_reset, batch_valid_action
 
 @jax.jit
 def loss_fn(params, batch):
@@ -108,36 +110,70 @@ def train_step(params, opt_state, batch):
     return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss, 'r_loss': r_loss}
 
 # --- Setup Optimizer ---
-learning_rate = 1e-3
+learning_rate = 1e-5
 optimizer = optax.adamw(learning_rate)
 
 # --- Initialisierung (Beispiel) ---
 
 
-def test_training(num_games= 50):
-    env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
-    enc = encode_board(env)  # z.B. (8, 56)
+def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state=None):
+    env = env_reset(
+        seed,  # <- Das wird an '_' übergeben
+        num_players=4,
+        layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
+        distance=10,
+        starting_player=0,
+        seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
+        enable_teams=False,
+        enable_initial_free_pin=True,
+        enable_circular_board=False
+    )
+    enc = old_encode_board(env)  # z.B. (8, 56)
     print(enc.shape)
     input_shape = enc.shape  # (8, 56)
 
-    params = init_muzero_params(jax.random.PRNGKey(0), input_shape)  # Beispiel Input Shape
-    opt_state = optimizer.init(params)
+    if params is None:
+        params = init_muzero_params(jax.random.PRNGKey(0), input_shape)  # Beispiel Input Shape
+    
+    if opt_state is None:
+        opt_state = optimizer.init(params)
 
     replay = ReplayBuffer(capacity=1000, batch_size=4, unroll_steps=5)
-    for game_idx in range(num_games):
-        if (game_idx+1) % 10 == 0:
-            print(f"Playing game {game_idx+1}/{num_games} for training data...")
-        #print(f"Playing game {game_idx+1}/{num_games} for training data...")
-        env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
-        episode = play_deterministic_game_for_training(env, params, jax.random.PRNGKey(game_idx))
-        replay.save_game(episode)
+    for it in range(iterations):
+        start_time = time()
+        print(f"Iteration {it+1}/{iterations}: Playing games to collect training data...")
+        eps = play_n_games(params, jax.random.PRNGKey(192), num_envs=num_games)
+        print("Saving collected games to replay buffer...")
+        replay.save_games(eps)
+        # for game_idx in range(num_games):
+        #     if (game_idx+1) % 10 == 0:
+        #         print(f"Playing game {game_idx+1}/{num_games} for training data...")
+        #     #print(f"Playing game {game_idx+1}/{num_games} for training data...")
+        #     env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
+        #     episode = play_deterministic_game_for_training(env, params, jax.random.PRNGKey(game_idx))
+        #     replay.save_game(episode)
 
-    print("Training on collected episodes...")
-    for _ in range(10):  # Beispiel: 10 Trainingsschritte
-        batch = replay.sample_batch()
-        params, opt_state, losses = train_step(params, opt_state, batch)
-        print("Losses:", losses)
+        print("Training on collected data...")
+        train_steps = 1000
+        for i in range(train_steps):  # Beispiel: 10 Trainingsschritte
+            batch = replay.sample_batch()
+            params, opt_state, losses = train_step(params, opt_state, batch)
+            if i % (train_steps // 10) == 0:
+                print(f"Step {i}, Losses: {losses}")
+        end_time = time()
+        print(f"Iteration {it+1} completed in {end_time - start_time:.2f} seconds.")
     return params, opt_state
 
+params = None
+opt_state = None
+# params = load_params_from_file('muzero_madn_params_00001.pkl')
+# with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
+#     opt_state = pickle.load(f)
+params, opt_state = test_training(30, seed=42, iterations=4, params=params, opt_state=opt_state)
+# save trained parameters and optimizer state
 
-test_training()
+with open('muzero_madn_params_00001.pkl', 'wb') as f:
+    pickle.dump(params, f)
+
+with open('muzero_madn_opt_state_00001.pkl', 'wb') as f:
+    pickle.dump(opt_state, f)

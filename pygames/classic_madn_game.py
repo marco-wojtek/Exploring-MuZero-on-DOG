@@ -41,6 +41,11 @@ COLORS = {
     (4, 4): GRUEN,     # Grüne Figur
 }
 
+# Load dice images
+dice_images = {}
+for i in range(1, 7):
+    dice_images[i] = pygame.image.load(f"images/dice_{i}.png")
+
 def create_board_surface(matrix, scale):
     """
     Erstellt ein Surface mit dem statischen Spielfeld (Hintergrund + Felder).
@@ -102,18 +107,27 @@ def draw_ui(screen, font, current_player, dice_roll):
     center_y = screen.get_height() // 2
     
     # Box für UI
-    box_rect = pygame.Rect(center_x - 60, center_y - 40, 120, 80)
+    box_rect = pygame.Rect(center_x - 75, center_y - 40, 150, 100)
     pygame.draw.rect(screen, BACKGROUND_COLOR, box_rect)
     pygame.draw.rect(screen, FIELD_OUTLINE, box_rect, 2)
     
     player_color = COLORS.get((current_player + 1, 1), (0, 0, 0))
     player_text = font.render(f"Spieler {current_player + 1}", True, player_color)
-    dice_text = font.render(f"Würfel: {dice_roll if dice_roll > 0 else '-'}", True, (0, 0, 0))
+    #dice_text = font.render(f"Würfel: {dice_roll if dice_roll > 0 else '-'}", True, (0, 0, 0))
+    # draw dice image
+    if dice_roll in dice_images:
+        dice_img = dice_images[dice_roll]
+        img_rect = dice_img.get_rect(center=(center_x, center_y + 25))
+        screen.blit(dice_img, img_rect)
+    else:
+        no_dice_text = font.render("Press Space to roll", True, (0, 0, 0))
+        screen.blit(no_dice_text, (center_x - no_dice_text.get_width() // 2, center_y + 25))
     
     screen.blit(player_text, (center_x - player_text.get_width() // 2, center_y - 30))
-    screen.blit(dice_text, (center_x - dice_text.get_width() // 2, center_y + 5))
+    #screen.blit(dice_text, (center_x - dice_text.get_width() // 2, center_y + 5))
 
 def main():
+
     pygame.init()
     scale = 50  # Größe pro Feld
     
@@ -178,7 +192,7 @@ def main():
         draw_pins(screen, matrix, scale)
         
         # 3. UI
-        draw_ui(screen, font, int(env.current_player), env.die)
+        draw_ui(screen, font, int(env.current_player), int(env.die))
         
         pygame.display.flip()
         clock.tick(60)

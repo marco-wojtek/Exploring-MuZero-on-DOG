@@ -222,3 +222,10 @@ def init_muzero_params(rng_key, input_shape):
         'dynamics': params_dyn,
         'prediction': params_pred
     }
+
+def load_params_from_file(param_file):
+    """Lädt die MuZero-Parameter aus einer Datei."""
+    import pickle
+    with open(param_file, 'rb') as f:
+        params = pickle.load(f)
+    return params

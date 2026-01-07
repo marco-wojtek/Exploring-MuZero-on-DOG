@@ -41,24 +41,35 @@ COLORS = {
     (4, 4): GRUEN,     # Grüne Figur
 }
 
+# Load dice images
+dice_images = {}
+for i in range(1, 7):
+    dice_images[i] = pygame.image.load(f"images/dice_{i}.png")
 
 class Button:
-    def __init__(self, x, y, width, height, text, color=(200, 200, 200), text_color=(0, 0, 0)):
+    def __init__(self, x, y, width, height, text, color=(200, 200, 200), text_color=(0, 0, 0), image=None):
         self.rect = pygame.Rect(x, y, width, height)
         self.text = text
         self.color = color
         self.text_color = text_color
         self.font = pygame.font.SysFont("Arial", 16)
         self.hovered = False
+        self.image = image  # Bild für den Button
         
     def draw(self, screen):
         color = (180, 180, 180) if self.hovered else self.color
         pygame.draw.rect(screen, color, self.rect)
         pygame.draw.rect(screen, (0, 0, 0), self.rect, 2)
         
-        text_surface = self.font.render(self.text, True, self.text_color)
-        text_rect = text_surface.get_rect(center=self.rect.center)
-        screen.blit(text_surface, text_rect)
+        if self.image:
+            # Bild mittig im Button zeichnen, ggf. skalieren
+            img = pygame.transform.smoothscale(self.image, (self.rect.width - 6, self.rect.height - 6))
+            img_rect = img.get_rect(center=self.rect.center)
+            screen.blit(img, img_rect)
+        else:
+            text_surface = self.font.render(self.text, True, self.text_color)
+            text_rect = text_surface.get_rect(center=self.rect.center)
+            screen.blit(text_surface, text_rect)
     
     def is_clicked(self, pos):
         return self.rect.collidepoint(pos)
@@ -68,28 +79,20 @@ class Button:
 
 
 def create_dice_buttons(screen_width, screen_height):
-    """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
     buttons = []
     button_width = 25
     button_height = 25
     spacing = 5
-    
-    # Zentrum berechnen
     center_x = screen_width // 2
     center_y = screen_height // 2
-    
-    # Buttons unter dem UI positionieren (UI-Box + Abstand + Button-Höhe)
-    y = center_y + 40 + 20  # UI-Box ist 80px hoch (center_y ± 40), +20px Abstand
-    
-    # Horizontale Zentrierung der 6 Buttons
+    y = center_y + 40 + 20
     total_width = 6 * button_width + 5 * spacing
     start_x = center_x - total_width // 2
-    
+
     for i in range(1, 7):
         x = start_x + (i-1) * (button_width + spacing)
-        button = Button(x, y, button_width, button_height, str(i))
+        button = Button(x, y, button_width, button_height, str(i), image=dice_images[i])
         buttons.append(button)
-    
     return buttons
 
 
