@@ -142,7 +142,7 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}: Playing games to collect training data...")
-        eps = play_n_games(params, jax.random.PRNGKey(192), num_envs=num_games)
+        eps = play_n_games(params, jax.random.PRNGKey(it**3), num_envs=num_games)
         print("Saving collected games to replay buffer...")
         replay.save_games(eps)
         # for game_idx in range(num_games):
@@ -154,14 +154,19 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
         #     replay.save_game(episode)
 
         print("Training on collected data...")
+        train_start = time()
         train_steps = 1000
-        for i in range(train_steps):  # Beispiel: 10 Trainingsschritte
+        for i in range(train_steps):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
             if i % (train_steps // 10) == 0:
                 print(f"Step {i}, Losses: {losses}")
         end_time = time()
-        print(f"Iteration {it+1} completed in {end_time - start_time:.2f} seconds.")
+        print(f"""
+              Iteration {it+1} completed in {end_time - start_time:.2f} seconds.
+              Game playing + data collection time: {train_start - start_time:.2f} seconds.
+              Training time: {end_time - train_start:.2f} seconds.
+              """)
     return params, opt_state
 
 params = None
@@ -169,11 +174,11 @@ opt_state = None
 # params = load_params_from_file('muzero_madn_params_00001.pkl')
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
-params, opt_state = test_training(30, seed=42, iterations=4, params=params, opt_state=opt_state)
+params, opt_state = test_training(30, seed=42, iterations=6, params=params, opt_state=opt_state)
 # save trained parameters and optimizer state
 
-with open('muzero_madn_params_00001.pkl', 'wb') as f:
+with open('muzero_madn_params_lr5_g30_it6.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('muzero_madn_opt_state_00001.pkl', 'wb') as f:
+with open('muzero_madn_opt_state_lr5_g30_it6.pkl', 'wb') as f:
     pickle.dump(opt_state, f)

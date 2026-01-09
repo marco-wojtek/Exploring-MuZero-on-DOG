@@ -9,6 +9,8 @@ from utils.visualize import board_to_mat, matrix_to_string
 # import warnings
 # warnings.filterwarnings("error", category=FutureWarning)
 
+ENABLE_PIN_IMAGES = True
+
 # Farben wie im Bild
 BACKGROUND_COLOR = (250, 235, 180)  # Cremefarbener Hintergrund
 FIELD_WHITE = (255, 255, 255)       # Weiße Felder
@@ -42,6 +44,10 @@ COLORS = {
     (4, 3): GRUEN,     # Grüne Figur
     (4, 4): GRUEN,     # Grüne Figur
 }
+
+pin_images = {}
+for color in ['blue', 'red', 'yellow', 'green']:
+    pin_images[color] = pygame.image.load(f"images/pin_{color}.png")
 
 class Button:
     def __init__(self, x, y, width, height, text, color=(200, 200, 200), text_color=(0, 0, 0)):
@@ -307,15 +313,23 @@ def draw_pins(screen, matrix, scale):
             color = COLORS.get((color_key, fig_key), None)
             
             if color and color_key > 0 and fig_key >= 1:
-                center = (x * scale + scale // 2, y * scale + scale // 2)
-                id = v - (color_key * 10)
-                # Kreis für Pin zeichnen
-                pygame.draw.circle(screen, color, center, radius)
-                pygame.draw.circle(screen, FIELD_OUTLINE, center, radius, 2)
                 
-                # Glanzeffekt (kleiner weißer Kreis oben links)
-                highlight_pos = (center[0] - radius // 3, center[1] - radius // 3)
-                pygame.draw.circle(screen, (255, 255, 255), highlight_pos, radius // 4)
+                id = v - (color_key * 10)
+                if ENABLE_PIN_IMAGES:
+                    # center slighly shifted in y relative to total window scale h
+                    center = (x * scale + scale // 2, y * scale + scale // 2 + scale // 10)
+                    pin_image = pin_images.get(['blue', 'red', 'yellow', 'green'][color_key - 1])
+                    pin_image = pygame.transform.smoothscale(pin_image, (radius * 2, radius * 2))
+                    pin_rect = pin_image.get_rect(center=(x * scale + scale // 2, y * scale + scale // 2))
+                    screen.blit(pin_image, pin_rect)
+                else:
+                    center = (x * scale + scale // 2, y * scale + scale // 2)
+                    pygame.draw.circle(screen, color, center, radius)
+                    pygame.draw.circle(screen, FIELD_OUTLINE, center, radius, 2)
+                    
+                    # Glanzeffekt (kleiner weißer Kreis oben links)
+                    highlight_pos = (center[0] - radius // 3, center[1] - radius // 3)
+                    pygame.draw.circle(screen, (255, 255, 255), highlight_pos, radius // 4)
 
                 # Pin-Nummer in die Mitte zeichnen
                 font = pygame.font.SysFont("Arial", 16)
@@ -347,7 +361,7 @@ def draw_ui(screen, font, current_player, hands, game_phase):
 
 def main():
     pygame.init()
-    scale = 40  # Größe pro Feld
+    scale = 50  # Größe pro Feld
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv

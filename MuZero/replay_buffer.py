@@ -457,7 +457,7 @@ def play_n_games(params, rng_key, num_envs=20):
 # input_shape = enc.shape  # (8, 56)
 # print(input_shape)
 # parameters = init_muzero_params(jax.random.PRNGKey(0), input_shape)
-# batch_size = 1
+# batch_size = 15
 # print(f"Spiele {batch_size} Spiele parallel...")
 # start_time = time()
 # eps = play_n_games(parameters, jax.random.PRNGKey(192), num_envs=batch_size)

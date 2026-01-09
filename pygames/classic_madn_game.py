@@ -7,6 +7,8 @@ sys.path.append(project_root)
 from MADN.classic_madn import *
 from utils.visualize import board_to_mat, matrix_to_string
 
+ENABLE_PIN_IMAGES = True
+
 # Farben wie im Bild
 BACKGROUND_COLOR = (250, 235, 180)  # Cremefarbener Hintergrund
 FIELD_WHITE = (255, 255, 255)       # Weiße Felder
@@ -41,10 +43,14 @@ COLORS = {
     (4, 4): GRUEN,     # Grüne Figur
 }
 
-# Load dice images
+# Load images
 dice_images = {}
 for i in range(1, 7):
     dice_images[i] = pygame.image.load(f"images/dice_{i}.png")
+
+pin_images = {}
+for color in ['blue', 'red', 'yellow', 'green']:
+    pin_images[color] = pygame.image.load(f"images/pin_{color}.png")
 
 def create_board_surface(matrix, scale):
     """
@@ -90,13 +96,19 @@ def draw_pins(screen, matrix, scale):
             color = COLORS.get((color_key, fig_key), None)
             
             if color and color_key > 0 and fig_key >= 1:
-                center = (x * scale + scale // 2, y * scale + scale // 2)
-                pygame.draw.circle(screen, color, center, radius)
-                pygame.draw.circle(screen, FIELD_OUTLINE, center, radius, 2)
-                
-                # Glanzeffekt (kleiner weißer Kreis oben links)
-                highlight_pos = (center[0] - radius // 3, center[1] - radius // 3)
-                pygame.draw.circle(screen, (255, 255, 255), highlight_pos, radius // 4)
+                if ENABLE_PIN_IMAGES:
+                    pin_image = pin_images.get(['blue', 'red', 'yellow', 'green'][color_key - 1])
+                    pin_image = pygame.transform.smoothscale(pin_image, (radius * 2, radius * 2))
+                    pin_rect = pin_image.get_rect(center=(x * scale + scale // 2, y * scale + scale // 2))
+                    screen.blit(pin_image, pin_rect)
+                else:
+                    center = (x * scale + scale // 2, y * scale + scale // 2)
+                    pygame.draw.circle(screen, color, center, radius)
+                    pygame.draw.circle(screen, FIELD_OUTLINE, center, radius, 2)
+                    
+                    # Glanzeffekt (kleiner weißer Kreis oben links)
+                    highlight_pos = (center[0] - radius // 3, center[1] - radius // 3)
+                    pygame.draw.circle(screen, (255, 255, 255), highlight_pos, radius // 4)
 
 def draw_ui(screen, font, current_player, dice_roll):
     """
