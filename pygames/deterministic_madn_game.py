@@ -46,11 +46,11 @@ COLORS = {
 # Load images
 dice_images = {}
 for i in range(1, 7):
-    dice_images[i] = pygame.image.load(f"images/dice_{i}.png")
+    dice_images[i] = pygame.image.load(f"images/dice/dice_{i}.png")
 
 pin_images = {}
 for color in ['blue', 'red', 'yellow', 'green']:
-    pin_images[color] = pygame.image.load(f"images/pin_{color}.png")
+    pin_images[color] = pygame.image.load(f"images/pins/pin_{color}.png")
 
 class Button:
     def __init__(self, x, y, width, height, text, color=(200, 200, 200), text_color=(0, 0, 0), image=None):
@@ -187,13 +187,13 @@ def main():
     # Spielkonfiguration
     layout = jnp.array([True, False, True, False])  # Alle 4 Spieler aktiv
     env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_teams=True, layout=layout)
-    
+    _ = env_step(env, jnp.array([1,1]))
     matrix = board_to_mat(env, layout)
     print(matrix)
     h, w = matrix.shape
     
     screen = pygame.display.set_mode((w * scale, h * scale))
-    pygame.display.set_caption("Mensch ärgere Dich nicht")
+    pygame.display.set_caption("Mensch ärgere Dich nicht (Deterministisch)")
     clock = pygame.time.Clock()
     # Statisches Board-Surface erstellen (nur einmal!)
     board_surface = create_board_surface(matrix, scale)

@@ -46,11 +46,12 @@ COLORS = {
 # Load images
 dice_images = {}
 for i in range(1, 7):
-    dice_images[i] = pygame.image.load(f"images/dice_{i}.png")
+    dice_images[i] = pygame.image.load(f"images/dice/dice_{i}.png")
 
 pin_images = {}
 for color in ['blue', 'red', 'yellow', 'green']:
-    pin_images[color] = pygame.image.load(f"images/pin_{color}.png")
+    pin_images[color] = pygame.image.load(f"images/pins/pin_{color}.png")
+DICE_ANIMATION_ORDER = [1, 4, 3, 6, 5, 2]
 
 def create_board_surface(matrix, scale):
     """
@@ -110,7 +111,7 @@ def draw_pins(screen, matrix, scale):
                     highlight_pos = (center[0] - radius // 3, center[1] - radius // 3)
                     pygame.draw.circle(screen, (255, 255, 255), highlight_pos, radius // 4)
 
-def draw_ui(screen, font, current_player, dice_roll):
+def draw_ui(screen, font, current_player, dice_roll, show_dice_animation=False, anim_start_time=None):
     """
     Zeichnet UI-Elemente (Spieler, Würfel) in die Mitte.
     """
@@ -127,7 +128,13 @@ def draw_ui(screen, font, current_player, dice_roll):
     player_text = font.render(f"Spieler {current_player + 1}", True, player_color)
     #dice_text = font.render(f"Würfel: {dice_roll if dice_roll > 0 else '-'}", True, (0, 0, 0))
     # draw dice image
-    if dice_roll in dice_images:
+    if show_dice_animation and anim_start_time is not None:
+        # 10 fps Animation
+        elapsed = pygame.time.get_ticks() - anim_start_time
+        dice_img = dice_images[DICE_ANIMATION_ORDER[(elapsed // 50) % len(DICE_ANIMATION_ORDER)]]
+        img_rect = dice_img.get_rect(center=(center_x, center_y + 25))
+        screen.blit(dice_img, img_rect)
+    elif dice_roll in dice_images:
         dice_img = dice_images[dice_roll]
         img_rect = dice_img.get_rect(center=(center_x, center_y + 25))
         screen.blit(dice_img, img_rect)
@@ -146,7 +153,9 @@ def main():
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
     env = env_reset(0, seed=23, num_players=4, distance=7, enable_initial_free_pin=True, enable_teams=True, enable_dice_rethrow=True, layout=layout)
-    
+    _ = env_step(env, jnp.array(2)) # Dummy-Schritt, um das Board zu initialisieren
+    _ = throw_die(env)  # Initialen Würfelwurf
+    print("Initiales Board:")
     matrix = board_to_mat(env, layout)
     print(matrix)
     h, w = matrix.shape
@@ -160,6 +169,7 @@ def main():
     font = pygame.font.SysFont("Arial", 20)
     game_phase = 'ROLL'
     running = True
+    dice_anim_start = None
 
     while running:
         for event in pygame.event.get():
@@ -168,9 +178,9 @@ def main():
 
             # 1. Würfeln per Leertaste
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and game_phase == 'ROLL':
-                env = throw_die(env)
-                print(f"Spieler {int(env.current_player) + 1} würfelt eine {env.die}")
-                game_phase = 'MOVE'
+                dice_anim_start = pygame.time.get_ticks()
+                game_phase = 'ANIMATE_DICE'
+                pending_roll = True
 
             # 2. Pin auswählen per Mausklick
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'MOVE':
@@ -196,6 +206,13 @@ def main():
                     else:
                         print("Das ist nicht dein Pin!")
 
+        if game_phase == 'ANIMATE_DICE':
+                if pygame.time.get_ticks() - dice_anim_start >= 300:
+                    if pending_roll:
+                        env = throw_die(env)
+                        print(f"Spieler {int(env.current_player) + 1} würfelt eine {env.die}")
+                        pending_roll = False
+                    game_phase = 'MOVE'
         # --- Zeichnen ---
         # 1. Statisches Board (nur kopieren, nicht neu zeichnen)
         screen.blit(board_surface, (0, 0))
@@ -204,7 +221,8 @@ def main():
         draw_pins(screen, matrix, scale)
         
         # 3. UI
-        draw_ui(screen, font, int(env.current_player), int(env.die))
+        show_anim = (game_phase == 'ANIMATE_DICE')
+        draw_ui(screen, font, int(env.current_player), int(env.die), show_dice_animation=show_anim, anim_start_time=dice_anim_start)
         
         pygame.display.flip()
         clock.tick(60)

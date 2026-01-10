@@ -127,10 +127,9 @@ class ReplayBuffer:
 
         for k in range(K):
             bootstrap_idx = t_start + k + steps
-
             value = 0
             current_gamma = 1.0
-
+            
             for n in range(steps):
                 reward_idx = t_start + k + n
                 if reward_idx < game_len:
@@ -139,10 +138,11 @@ class ReplayBuffer:
                     current_gamma *= gamma
                 else:
                     break
-
-        if bootstrap_idx < game_len:
-            value += current_gamma * episode.root_values[bootstrap_idx]
-        target_values.append(value)
+            
+            if bootstrap_idx < game_len:
+                value += current_gamma * episode.root_values[bootstrap_idx]
+            
+            target_values.append(value)
 
         seq['observations'] = obs
         seq['actions'] = jnp.array(actions)

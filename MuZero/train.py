@@ -174,7 +174,7 @@ opt_state = None
 # params = load_params_from_file('muzero_madn_params_00001.pkl')
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
-params, opt_state = test_training(30, seed=42, iterations=6, params=params, opt_state=opt_state)
+params, opt_state = test_training(num_games=100, seed=42, iterations=10, params=params, opt_state=opt_state)
 # save trained parameters and optimizer state
 
 with open('muzero_madn_params_lr5_g30_it6.pkl', 'wb') as f:

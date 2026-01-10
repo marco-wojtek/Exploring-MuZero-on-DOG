@@ -47,25 +47,44 @@ COLORS = {
 
 pin_images = {}
 for color in ['blue', 'red', 'yellow', 'green']:
-    pin_images[color] = pygame.image.load(f"images/pin_{color}.png")
+    pin_images[color] = pygame.image.load(f"images/pins/pin_{color}.png")
+
+card_images = {}
+for i in range(0, 14):
+    card_images[i] = pygame.image.load(f"images/cards/card_{i}.png")
+
+card_4_images = {}
+card_4_images[0] = pygame.image.load(f"images/cards/card_pos4.png")
+card_4_images[1] = pygame.image.load(f"images/cards/card_neg4.png")
+
+card_1_11_images = {}
+card_1_11_images[0] = pygame.image.load(f"images/cards/card_11_1.png")
+card_1_11_images[1] = pygame.image.load(f"images/cards/card_11_11.png")
 
 class Button:
-    def __init__(self, x, y, width, height, text, color=(200, 200, 200), text_color=(0, 0, 0)):
+    def __init__(self, x, y, width, height, text, color=(200, 200, 200), text_color=(0, 0, 0), image=None):
         self.rect = pygame.Rect(x, y, width, height)
         self.text = text
         self.color = color
         self.text_color = text_color
         self.font = pygame.font.SysFont("Arial", 16)
         self.hovered = False
+        self.image = image  # Bild für den Button
         
     def draw(self, screen):
         color = (180, 180, 180) if self.hovered else self.color
         pygame.draw.rect(screen, color, self.rect)
         pygame.draw.rect(screen, (0, 0, 0), self.rect, 2)
         
-        text_surface = self.font.render(self.text, True, self.text_color)
-        text_rect = text_surface.get_rect(center=self.rect.center)
-        screen.blit(text_surface, text_rect)
+        if self.image:
+            # Bild mittig im Button zeichnen, ggf. skalieren
+            img = pygame.transform.smoothscale(self.image, (self.rect.width - 6, self.rect.height - 6))
+            img_rect = img.get_rect(center=self.rect.center)
+            screen.blit(img, img_rect)
+        else:
+            text_surface = self.font.render(self.text, True, self.text_color)
+            text_rect = text_surface.get_rect(center=self.rect.center)
+            screen.blit(text_surface, text_rect)
     
     def is_clicked(self, pos):
         return self.rect.collidepoint(pos)
@@ -192,7 +211,7 @@ class Hot7Selector:
 def create_all_card_buttons(screen_width, screen_height):
     """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
     buttons = []
-    button_size = 25
+    button_size = 35
     spacing = 5
     
     # Zentrum berechnen
@@ -209,21 +228,20 @@ def create_all_card_buttons(screen_width, screen_height):
     # erste 7 Buttons erstellen
     for i in range(0, 7):
         x = start_x + (i) * (button_size + spacing)
-        button = Button(x, y, button_size, button_size, str(i))
+        button = Button(x, y, button_size, button_size, str(i), image=card_images[i])
         buttons.append(button)
     # weitere 7 buttons darunter
     y += button_size + spacing
     for i in range(7, 14):
         x = start_x + (i-7) * (button_size + spacing)
-        button = Button(x, y, button_size, button_size, str(i))
+        button = Button(x, y, button_size, button_size, str(i), image=card_images[i])
         buttons.append(button)
     return buttons
 
 def create_pos_neg_4_buttons(screen_width, screen_height):
     """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
     buttons = []
-    button_width = 25
-    button_height = 25
+    button_size = 40
     spacing = 5
     
     # Zentrum berechnen
@@ -234,21 +252,20 @@ def create_pos_neg_4_buttons(screen_width, screen_height):
     y = center_y + 40 + 20  # UI-Box ist 80px hoch (center_y ± 40), +20px Abstand
     
     # Horizontale Zentrierung der 2 Buttons
-    total_width = 2 * button_width + 1 * spacing
+    total_width = 2 * button_size + 1 * spacing
     start_x = center_x - total_width // 2
     
     # 2 Buttons erstellen
     for i in range(0, 2):
-        x = start_x + (i-1) * (button_width + spacing)
-        button = Button(x, y, button_width, button_height, str((-1)**i * 4))
+        x = start_x + (i-1) * (button_size + spacing)
+        button = Button(x, y, button_size, button_size, str((-1)**i * 4), image=card_4_images[i])
         buttons.append(button)
     return buttons
 
 def create_1_or_11_buttons(screen_width, screen_height):
     """Erstellt Würfel-Buttons für Aktionen 1-6 unter dem UI im Zentrum"""
     buttons = []
-    button_width = 25
-    button_height = 25
+    button_size = 40
     spacing = 5
     
     # Zentrum berechnen
@@ -259,13 +276,13 @@ def create_1_or_11_buttons(screen_width, screen_height):
     y = center_y + 40 + 20  # UI-Box ist 80px hoch (center_y ± 40), +20px Abstand
     
     # Horizontale Zentrierung der 2 Buttons
-    total_width = 2 * button_width + 1 * spacing
+    total_width = 2 * button_size + 1 * spacing
     start_x = center_x - total_width // 2
     
     # 2 Buttons erstellen
     for i in range(0, 2):
-        x = start_x + (i-1) * (button_width + spacing)
-        button = Button(x, y, button_width, button_height, str(1 if i == 0 else 11))
+        x = start_x + (i-1) * (button_size + spacing)
+        button = Button(x, y, button_size, button_size, str(1 if i == 0 else 11), image=card_1_11_images[i])
         buttons.append(button)
     return buttons
 
@@ -371,7 +388,7 @@ def main():
     #                                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     #                                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     #                                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0]]))
-
+    _ = env_step(env, jnp.array(2))
     print("Phase:", env.phase)
     matrix = board_to_mat(env, layout)
     action_space = get_play_action_size(env)
@@ -379,7 +396,7 @@ def main():
     h, w = matrix.shape
     
     screen = pygame.display.set_mode((w * scale, h * scale))
-    pygame.display.set_caption("Mensch ärgere Dich nicht")
+    pygame.display.set_caption("DOG")
     clock = pygame.time.Clock()
     # Statisches Board-Surface erstellen (nur einmal!)
     board_surface = create_board_surface(matrix, scale)
