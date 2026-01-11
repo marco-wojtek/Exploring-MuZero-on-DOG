@@ -37,6 +37,9 @@ class Episode:
     # Optional: Würfelwürfe (für Stochastic MuZero Analyse, nicht zwingend für Training)
     chance_outcomes: chex.Array
 
+    players: chex.Array  # Spieler bei jedem Zeitschritt
+    teams: chex.Array    # Team bei jedem Zeitschritt (0 oder 1)
+
 import numpy as np
 import random
 
@@ -82,23 +85,47 @@ class ReplayBuffer:
         return jax.tree_util.tree_map(lambda *x: np.stack(x), *batch)
 
     def _extract_sequence(self, episode, t_start):
-        """Extrahiert eine Sequenz der Länge unroll_steps + 1."""
+        """
+        Flexible Implementierung: 
+        - teams = -1: Single-Player (mit negativen Rewards für Verlierer)
+        - teams = 0 oder 1: Team-Play (Zero-Sum)
+        """
         K = self.unroll_steps + 1
-        end = t_start + K
-        seq = {}
-
-        indices = jnp.arange(t_start, end)
+        game_len = len(episode.actions)
         
-        # Beobachtungen extrahieren
         obs = episode.observations[t_start]
-
+        root_player = episode.players[t_start]
+        root_team = episode.teams[t_start]
+        
+        # Bestimme finalen Reward aus Root-Perspektive
+        if game_len > 0 and episode.rewards[-1] > 0:
+            final_player = episode.players[-1]
+            final_team = episode.teams[-1]
+            
+            # Unterscheidung: Teams oder Single-Player?
+            if root_team == -1:
+                # SINGLE-PLAYER-MODUS
+                # Negative Rewards für Verlierer
+                if final_player == root_player:
+                    final_reward = 1.0   # Ich habe gewonnen
+                else:
+                    final_reward = -1.0  # Jemand anderes hat gewonnen
+            else:
+                # TEAM-MODUS (Zero-Sum)
+                if final_team == root_team:
+                    final_reward = 1.0   # Mein Team hat gewonnen
+                else:
+                    final_reward = -1.0  # Gegner-Team hat gewonnen
+        else:
+            final_reward = 0.0  # Kein Gewinner oder Unentschieden
+        
+        # Extrahiere Sequenz-Daten
         actions = []
         rewards = []
         policies = []
-        values = [] # Bootstrap values
+        values = []
         masks = []
-
-        game_len = len(episode.actions)
+        
         for k in range(K):
             idx = t_start + k
             if idx < game_len:
@@ -110,49 +137,37 @@ class ReplayBuffer:
                 values.append(episode.root_values[idx])
                 masks.append(1.0)
             else:
+                # Padding
                 if k < K - 1:
-                    actions.append(0)  # Dummy Aktion
-                    rewards.append(0.0)  # Dummy Reward
-                
-                policies.append(jnp.zeros_like(episode.child_visits[0]))  # Dummy Policy
-                values.append(0.0)  # Dummy Value
-                masks.append(0.0)  # Padding Maske
-                
-        # Target values berechen (Bootstrapping)
-        # z_t = u_{t+1} + gamma * u_{t+2} + ... + gamma^(n-1) * v_{t+n}
-
+                    actions.append(0)
+                    rewards.append(0.0)
+                policies.append(jnp.zeros(24))
+                values.append(0.0)
+                masks.append(0.0)
+        
+        # Target Values mit Perspektiv-transformiertem Reward
         target_values = []
         gamma = 0.99
-        steps = 5 # Anzahl der Schritte für das Bootstrapping
-
+        
         for k in range(K):
-            bootstrap_idx = t_start + k + steps
-            value = 0
-            current_gamma = 1.0
-            
-            for n in range(steps):
-                reward_idx = t_start + k + n
-                if reward_idx < game_len:
-                    reward = episode.rewards[reward_idx]
-                    value += current_gamma * reward
-                    current_gamma *= gamma
-                else:
-                    break
-            
-            if bootstrap_idx < game_len:
-                value += current_gamma * episode.root_values[bootstrap_idx]
+            idx = t_start + k
+            if idx < game_len:
+                steps_to_end = game_len - 1 - idx
+                value = (gamma ** steps_to_end) * final_reward  # Kann jetzt negativ sein!
+            else:
+                value = 0.0
             
             target_values.append(value)
-
-        seq['observations'] = obs
-        seq['actions'] = jnp.array(actions)
-        seq['rewards'] = jnp.array(rewards)
-        seq['policies'] = jnp.array(policies)
-        seq['values'] = jnp.array(values)
-        seq['masks'] = jnp.array(masks)
-        seq['target_values'] = jnp.array(target_values)
-
-        return seq
+        
+        return {
+            'observations': obs,
+            'actions': jnp.array(actions),
+            'rewards': jnp.array(rewards),  # Wird für Reward Loss verwendet (wenn aktiv)
+            'policies': jnp.array(policies),
+            'values': jnp.array(values),
+            'masks': jnp.array(masks),
+            'target_values': jnp.array(target_values)
+        }
 
 def play_classic_game_for_training(env, params, rng_key):
     observations = []
@@ -506,3 +521,223 @@ def play_n_games(params, rng_key, num_envs=20):
 # print("Rewards after step:", rewards)
 
 # print("Board of all env after step:\n", next_envs.board)
+
+@jax.jit
+def run_full_game(env, params, rng_key):
+    """Mit early exit - stoppt wenn Spiel fertig ist
+    Verwende run_full_game, wenn du ein einzelnes Spiel debuggen oder analysieren möchtest.
+    """
+    
+    max_steps = 500
+    init_buffers = {
+        'obs': jnp.zeros((max_steps, *old_encode_board(env).shape)),
+        'act': jnp.zeros(max_steps, dtype=jnp.int32),
+        'rew': jnp.zeros(max_steps),
+        'val': jnp.zeros(max_steps),
+        'pol': jnp.zeros((max_steps, 24)),
+        'idx': 0  # Maske brauchen wir nicht mehr, idx = length!
+    }
+    
+    def cond_fn(carry):
+        env, key, buffers, done = carry
+        # Stoppe wenn done ODER max erreicht
+        return (~done) & (buffers['idx'] < max_steps)
+    
+    def body_fn(carry):
+        env, key, buffers, done = carry
+        key, subkey = jax.random.split(key)
+        
+        obs = old_encode_board(env)[None, ...]
+        valid_mask = valid_action(env).flatten()
+        invalid_mask = (~valid_mask)[None, :]
+        has_valid = jnp.any(valid_mask)
+        
+        def do_step(e):
+            policy_output, root_value = run_muzero_mcts(params, subkey, obs, invalid_actions=invalid_mask)
+            action = policy_output.action[0]
+            next_env, reward, next_done = env_step(e, map_action(action))
+            return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done
+        
+        def skip_step(e):
+            # no_step für Spielerwechsel ohne valide Moves
+            next_env, reward, next_done = no_step(e)
+            dummy_obs = jnp.zeros_like(obs[0])
+            return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done
+        
+        next_env, step_obs, action, reward, value, policy, next_done = jax.lax.cond(
+            has_valid,  # Kein & (~done) nötig, da while_loop bereits prüft!
+            do_step,
+            skip_step,
+            env
+        )
+        
+        idx = buffers['idx']
+        new_buffers = {
+            'obs': buffers['obs'].at[idx].set(step_obs),
+            'act': buffers['act'].at[idx].set(action),
+            'rew': buffers['rew'].at[idx].set(reward),
+            'val': buffers['val'].at[idx].set(value),
+            'pol': buffers['pol'].at[idx].set(policy),
+            'idx': idx + 1
+        }
+        
+        return (next_env, key, new_buffers, next_done)
+    
+    final_env, _, final_buffers, _ = jax.lax.while_loop(
+        cond_fn,
+        body_fn,
+        (env, rng_key, init_buffers, False)
+    )
+    
+    return final_buffers
+
+def play_n_games_v2(params, rng_key, num_envs=50):
+    """Mit while_loop - effizienter!"""
+    rng_key, subkey = jax.random.split(rng_key)
+    seeds = jax.random.randint(subkey, (num_envs,), 0, 1000000)
+    envs = batch_reset(seeds)
+    keys = jax.random.split(rng_key, num_envs)
+    
+    # Vektorisiert über alle Games
+    all_buffers = jax.vmap(run_full_game, in_axes=(0, None, 0))(envs, params, keys)
+    
+    # Konvertiere zu Episodes (ohne Maske, idx = length)
+    episodes = []
+    for i in range(num_envs):
+        length = all_buffers['idx'][i]
+        
+        ep = Episode(
+            observations=all_buffers['obs'][i, :length],
+            actions=all_buffers['act'][i, :length],
+            rewards=all_buffers['rew'][i, :length],
+            root_values=all_buffers['val'][i, :length],
+            child_visits=all_buffers['pol'][i, :length],
+            mask=jnp.ones(length),
+            chance_outcomes=jnp.zeros(length)
+        )
+        episodes.append(ep)
+    
+    return episodes
+
+
+def play_batch_of_games_jitted(envs, num_envs, input_shape, params, keys, max_steps=500):
+    """MCTS parallel + Early Exit + XLA optimiert
+    Verwende play_batch_of_games_jitted, wenn du viele Spiele parallel simulieren möchtest, insbesondere für Training oder Datengewinnung.
+    """
+    
+    def body_fn(carry):
+        envs_state, buffers, dones, step_count = carry
+        
+        # ✅ PARALLEL: vmap über alle aktiven Envs
+        def step_single_env(env, buffer, done, key):
+            def do_active_step(env, buffer):
+                obs = old_encode_board(env)[None, ...]
+                valid_mask = valid_action(env).flatten()
+                invalid_mask = (~valid_mask)[None, :]
+                has_valid = jnp.any(valid_mask)
+                
+                # Unterscheidung: MCTS oder no_step
+                def do_mcts(env):
+                    policy_output, root_value = run_muzero_mcts(
+                        params, key, obs, invalid_actions=invalid_mask
+                    )
+                    action = policy_output.action[0]
+                    next_env, reward, next_done = env_step(env, map_action(action))
+                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done
+                
+                def do_skip(env):
+                    # Keine validen Actions → no_step
+                    next_env, reward, next_done = no_step(env)
+                    dummy_obs = jnp.zeros_like(obs[0])
+                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done
+                
+                # Wähle zwischen MCTS und no_step
+                next_env, step_obs, action, reward, value, policy, next_done = jax.lax.cond(
+                    has_valid,
+                    do_mcts,
+                    do_skip,
+                    env
+                )
+                
+                # Buffer Update
+                idx = buffer['idx']
+                current_player = env.current_player
+                team = jax.lax.cond(env.rules['enable_teams'], lambda: jnp.int8(current_player%2), lambda: jnp.int8(-1))
+                new_buffer = {
+                    'obs': buffer['obs'].at[idx].set(step_obs),
+                    'act': buffer['act'].at[idx].set(action),
+                    'rew': buffer['rew'].at[idx].set(reward),
+                    'val': buffer['val'].at[idx].set(value),
+                    'pol': buffer['pol'].at[idx].set(policy),
+                    'player': buffer['player'].at[idx].set(current_player),
+                    'team': buffer['team'].at[idx].set(team),
+                    'idx': idx + 1
+                }
+                return next_env, new_buffer, next_done
+            
+            def do_skip_step(env, buffer):
+                # Game ist fertig, nichts tun
+                return env, buffer, done
+            
+            return jax.lax.cond(~done, do_active_step, do_skip_step, env, buffer)
+        
+        # ✅ HIER: vmap über alle Envs gleichzeitig!
+        new_envs, new_buffers, new_dones = jax.vmap(step_single_env)(
+            envs_state, buffers, dones, keys  # keys muss pro Step neu sein!
+        )
+        
+        return (new_envs, new_buffers, new_dones, step_count + 1)
+    
+    # Initialisierung
+    init_buffers = {
+        'obs': jnp.zeros((num_envs, max_steps, *input_shape)),
+        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
+        'rew': jnp.zeros((num_envs, max_steps)),
+        'val': jnp.zeros((num_envs, max_steps)),
+        'pol': jnp.zeros((num_envs, max_steps, 24)),
+        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
+        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
+        'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
+    }
+    init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
+    
+    def cond_fn(carry):
+        _, _, dones, step_count = carry
+        # Stoppe wenn ALLE done ODER max_steps erreicht
+        return jnp.any(~dones) & (step_count < max_steps)
+    
+    final_envs, final_buffers, final_dones, _ = jax.lax.while_loop(
+        cond_fn,
+        body_fn,
+        (envs, init_buffers, init_dones, 0)
+    )
+    
+    return final_buffers
+
+def play_n_games_v3(params, rng_key, input_shape, num_envs=50):
+    """Bester Ansatz: Alles in JAX, aber mit bedingter Ausführung"""
+    rng_key, subkey = jax.random.split(rng_key)
+    seeds = jax.random.randint(subkey, (num_envs,), 0, 1000000)
+    envs = batch_reset(seeds)
+    keys = jax.random.split(rng_key, num_envs)
+    
+    all_buffers = play_batch_of_games_jitted(envs, num_envs, input_shape, params, keys)
+    
+    # Episode Extraction wie in v2
+    episodes = []
+    for i in range(num_envs):
+        length = all_buffers['idx'][i]
+        
+        ep = Episode(
+            observations=all_buffers['obs'][i, :length],
+            actions=all_buffers['act'][i, :length],
+            rewards=all_buffers['rew'][i, :length],
+            root_values=all_buffers['val'][i, :length],
+            child_visits=all_buffers['pol'][i, :length],
+            mask=jnp.ones(length),
+            chance_outcomes=jnp.zeros(length),
+            players=all_buffers['player'][i, :length],
+            teams=all_buffers['team'][i, :length]
+        )
+        episodes.append(ep)
+    return episodes

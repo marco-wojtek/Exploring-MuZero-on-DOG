@@ -187,7 +187,6 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
                [0, 0, 0, 0]])
     
     for i in range(4):
-        print(winners)
         winners = winners.at[i].add(play_n_games_for_eval(agents, jax.random.PRNGKey(i*12345), num_envs=batch_size, starting_player=i))
 
     print("Final Results:")
@@ -264,10 +263,12 @@ def evaluate_agent(params1, params2, params3, params4, num_games=50):
     winners = jnp.array(winners)
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
-params1 = load_params_from_file('muzero_madn_params_00001.pkl')
+
+params4 = load_params_from_file('muzero_madn_params_lr3e4_g50_it10.pkl')
+params3 = load_params_from_file('muzero_madn_params_00001.pkl')
 params2 = load_params_from_file('muzero_madn_params.pkl')
-params3 = load_params_from_file('muzero_madn_params_lr5_g30_it6.pkl')
+params1 = load_params_from_file('muzero_madn_params_lr5_g30_it6.pkl')
 start_time = time()
-evaluate_agent_parallel(params1, params2, params3, None, batch_size=13)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=25)
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

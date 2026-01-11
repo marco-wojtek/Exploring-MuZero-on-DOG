@@ -1,3 +1,10 @@
+import os
+#VOR allen JAX imports!
+os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'  # Anzahl Ihrer CPU-Kerne
+os.environ['JAX_PLATFORMS'] = 'cpu'
+
+import jax
+jax.config.update('jax_enable_x64', False)
 from time import time
 import jax
 import jax.numpy as jnp
@@ -10,113 +17,104 @@ sys.path.append(project_root)
 # Annahme: Deine Netzwerk-Klassen und init-Funktionen sind importiert
 from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, run_muzero_mcts, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
-from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training, play_n_games, batch_encode, batch_env_step, batch_map_action, batch_reset, batch_valid_action
+from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training, play_n_games,play_n_games_v2,  batch_encode, batch_env_step, batch_map_action, batch_reset, batch_valid_action, play_n_games_v3
 
 @jax.jit
 def loss_fn(params, batch):
-    """
-    Berechnet den MuZero Loss für einen Batch.
-    batch ist ein Dictionary/Struct mit:
-    - observations: (B, Obs_Shape) -> Startzustand
-    - actions: (B, Unroll_Steps) -> Aktionen im Unroll
-    - target_values: (B, Unroll_Steps + 1) -> z
-    - target_rewards: (B, Unroll_Steps) -> u
-    - target_policies: (B, Unroll_Steps + 1, Num_Actions) -> pi
-    - sample_weights: (B, Unroll_Steps + 1) -> Maskierung für Padding
-    """
+    """Vektorisierte Version mit scan statt Loop"""
     
-    # 1. Initial Inference (Representation Network)
-    # Wir starten beim Schritt t=0
     root_obs = batch['observations']
     latent_state = repr_net.apply(params['representation'], root_obs)
     
-    # Loss Akkumulatoren
-    total_loss = 0.0
-    value_loss = 0.0
-    reward_loss = 0.0
-    policy_loss = 0.0
-    
-    # Wir iterieren durch die Unroll-Schritte (K Schritte)
-    # K = Anzahl der Schritte, die wir in die Zukunft schauen (z.B. 5)
     num_unroll_steps = batch['actions'].shape[1]
     
-    for k in range(num_unroll_steps + 1):
-        # A. Prediction (Policy & Value) für den aktuellen latenten Zustand
+    def unroll_step(carry, inputs):
+        latent_state, total_loss = carry
+        # k, action, target_value, target_policy, target_reward, mask = inputs
+        k, action, target_value, target_policy, mask = inputs
+        
+        # Prediction
         pred_policy_logits, pred_value = pred_net.apply(params['prediction'], latent_state)
-        pred_value = pred_value.squeeze(-1) # (B,)
+        pred_value = pred_value.squeeze(-1)
         
-        # B. Targets für diesen Schritt holen
-        target_value = batch['target_values'][:, k]
-        target_policy = batch['policies'][:, k]
-        mask = batch['masks'][:, k]
-        
-        # C. Losses berechnen (Maskiert!)
-        
-        # Value Loss (MSE oder Cross-Entropy bei kategorischen Values)
-        # Hier einfach MSE für den Anfang:
+        # Losses
         l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
-        
-        # Policy Loss (Cross Entropy)
-        # target_policy sind Wahrscheinlichkeiten, pred_policy_logits sind Logits
         l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
         
-        # Reward Loss (nur wenn k > 0, da Reward zum Übergang gehört)
-        if k > 0:
-            # Der Reward wurde im VORHERIGEN Schritt (Dynamics) vorhergesagt
-            # Wir vergleichen pred_reward (aus Schritt k-1) mit target_reward (aus Schritt k-1)
-            # Hinweis: In der Schleife unten berechnen wir pred_reward für den NÄCHSTEN Schritt.
-            # Daher müssen wir den Reward-Loss eigentlich dort berechnen oder speichern.
-            # Einfacher: Wir berechnen Reward Loss direkt beim Dynamics Schritt.
-            pass 
-
-        # Skalierung der Losses (Policy oft weniger gewichtet am Anfang)
-        scale = 1.0 if k == 0 else 0.5 # Gradient Scale für Recurrent Steps (MuZero Paper)
+        scale = jnp.where(k == 0, 1.0, 1/num_unroll_steps)
+        step_loss = scale * (l_value + l_policy)
         
-        total_loss += scale * (l_value + l_policy)
-        value_loss += l_value
-        policy_loss += l_policy
+        # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
+        def do_dynamics(state):
+            new_state, pred_reward, _ = dynamics_net.apply(params['dynamics'], state, action)
+            # pred_reward = pred_reward.squeeze(-1)
+            # l_reward = jnp.mean(mask * (target_reward - pred_reward) ** 2)
+            return new_state#, scale * l_reward
         
-        # D. Dynamics Step (nur wenn wir nicht am Ende sind)
-        if k < num_unroll_steps:
-            action = batch['actions'][:, k] # Aktion, die tatsächlich gespielt wurde
-            
-            # Dynamics Network anwenden
-            latent_state, pred_reward, _ = dynamics_net.apply(params['dynamics'], latent_state, action)
-            pred_reward = pred_reward.squeeze(-1)
-            
-            # Reward Loss berechnen
-            target_reward = batch['rewards'][:, k]
-            l_reward = jnp.mean(mask * (target_reward - pred_reward) ** 2)
-            
-            total_loss += scale * l_reward
-            reward_loss += l_reward
-            
-            # Gradient Scaling Hook für den latent state (optional, stabilisiert Training)
-            latent_state = jax.lax.stop_gradient(latent_state * 0.5) + latent_state * 0.5
-
-    # L2 Regularization (Weight Decay) macht meist der Optimizer (AdamW)
+        def skip_dynamics(state):
+            return state#, 0.0
+        
+        next_latent = jax.lax.cond(
+            k < num_unroll_steps,
+            do_dynamics,
+            skip_dynamics,
+            latent_state
+        )
+        
+        # Gradient scaling
+        next_latent = jax.lax.stop_gradient(next_latent * 0.5) + next_latent * 0.5
+        
+        # return (next_latent, total_loss + step_loss + reward_loss), (l_value, l_policy, reward_loss)
+        return (next_latent, total_loss + step_loss), (l_value, l_policy)
     
-    return total_loss, (value_loss, policy_loss, reward_loss)
+    # Prepare scan inputs
+    k_indices = jnp.arange(num_unroll_steps + 1)
+    actions_padded = jnp.concatenate([batch['actions'], jnp.zeros((batch['actions'].shape[0], 1), dtype=jnp.int32)], axis=1)
+    #rewards_padded = jnp.concatenate([batch['rewards'], jnp.zeros((batch['rewards'].shape[0], 1))], axis=1)
+    
+    scan_inputs = (
+        k_indices,
+        actions_padded.T,
+        batch['target_values'].T,
+        jnp.transpose(batch['policies'], (1, 0, 2)),
+        #rewards_padded.T,
+        batch['masks'].T
+    )
+    
+    (final_state, total_loss), (v_losses, p_losses) = jax.lax.scan(
+        unroll_step,
+        (latent_state, 0.0),
+        scan_inputs
+    )
+    
+    value_loss = jnp.sum(v_losses)
+    policy_loss = jnp.sum(p_losses)
+    #reward_loss = jnp.sum(r_losses)
+    
+    return total_loss, (value_loss, policy_loss)#, reward_loss)
 
 @jax.jit
 def train_step(params, opt_state, batch):
     """Führt einen Trainingsschritt aus."""
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, (v_loss, p_loss, r_loss)), grads = grad_fn(params, batch)
+    # (loss, (v_loss, p_loss, r_loss)), grads = grad_fn(params, batch)
+    (loss, (v_loss, p_loss)), grads = grad_fn(params, batch)
     
     updates, new_opt_state = optimizer.update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
     
-    return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss, 'r_loss': r_loss}
+    return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss}#, 'r_loss': r_loss}
 
 # --- Setup Optimizer ---
-learning_rate = 1e-5
+learning_rate = 2e-4
 optimizer = optax.adamw(learning_rate)
 
 # --- Initialisierung (Beispiel) ---
 
-
 def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state=None):
+    print(f"JAX Devices: {jax.devices()}")
+    print(f"JAX Backend: {jax.default_backend()}")
+
     env = env_reset(
         seed,  # <- Das wird an '_' übergeben
         num_players=4,
@@ -138,24 +136,17 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     if opt_state is None:
         opt_state = optimizer.init(params)
 
-    replay = ReplayBuffer(capacity=1000, batch_size=4, unroll_steps=5)
+    replay = ReplayBuffer(capacity=500, batch_size=64, unroll_steps=5)
     for it in range(iterations):
         start_time = time()
-        print(f"Iteration {it+1}/{iterations}: Playing games to collect training data...")
-        eps = play_n_games(params, jax.random.PRNGKey(it**3), num_envs=num_games)
+        print(f"Iteration {it+1}/{iterations}")
+        eps = play_n_games_v3(params, jax.random.PRNGKey(it**3), input_shape, num_envs=num_games)
         print("Saving collected games to replay buffer...")
         replay.save_games(eps)
-        # for game_idx in range(num_games):
-        #     if (game_idx+1) % 10 == 0:
-        #         print(f"Playing game {game_idx+1}/{num_games} for training data...")
-        #     #print(f"Playing game {game_idx+1}/{num_games} for training data...")
-        #     env = env_reset(0, num_players=4, distance=10, enable_initial_free_pin=True, enable_circular_board=False)
-        #     episode = play_deterministic_game_for_training(env, params, jax.random.PRNGKey(game_idx))
-        #     replay.save_game(episode)
 
         print("Training on collected data...")
         train_start = time()
-        train_steps = 1000
+        train_steps = 500
         for i in range(train_steps):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
@@ -174,11 +165,11 @@ opt_state = None
 # params = load_params_from_file('muzero_madn_params_00001.pkl')
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
-params, opt_state = test_training(num_games=100, seed=42, iterations=10, params=params, opt_state=opt_state)
+params, opt_state = test_training(num_games=50, seed=13, iterations=10, params=params, opt_state=opt_state)
 # save trained parameters and optimizer state
 
-with open('muzero_madn_params_lr5_g30_it6.pkl', 'wb') as f:
+with open('muzero_madn_params_lr3e4_g50_it10.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('muzero_madn_opt_state_lr5_g30_it6.pkl', 'wb') as f:
+with open('muzero_madn_opt_state_lr3e4_g50_it10.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
