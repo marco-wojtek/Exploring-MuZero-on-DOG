@@ -13,3 +13,7 @@ dependencies = [
     "pygame>=2.6.1",
     "pytest>=8.4.2",
 ]
+[project.optional-dependencies]
+cuda = [
+    "jax[cuda13]",  # Überschreibt CPU-Version
+]

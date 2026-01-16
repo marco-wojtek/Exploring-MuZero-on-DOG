@@ -1,0 +1,182 @@
+JAX Devices: [CpuDevice(id=0), CpuDevice(id=1), CpuDevice(id=2), CpuDevice(id=3), CpuDevice(id=4), CpuDevice(id=5), CpuDevice(id=6), CpuDevice(id=7)]
+JAX Backend: cpu
+(14, 56)
+Iteration 1/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(21.703562, dtype=float32), 'total_loss': Array(7.706171, dtype=float32), 'v_loss': Array(1.5675973, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(17.394299, dtype=float32), 'total_loss': Array(6.0558066, dtype=float32), 'v_loss': Array(1.1402677, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(17.449455, dtype=float32), 'total_loss': Array(5.8123302, dtype=float32), 'v_loss': Array(0.5819545, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(16.811882, dtype=float32), 'total_loss': Array(5.6467032, dtype=float32), 'v_loss': Array(0.9116846, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(15.488434, dtype=float32), 'total_loss': Array(5.2471957, dtype=float32), 'v_loss': Array(1.0005189, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(15.680567, dtype=float32), 'total_loss': Array(5.266058, dtype=float32), 'v_loss': Array(0.8365731, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(15.368244, dtype=float32), 'total_loss': Array(5.1661506, dtype=float32), 'v_loss': Array(0.74724495, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(15.113781, dtype=float32), 'total_loss': Array(4.992566, dtype=float32), 'v_loss': Array(0.75571585, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(14.9665785, dtype=float32), 'total_loss': Array(5.178003, dtype=float32), 'v_loss': Array(1.3466163, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(14.490728, dtype=float32), 'total_loss': Array(5.1143546, dtype=float32), 'v_loss': Array(1.2388783, dtype=float32)}
+
+              Iteration 1 completed in 1217.84 seconds.
+              Game playing + data collection time: 931.43 seconds.
+              Training time: 286.41 seconds.
+
+Iteration 2/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(15.398022, dtype=float32), 'total_loss': Array(5.112113, dtype=float32), 'v_loss': Array(0.85556895, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(15.4056835, dtype=float32), 'total_loss': Array(5.1047664, dtype=float32), 'v_loss': Array(0.7586083, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(14.576255, dtype=float32), 'total_loss': Array(4.876647, dtype=float32), 'v_loss': Array(0.89317733, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(14.808439, dtype=float32), 'total_loss': Array(4.8839355, dtype=float32), 'v_loss': Array(1.1238496, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(14.346943, dtype=float32), 'total_loss': Array(4.7555017, dtype=float32), 'v_loss': Array(0.68283105, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(14.817358, dtype=float32), 'total_loss': Array(4.9844794, dtype=float32), 'v_loss': Array(0.85449, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(14.43311, dtype=float32), 'total_loss': Array(4.811653, dtype=float32), 'v_loss': Array(0.88030505, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(14.59306, dtype=float32), 'total_loss': Array(4.804005, dtype=float32), 'v_loss': Array(0.66106075, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(14.674368, dtype=float32), 'total_loss': Array(4.90431, dtype=float32), 'v_loss': Array(0.95770216, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(14.359255, dtype=float32), 'total_loss': Array(4.6435046, dtype=float32), 'v_loss': Array(0.85050464, dtype=float32)}
+
+              Iteration 2 completed in 1427.57 seconds.
+              Game playing + data collection time: 1167.62 seconds.
+              Training time: 259.95 seconds.
+
+Iteration 3/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(14.713892, dtype=float32), 'total_loss': Array(4.5798745, dtype=float32), 'v_loss': Array(0.6317041, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(14.739135, dtype=float32), 'total_loss': Array(4.7820945, dtype=float32), 'v_loss': Array(0.52749014, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(14.364878, dtype=float32), 'total_loss': Array(4.620437, dtype=float32), 'v_loss': Array(0.60597, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(13.562318, dtype=float32), 'total_loss': Array(4.3718586, dtype=float32), 'v_loss': Array(0.9113204, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(14.116559, dtype=float32), 'total_loss': Array(4.4262276, dtype=float32), 'v_loss': Array(0.8302506, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(13.227404, dtype=float32), 'total_loss': Array(4.1826367, dtype=float32), 'v_loss': Array(1.091465, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(13.145091, dtype=float32), 'total_loss': Array(4.055281, dtype=float32), 'v_loss': Array(0.56901324, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(13.07563, dtype=float32), 'total_loss': Array(4.2531195, dtype=float32), 'v_loss': Array(0.35863876, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(14.238671, dtype=float32), 'total_loss': Array(4.4601207, dtype=float32), 'v_loss': Array(0.5741621, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(13.801185, dtype=float32), 'total_loss': Array(4.296896, dtype=float32), 'v_loss': Array(0.47261533, dtype=float32)}
+
+              Iteration 3 completed in 1406.06 seconds.
+              Game playing + data collection time: 1163.57 seconds.
+              Training time: 242.49 seconds.
+
+Iteration 4/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(13.635833, dtype=float32), 'total_loss': Array(4.387039, dtype=float32), 'v_loss': Array(0.70066977, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(13.708403, dtype=float32), 'total_loss': Array(4.2154765, dtype=float32), 'v_loss': Array(0.55527115, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(12.769455, dtype=float32), 'total_loss': Array(4.1077437, dtype=float32), 'v_loss': Array(0.7143019, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(13.166766, dtype=float32), 'total_loss': Array(4.0070715, dtype=float32), 'v_loss': Array(0.54018235, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(13.494551, dtype=float32), 'total_loss': Array(4.2723174, dtype=float32), 'v_loss': Array(0.76438326, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(13.493133, dtype=float32), 'total_loss': Array(4.170497, dtype=float32), 'v_loss': Array(0.61812204, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(13.516113, dtype=float32), 'total_loss': Array(4.2006974, dtype=float32), 'v_loss': Array(0.5905594, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(12.827354, dtype=float32), 'total_loss': Array(3.8992043, dtype=float32), 'v_loss': Array(0.5420673, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(12.921732, dtype=float32), 'total_loss': Array(3.888213, dtype=float32), 'v_loss': Array(0.46919417, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(13.563824, dtype=float32), 'total_loss': Array(4.028692, dtype=float32), 'v_loss': Array(0.5871956, dtype=float32)}
+
+              Iteration 4 completed in 1428.29 seconds.
+              Game playing + data collection time: 1170.72 seconds.
+              Training time: 257.58 seconds.
+
+Iteration 5/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(13.527132, dtype=float32), 'total_loss': Array(3.9168952, dtype=float32), 'v_loss': Array(0.5906089, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(12.802801, dtype=float32), 'total_loss': Array(4.085534, dtype=float32), 'v_loss': Array(0.5113053, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(13.454159, dtype=float32), 'total_loss': Array(3.9192407, dtype=float32), 'v_loss': Array(0.44345823, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(13.532402, dtype=float32), 'total_loss': Array(4.110496, dtype=float32), 'v_loss': Array(0.92909414, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(12.928858, dtype=float32), 'total_loss': Array(3.8834808, dtype=float32), 'v_loss': Array(0.5544518, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(12.918654, dtype=float32), 'total_loss': Array(3.8363822, dtype=float32), 'v_loss': Array(0.44580942, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(12.212114, dtype=float32), 'total_loss': Array(3.614367, dtype=float32), 'v_loss': Array(0.5182457, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(12.532669, dtype=float32), 'total_loss': Array(3.6849859, dtype=float32), 'v_loss': Array(0.57078916, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(12.28896, dtype=float32), 'total_loss': Array(3.8230472, dtype=float32), 'v_loss': Array(0.46856982, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(12.74682, dtype=float32), 'total_loss': Array(3.9759886, dtype=float32), 'v_loss': Array(0.7855748, dtype=float32)}
+
+              Iteration 5 completed in 1420.64 seconds.
+              Game playing + data collection time: 1188.30 seconds.
+              Training time: 232.33 seconds.
+
+Iteration 6/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(13.233786, dtype=float32), 'total_loss': Array(3.9838307, dtype=float32), 'v_loss': Array(0.92095685, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(12.178468, dtype=float32), 'total_loss': Array(3.578564, dtype=float32), 'v_loss': Array(0.5977749, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(12.056216, dtype=float32), 'total_loss': Array(3.5565143, dtype=float32), 'v_loss': Array(0.6242406, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(13.073649, dtype=float32), 'total_loss': Array(3.918932, dtype=float32), 'v_loss': Array(0.7845852, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(13.644595, dtype=float32), 'total_loss': Array(3.941994, dtype=float32), 'v_loss': Array(0.67842966, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(13.036672, dtype=float32), 'total_loss': Array(3.801295, dtype=float32), 'v_loss': Array(0.54414016, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(12.852657, dtype=float32), 'total_loss': Array(3.7385771, dtype=float32), 'v_loss': Array(0.63998234, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(11.835685, dtype=float32), 'total_loss': Array(3.4221587, dtype=float32), 'v_loss': Array(0.6225748, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(12.556646, dtype=float32), 'total_loss': Array(3.5690362, dtype=float32), 'v_loss': Array(0.5911969, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(12.531429, dtype=float32), 'total_loss': Array(3.6481133, dtype=float32), 'v_loss': Array(0.59459335, dtype=float32)}
+
+              Iteration 6 completed in 1386.49 seconds.
+              Game playing + data collection time: 1165.39 seconds.
+              Training time: 221.11 seconds.
+
+Iteration 7/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(12.987536, dtype=float32), 'total_loss': Array(3.6543672, dtype=float32), 'v_loss': Array(0.60816866, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(12.936235, dtype=float32), 'total_loss': Array(3.916278, dtype=float32), 'v_loss': Array(0.48056448, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(12.993951, dtype=float32), 'total_loss': Array(3.7730658, dtype=float32), 'v_loss': Array(0.47154555, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(12.579519, dtype=float32), 'total_loss': Array(3.5370557, dtype=float32), 'v_loss': Array(0.47937244, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(12.390287, dtype=float32), 'total_loss': Array(3.780904, dtype=float32), 'v_loss': Array(0.5638273, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(11.990702, dtype=float32), 'total_loss': Array(3.3923512, dtype=float32), 'v_loss': Array(0.5313333, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(12.130146, dtype=float32), 'total_loss': Array(3.3477364, dtype=float32), 'v_loss': Array(0.45631272, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(13.1172695, dtype=float32), 'total_loss': Array(3.696266, dtype=float32), 'v_loss': Array(0.581883, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(12.337181, dtype=float32), 'total_loss': Array(3.456487, dtype=float32), 'v_loss': Array(0.42484054, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(12.417902, dtype=float32), 'total_loss': Array(3.6152313, dtype=float32), 'v_loss': Array(0.435695, dtype=float32)}
+
+              Iteration 7 completed in 1356.58 seconds.
+              Game playing + data collection time: 1137.84 seconds.
+              Training time: 218.74 seconds.
+
+Iteration 8/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(11.950322, dtype=float32), 'total_loss': Array(3.3883944, dtype=float32), 'v_loss': Array(0.7041531, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(11.063629, dtype=float32), 'total_loss': Array(2.8939974, dtype=float32), 'v_loss': Array(0.61553174, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(12.3519335, dtype=float32), 'total_loss': Array(3.537761, dtype=float32), 'v_loss': Array(0.35800794, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(12.843647, dtype=float32), 'total_loss': Array(3.6504335, dtype=float32), 'v_loss': Array(0.8043039, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(12.662815, dtype=float32), 'total_loss': Array(3.4736767, dtype=float32), 'v_loss': Array(0.28398868, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(11.3734, dtype=float32), 'total_loss': Array(3.2834196, dtype=float32), 'v_loss': Array(0.7079809, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(10.87065, dtype=float32), 'total_loss': Array(3.032831, dtype=float32), 'v_loss': Array(0.4283036, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(12.047485, dtype=float32), 'total_loss': Array(3.3626268, dtype=float32), 'v_loss': Array(0.9294872, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(11.290886, dtype=float32), 'total_loss': Array(3.1256592, dtype=float32), 'v_loss': Array(0.44278508, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(12.214803, dtype=float32), 'total_loss': Array(3.403038, dtype=float32), 'v_loss': Array(0.9885403, dtype=float32)}
+
+              Iteration 8 completed in 1353.31 seconds.
+              Game playing + data collection time: 1142.61 seconds.
+              Training time: 210.69 seconds.
+
+Iteration 9/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(9.74325, dtype=float32), 'total_loss': Array(2.5255032, dtype=float32), 'v_loss': Array(0.5506535, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(10.922912, dtype=float32), 'total_loss': Array(3.2059736, dtype=float32), 'v_loss': Array(0.73772025, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(11.103871, dtype=float32), 'total_loss': Array(2.9292302, dtype=float32), 'v_loss': Array(0.37454435, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(10.672262, dtype=float32), 'total_loss': Array(2.7868803, dtype=float32), 'v_loss': Array(0.3841005, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(10.727441, dtype=float32), 'total_loss': Array(3.0138972, dtype=float32), 'v_loss': Array(0.6202571, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(11.380794, dtype=float32), 'total_loss': Array(3.0838773, dtype=float32), 'v_loss': Array(0.41246325, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(9.988705, dtype=float32), 'total_loss': Array(2.7777894, dtype=float32), 'v_loss': Array(0.60629064, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(9.914863, dtype=float32), 'total_loss': Array(2.6723564, dtype=float32), 'v_loss': Array(0.5309624, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(11.723545, dtype=float32), 'total_loss': Array(3.0861301, dtype=float32), 'v_loss': Array(0.47121906, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(11.368328, dtype=float32), 'total_loss': Array(3.1177292, dtype=float32), 'v_loss': Array(0.63280267, dtype=float32)}
+
+              Iteration 9 completed in 1377.99 seconds.
+              Game playing + data collection time: 1167.31 seconds.
+              Training time: 210.68 seconds.
+
+Iteration 10/10
+Saving collected games to replay buffer...
+Training on collected data...
+Step 0, Losses: {'p_loss': Array(11.302827, dtype=float32), 'total_loss': Array(2.8202176, dtype=float32), 'v_loss': Array(0.4787627, dtype=float32)}
+Step 50, Losses: {'p_loss': Array(10.843645, dtype=float32), 'total_loss': Array(2.7895644, dtype=float32), 'v_loss': Array(0.55400956, dtype=float32)}
+Step 100, Losses: {'p_loss': Array(10.628946, dtype=float32), 'total_loss': Array(2.699272, dtype=float32), 'v_loss': Array(0.40200412, dtype=float32)}
+Step 150, Losses: {'p_loss': Array(9.214564, dtype=float32), 'total_loss': Array(2.2988775, dtype=float32), 'v_loss': Array(0.44486487, dtype=float32)}
+Step 200, Losses: {'p_loss': Array(10.188791, dtype=float32), 'total_loss': Array(2.5982785, dtype=float32), 'v_loss': Array(0.33403894, dtype=float32)}
+Step 250, Losses: {'p_loss': Array(11.046582, dtype=float32), 'total_loss': Array(3.1003692, dtype=float32), 'v_loss': Array(0.46896088, dtype=float32)}
+Step 300, Losses: {'p_loss': Array(9.317362, dtype=float32), 'total_loss': Array(2.268327, dtype=float32), 'v_loss': Array(0.28510278, dtype=float32)}
+Step 350, Losses: {'p_loss': Array(10.459064, dtype=float32), 'total_loss': Array(2.7765331, dtype=float32), 'v_loss': Array(0.5179045, dtype=float32)}
+Step 400, Losses: {'p_loss': Array(9.747965, dtype=float32), 'total_loss': Array(2.5173616, dtype=float32), 'v_loss': Array(0.2482425, dtype=float32)}
+Step 450, Losses: {'p_loss': Array(11.4778595, dtype=float32), 'total_loss': Array(3.1937692, dtype=float32), 'v_loss': Array(0.6296317, dtype=float32)}
+
+              Iteration 10 completed in 1365.32 seconds.
+              Game playing + data collection time: 1148.49 seconds.
+              Training time: 216.84 seconds.

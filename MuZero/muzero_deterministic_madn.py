@@ -38,9 +38,9 @@ class RepresentationNetwork(nn.Module):
         x = x[..., None]
         
         # 3. Convolutional Layers (Feature Extraction auf dem Board)
-        x = nn.Conv(features=16, kernel_size=(3, 3), padding='SAME')(x)
+        x = nn.Conv(features=16, kernel_size=(3,), padding='SAME')(x)
         x = nn.relu(x)
-        x = nn.Conv(features=16, kernel_size=(3, 3), padding='SAME')(x)
+        x = nn.Conv(features=16, kernel_size=(3,), padding='SAME')(x)
         x = nn.relu(x)
         
         # 4. Flatten für Dense Layers
@@ -85,7 +85,11 @@ class DynamicsNetwork(nn.Module):
         
         # A. Next Latent State
         next_latent = nn.Dense(self.latent_dim)(x)
-        next_latent = nn.sigmoid(next_latent) # Gleiche Skalierung wie Representation!
+        # ✅ PAPER: Min-Max Scaling statt Sigmoid
+        # Min-Max über Batch-Dimension
+        min_val = jnp.min(next_latent, axis=0, keepdims=True)
+        max_val = jnp.max(next_latent, axis=0, keepdims=True)
+        next_latent = (next_latent - min_val) / (max_val - min_val + 1e-8)
         
         # B. Reward Prediction
         # MADN Rewards sind oft sparse (0 oder 1). 
@@ -168,8 +172,8 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None):
         rng_key=key2,
         root=root_output,            # Startpunkt der Suche
         recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
-        num_simulations=100,
-        max_depth=50,
+        num_simulations=50,
+        max_depth=25,
         invalid_actions=invalid_actions,
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
         dirichlet_fraction=0.25,     # Exploration Noise

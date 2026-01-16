@@ -17,7 +17,7 @@ sys.path.append(project_root)
 # Annahme: Deine Netzwerk-Klassen und init-Funktionen sind importiert
 from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, run_muzero_mcts, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
-from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training, play_n_games,play_n_games_v2,  batch_encode, batch_env_step, batch_map_action, batch_reset, batch_valid_action, play_n_games_v3
+from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training, play_n_games,  batch_encode, batch_env_step, batch_map_action, batch_reset, batch_valid_action, play_n_games_v3
 
 @jax.jit
 def loss_fn(params, batch):
@@ -41,8 +41,7 @@ def loss_fn(params, batch):
         l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
         l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
         
-        scale = jnp.where(k == 0, 1.0, 1/num_unroll_steps)
-        step_loss = scale * (l_value + l_policy)
+        step_loss = (1.0 / num_unroll_steps) * (l_value + l_policy)
         
         # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
         def do_dynamics(state):
@@ -107,7 +106,10 @@ def train_step(params, opt_state, batch):
 
 # --- Setup Optimizer ---
 learning_rate = 2e-4
-optimizer = optax.adamw(learning_rate)
+optimizer = optax.chain(
+    optax.clip_by_global_norm(5.0),  # ✅ Paper verwendet clipping
+    optax.adamw(learning_rate, weight_decay=1e-4)
+)
 
 # --- Initialisierung (Beispiel) ---
 
@@ -116,12 +118,12 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     print(f"JAX Backend: {jax.default_backend()}")
 
     env = env_reset(
-        seed,  # <- Das wird an '_' übergeben
+        0,  # <- Das wird an '_' übergeben
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=10,
         starting_player=0,
-        seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
+        seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
         enable_teams=False,
         enable_initial_free_pin=True,
         enable_circular_board=False
@@ -131,12 +133,16 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     input_shape = enc.shape  # (8, 56)
 
     if params is None:
-        params = init_muzero_params(jax.random.PRNGKey(0), input_shape)  # Beispiel Input Shape
+        params = init_muzero_params(jax.random.PRNGKey(seed), input_shape)  # Beispiel Input Shape
     
     if opt_state is None:
         opt_state = optimizer.init(params)
 
-    replay = ReplayBuffer(capacity=500, batch_size=64, unroll_steps=5)
+    replay = ReplayBuffer(capacity=10000, batch_size=64, unroll_steps=5)
+    # collect initial set of games
+    # print("Collecting initial games...")
+    # eps = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=1000)
+    # replay.save_games(eps)
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
@@ -165,11 +171,11 @@ opt_state = None
 # params = load_params_from_file('muzero_madn_params_00001.pkl')
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
-params, opt_state = test_training(num_games=50, seed=13, iterations=10, params=params, opt_state=opt_state)
+params, opt_state = test_training(num_games=256, seed=1589, iterations=10, params=params, opt_state=opt_state)
 # save trained parameters and optimizer state
 
-with open('muzero_madn_params_lr3e4_g50_it10.pkl', 'wb') as f:
+with open('muzero_madn_params_lr2e4_g256_it10.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('muzero_madn_opt_state_lr3e4_g50_it10.pkl', 'wb') as f:
+with open('muzero_madn_opt_state_lr2e4_g256_it10.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
