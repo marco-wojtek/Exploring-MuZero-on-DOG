@@ -1,10 +1,5 @@
 import os
-#VOR allen JAX imports!
-os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'  # Anzahl Ihrer CPU-Kerne
-os.environ['JAX_PLATFORMS'] = 'cpu'
-
 import jax
-jax.config.update('jax_enable_x64', False)
 from time import time
 import jax
 import jax.numpy as jnp
