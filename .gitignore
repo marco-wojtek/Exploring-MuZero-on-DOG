@@ -7,4 +7,5 @@ wheels/
 MADN/a.py
 team_simulation.txt
 madn_trajectories.txt
-*.pkl
+param_memory/
+linux_terminal.md

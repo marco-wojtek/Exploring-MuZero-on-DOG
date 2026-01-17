@@ -13,7 +13,7 @@ sys.path.append(project_root)
 from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, run_muzero_mcts, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
 from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training, play_n_games,  batch_encode, batch_env_step, batch_map_action, batch_reset, batch_valid_action, play_n_games_v3
-
+from MuZero.vec_replay_buffer import VectorizedReplayBuffer
 @jax.jit
 def loss_fn(params, batch):
     """Vektorisierte Version mit scan statt Loop"""
@@ -100,10 +100,16 @@ def train_step(params, opt_state, batch):
     return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss}#, 'r_loss': r_loss}
 
 # --- Setup Optimizer ---
-learning_rate = 2e-4
+learning_rate_schedule = optax.exponential_decay(
+    init_value=5e-4,
+    transition_steps=50,
+    decay_rate=0.5,
+    end_value=5e-5
+)
+
 optimizer = optax.chain(
-    optax.clip_by_global_norm(5.0),  # ✅ Paper verwendet clipping
-    optax.adamw(learning_rate, weight_decay=1e-4)
+    optax.clip_by_global_norm(5.0),
+    optax.adamw(learning_rate_schedule, weight_decay=1e-4)
 )
 
 # --- Initialisierung (Beispiel) ---
@@ -133,11 +139,12 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     if opt_state is None:
         opt_state = optimizer.init(params)
 
-    replay = ReplayBuffer(capacity=10000, batch_size=64, unroll_steps=5)
+    replay = VectorizedReplayBuffer(capacity=10000, batch_size=128, unroll_steps=5)
     # collect initial set of games
     print("Collecting initial games...")
     buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games)
     replay.save_games_from_buffers(buffers)
+    times_per_iteration = []
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
@@ -159,14 +166,19 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
               Game playing + data collection time: {train_start - start_time:.2f} seconds.
               Training time: {end_time - train_start:.2f} seconds.
               """)
-    return params, opt_state
+        times_per_iteration.append(end_time - start_time)
+    return params, opt_state, times_per_iteration
 
 params = None
 opt_state = None
 # params = load_params_from_file('muzero_madn_params_00001.pkl')
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
-params, opt_state = test_training(num_games=1024, seed=649, iterations=30, params=params, opt_state=opt_state)
+starttime = time()
+params, opt_state, times_per_iteration = test_training(num_games=1024, seed=649, iterations=30, params=params, opt_state=opt_state)
+endtime = time()
+print(f"Total training time: {(endtime - starttime) / 60:.2f} minutes.")
+print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
 with open('muzero_madn_params_lr2e4_g1024_it30.pkl', 'wb') as f:
