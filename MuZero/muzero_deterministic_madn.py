@@ -24,8 +24,8 @@ class ResBlock(nn.Module):
         return nn.relu(residual + x)
 
 class RepresentationNetwork(nn.Module):
-    latent_dim: int = 128  # Größer als 64 für MADN
-    num_res_blocks: int = 2
+    latent_dim: int = 256  # Größer als 64 für MADN
+    num_res_blocks: int = 6
 
     @nn.compact
     def __call__(self, x):
@@ -35,20 +35,30 @@ class RepresentationNetwork(nn.Module):
         
         # 2. Channel-Dimension hinzufügen für Conv2D
         # Shape wird zu: (Batch, 14, 56, 1)
-        x = x[..., None]
+        x = jnp.transpose(x, (0, 2, 1))
         
         # 3. Convolutional Layers (Feature Extraction auf dem Board)
-        x = nn.Conv(features=16, kernel_size=(3,), padding='SAME')(x)
-        x = nn.relu(x)
-        x = nn.Conv(features=16, kernel_size=(3,), padding='SAME')(x)
+        x = nn.Conv(features=32, kernel_size=(3,), padding='SAME')(x)
+        x = nn.LayerNorm()(x)
         x = nn.relu(x)
         
-        # 4. Flatten für Dense Layers
-        # Wir behalten die Batch-Dimension (0) und flachen den Rest
-        x = x.reshape((x.shape[0], -1))
+        x = nn.Conv(features=64, kernel_size=(3,), padding='SAME')(x)
+        x = nn.LayerNorm()(x)
+        x = nn.relu(x)
+        
+        x = nn.Conv(features=128, kernel_size=(5,), padding='SAME')(x)
+        x = nn.LayerNorm()(x)
+        x = nn.relu(x)
+        
+        # Global Pooling: Aggregiere über die räumliche Dimension
+        # Wir wollen einen 1D latenten Vektor
+        x_mean = jnp.mean(x, axis=1)  # (Batch, 128)
+        x_max = jnp.max(x, axis=1)    # (Batch, 128)
+        x = jnp.concatenate([x_mean, x_max], axis=-1)  # (Batch, 256)
         
         # 5. Projektion auf Latent Dim
         x = nn.Dense(self.latent_dim)(x)
+        x = nn.LayerNorm()(x)
         x = nn.relu(x)
         
         # Residual Blocks zur weiteren Verarbeitung
@@ -57,12 +67,14 @@ class RepresentationNetwork(nn.Module):
             
         # Normalisierung des Latent States
         x = nn.Dense(self.latent_dim)(x)
-        x = nn.sigmoid(x)
+        min_val = jnp.min(x, axis=0, keepdims=True)
+        max_val = jnp.max(x, axis=0, keepdims=True)
+        x = (x - min_val) / (max_val - min_val + 1e-8)
         return x
 
 class DynamicsNetwork(nn.Module):
-    latent_dim: int = 128
-    num_res_blocks: int = 2
+    latent_dim: int = 256
+    num_res_blocks: int = 6
     num_actions: int = 24 # 4 Pins * 6 Würfelaugen
     
     @nn.compact
@@ -76,6 +88,7 @@ class DynamicsNetwork(nn.Module):
         
         # 3. Verarbeitung durch ResBlocks
         x = nn.Dense(self.latent_dim)(x)
+        x = nn.LayerNorm()(x)
         x = nn.relu(x)
         
         for _ in range(self.num_res_blocks):
@@ -104,9 +117,9 @@ class DynamicsNetwork(nn.Module):
         return next_latent, reward, discount_logits
 
 class PredictionNetwork(nn.Module):
-    latent_dim: int = 128
+    latent_dim: int = 256
     num_actions: int = 24
-    num_res_blocks: int = 2
+    num_res_blocks: int = 6
     
     @nn.compact
     def __call__(self, latent_state):
@@ -172,8 +185,8 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None):
         rng_key=key2,
         root=root_output,            # Startpunkt der Suche
         recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
-        num_simulations=50,
-        max_depth=25,
+        num_simulations=100,
+        max_depth=50,
         invalid_actions=invalid_actions,
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
         dirichlet_fraction=0.25,     # Exploration Noise

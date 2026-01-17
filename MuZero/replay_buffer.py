@@ -63,24 +63,34 @@ class ReplayBuffer:
         for episode in episodes:
             self.save_game(episode)
 
+    def save_games_from_buffers(self, all_buffers):
+        """Speichert mehrere Episoden aus Buffers."""
+        num_envs = all_buffers['idx'].shape[0]
+        for i in range(num_envs):
+            length = all_buffers['idx'][i]
+        
+            ep = Episode(
+                observations=all_buffers['obs'][i, :length],
+                actions=all_buffers['act'][i, :length],
+                rewards=all_buffers['rew'][i, :length],
+                root_values=all_buffers['val'][i, :length],
+                child_visits=all_buffers['pol'][i, :length],
+                mask=all_buffers['mask'][i, :length],
+                chance_outcomes=jnp.zeros(length),
+                players=all_buffers['player'][i, :length],
+                teams=all_buffers['team'][i, :length]
+            ) 
+            self.save_game(ep)
+
     def sample_batch(self):
-        """
-        Zieht einen Batch für das Training.
-        Wichtig: Wir brauchen für jeden Eintrag im Batch eine Startposition (t)
-        und dann die Daten für t, t+1, ..., t+unroll_steps.
-        """
-        batch = []
-        for _ in range(self.batch_size):
-            episode = random.choice(self.buffer)
-            
-            # Wähle einen zufälligen Startpunkt im Spiel
-            # Wir müssen sicherstellen, dass wir noch 'unroll_steps' weit gehen können
-            # oder wir padden später.
-            game_len = len(episode.actions)
-            t_start = random.randint(0, game_len - 1)
-            
-            batch.append(self._extract_sequence(episode, t_start))
-            
+        """Optimierte Version mit weniger Overhead."""
+        episodes = random.choices(self.buffer, k=self.batch_size)
+
+        game_lens = [len(ep.actions) for ep in episodes]
+        t_starts = [random.randint(0, max(0, gl - 1)) for gl in game_lens]
+
+        batch = [self._extract_sequence(ep, t) for ep, t in zip(episodes, t_starts)]
+        
         # Stacken zu JAX Arrays
         return jax.tree_util.tree_map(lambda *x: np.stack(x), *batch)
 
@@ -126,7 +136,7 @@ class ReplayBuffer:
                 
                 policies.append(episode.child_visits[idx])
                 values.append(episode.root_values[idx])
-                masks.append(1.0)
+                masks.append(episode.mask[idx])
                 
                 steps_until_end = game_len - 1 - idx
             
@@ -535,16 +545,16 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, keys, max_st
                     )
                     action = policy_output.action[0]
                     next_env, reward, next_done = env_step(env, map_action(action))
-                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done
+                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1
                 
                 def do_skip(env):
                     # Keine validen Actions → no_step
                     next_env, reward, next_done = no_step(env)
                     dummy_obs = jnp.zeros_like(obs[0])
-                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done
+                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done, 0
                 
                 # Wähle zwischen MCTS und no_step
-                next_env, step_obs, action, reward, value, policy, next_done = jax.lax.cond(
+                next_env, step_obs, action, reward, value, policy, next_done, mask = jax.lax.cond(
                     has_valid,
                     do_mcts,
                     do_skip,
@@ -561,6 +571,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, keys, max_st
                     'rew': buffer['rew'].at[idx].set(reward),
                     'val': buffer['val'].at[idx].set(value),
                     'pol': buffer['pol'].at[idx].set(policy),
+                    'mask': buffer['mask'].at[idx].set(mask),
                     'player': buffer['player'].at[idx].set(current_player),
                     'team': buffer['team'].at[idx].set(team),
                     'idx': idx + 1
@@ -587,6 +598,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, keys, max_st
         'rew': jnp.zeros((num_envs, max_steps)),
         'val': jnp.zeros((num_envs, max_steps)),
         'pol': jnp.zeros((num_envs, max_steps, 24)),
+        'mask': jnp.zeros((num_envs, max_steps)),
         'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
         'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
         'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
@@ -614,7 +626,7 @@ def play_n_games_v3(params, rng_key, input_shape, num_envs=50):
     keys = jax.random.split(rng_key, num_envs)
     
     all_buffers = play_batch_of_games_jitted(envs, num_envs, input_shape, params, keys)
-    
+    return all_buffers
     # Episode Extraction wie in v2
     episodes = []
     for i in range(num_envs):
@@ -626,7 +638,7 @@ def play_n_games_v3(params, rng_key, input_shape, num_envs=50):
             rewards=all_buffers['rew'][i, :length],
             root_values=all_buffers['val'][i, :length],
             child_visits=all_buffers['pol'][i, :length],
-            mask=jnp.ones(length),
+            mask=all_buffers['mask'][i, :length],
             chance_outcomes=jnp.zeros(length),
             players=all_buffers['player'][i, :length],
             teams=all_buffers['team'][i, :length]

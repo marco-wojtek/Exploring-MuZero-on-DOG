@@ -135,15 +135,15 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
 
     replay = ReplayBuffer(capacity=10000, batch_size=64, unroll_steps=5)
     # collect initial set of games
-    # print("Collecting initial games...")
-    # eps = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=1000)
-    # replay.save_games(eps)
+    print("Collecting initial games...")
+    buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games)
+    replay.save_games_from_buffers(buffers)
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
-        eps = play_n_games_v3(params, jax.random.PRNGKey(it**3), input_shape, num_envs=num_games)
+        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games)
         print("Saving collected games to replay buffer...")
-        replay.save_games(eps)
+        replay.save_games_from_buffers(buffers)
 
         print("Training on collected data...")
         train_start = time()
@@ -166,11 +166,11 @@ opt_state = None
 # params = load_params_from_file('muzero_madn_params_00001.pkl')
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
-params, opt_state = test_training(num_games=256, seed=1589, iterations=10, params=params, opt_state=opt_state)
+params, opt_state = test_training(num_games=1024, seed=649, iterations=30, params=params, opt_state=opt_state)
 # save trained parameters and optimizer state
 
-with open('muzero_madn_params_lr2e4_g256_it10.pkl', 'wb') as f:
+with open('muzero_madn_params_lr2e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('muzero_madn_opt_state_lr2e4_g256_it10.pkl', 'wb') as f:
+with open('muzero_madn_opt_state_lr2e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
