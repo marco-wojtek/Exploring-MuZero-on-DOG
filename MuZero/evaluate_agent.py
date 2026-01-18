@@ -265,7 +265,7 @@ def evaluate_agent(params1, params2, params3, params4, num_games=50):
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
 
 params1 = None
-params3 = None
+params3 = "muzero_madn_params_lr2e4_g1024_it30.pkl"
 params4 = None
 params2 = None
 start_time = time()

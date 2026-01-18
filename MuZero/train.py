@@ -100,10 +100,11 @@ def train_step(params, opt_state, batch):
     return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss}#, 'r_loss': r_loss}
 
 # --- Setup Optimizer ---
-learning_rate_schedule = optax.exponential_decay(
-    init_value=5e-4,
-    transition_steps=50,
-    decay_rate=0.5,
+learning_rate_schedule = optax.warmup_cosine_decay_schedule(
+    init_value=1e-5,          # Warmup start
+    peak_value=5e-4,          # Nach Warmup
+    warmup_steps=1000,        # 2 Iterationen Warmup
+    decay_steps=15000,        # Über alle 30 Iterationen
     end_value=5e-5
 )
 
@@ -158,7 +159,7 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
         for i in range(train_steps):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
-            if i % (train_steps // 10) == 0:
+            if i % (train_steps // 5) == 0:
                 print(f"Step {i}, Losses: {losses}")
         end_time = time()
         print(f"""
