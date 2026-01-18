@@ -172,7 +172,7 @@ def recurrent_inference_fn(params, rng_key, action, embedding):
     return recurrent_output, next_embedding
 
 @jax.jit
-def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_simulations=100, max_depth=50):
+def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_simulations=50, max_depth=25):
     batch_size = observations.shape[0]
     key1, key2 = jax.random.split(rng_key)
 

@@ -101,11 +101,11 @@ def train_step(params, opt_state, batch):
 
 # --- Setup Optimizer ---
 learning_rate_schedule = optax.warmup_cosine_decay_schedule(
-    init_value=1e-5,          # Warmup start
-    peak_value=5e-4,          # Nach Warmup
-    warmup_steps=2000,        # 2 Iterationen Warmup
-    decay_steps=20000,        # Über alle 30 Iterationen
-    end_value=1e-4
+    init_value=1e-4,          # Warmup start (höher!)
+    peak_value=1e-3,          # Peak Value (10× höher!)
+    warmup_steps=3000,        # 3 Iterationen Warmup
+    decay_steps=27000,        # Über 27 weitere Iterationen
+    end_value=2e-4            # Höherer End-Value
 )
 
 optimizer = optax.chain(
