@@ -173,7 +173,7 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
-    enc = old_encode_board(env)[None, ...]  # z.B. (8, 56)
+    enc = old_encode_board(env)  # z.B. (8, 56)
     agents = []
     for param in [params1, params2, params3, params4]:
         if param is None:
@@ -265,10 +265,10 @@ def evaluate_agent(params1, params2, params3, params4, num_games=50):
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
 
 params1 = None
-params3 = "muzero_madn_params_lr2e4_g1024_it30.pkl"
+params3 = load_params_from_file("muzero_madn_params_lr2e4_g1024_it30.pkl")
 params4 = None
 params2 = None
 start_time = time()
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=25)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=50)
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

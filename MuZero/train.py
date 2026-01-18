@@ -36,7 +36,7 @@ def loss_fn(params, batch):
         l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
         l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
         
-        step_loss = (1.0 / num_unroll_steps) * (l_value + l_policy)
+        step_loss =  (l_value + l_policy) #* (1.0 / num_unroll_steps)
         
         # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
         def do_dynamics(state):
@@ -103,9 +103,9 @@ def train_step(params, opt_state, batch):
 learning_rate_schedule = optax.warmup_cosine_decay_schedule(
     init_value=1e-5,          # Warmup start
     peak_value=5e-4,          # Nach Warmup
-    warmup_steps=1000,        # 2 Iterationen Warmup
-    decay_steps=15000,        # Über alle 30 Iterationen
-    end_value=5e-5
+    warmup_steps=2000,        # 2 Iterationen Warmup
+    decay_steps=20000,        # Über alle 30 Iterationen
+    end_value=1e-4
 )
 
 optimizer = optax.chain(
@@ -140,7 +140,7 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     if opt_state is None:
         opt_state = optimizer.init(params)
 
-    replay = VectorizedReplayBuffer(capacity=10000, batch_size=128, unroll_steps=5)
+    replay = VectorizedReplayBuffer(capacity=25000, batch_size=128, unroll_steps=5)
     # collect initial set of games
     print("Collecting initial games...")
     buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games)
@@ -155,11 +155,11 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
 
         print("Training on collected data...")
         train_start = time()
-        train_steps = 500
+        train_steps = 1500
         for i in range(train_steps):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
-            if i % (train_steps // 5) == 0:
+            if i % (train_steps // 3) == 0:
                 print(f"Step {i}, Losses: {losses}")
         end_time = time()
         print(f"""
@@ -176,14 +176,14 @@ opt_state = None
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
 starttime = time()
-params, opt_state, times_per_iteration = test_training(num_games=1024, seed=649, iterations=30, params=params, opt_state=opt_state)
+params, opt_state, times_per_iteration = test_training(num_games=1024, seed=1234, iterations=30, params=params, opt_state=opt_state)
 endtime = time()
 print(f"Total training time: {(endtime - starttime) / 60:.2f} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open('muzero_madn_params_lr2e4_g1024_it30.pkl', 'wb') as f:
+with open('muzero_madn_params_lr1e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('muzero_madn_opt_state_lr2e4_g1024_it30.pkl', 'wb') as f:
+with open('muzero_madn_opt_state_lr1e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(opt_state, f)

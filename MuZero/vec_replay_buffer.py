@@ -62,7 +62,7 @@ class VectorizedReplayBuffer:
         KEIN Python-Loop über batch_size!
         """
         K = self.unroll_steps + 1
-        gamma = 0.997
+        gamma = 0.99
         
         # ========================================
         # SCHRITT 1: Sample Episode-Indizes

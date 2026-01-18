@@ -172,7 +172,7 @@ def recurrent_inference_fn(params, rng_key, action, embedding):
     return recurrent_output, next_embedding
 
 @jax.jit
-def run_muzero_mcts(params, rng_key, observations, invalid_actions=None):
+def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_simulations=100, max_depth=50):
     batch_size = observations.shape[0]
     key1, key2 = jax.random.split(rng_key)
 
@@ -185,8 +185,8 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None):
         rng_key=key2,
         root=root_output,            # Startpunkt der Suche
         recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
-        num_simulations=100,
-        max_depth=50,
+        num_simulations=num_simulations,
+        max_depth=max_depth,
         invalid_actions=invalid_actions,
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
         dirichlet_fraction=0.25,     # Exploration Noise
