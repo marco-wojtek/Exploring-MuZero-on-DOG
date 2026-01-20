@@ -180,7 +180,7 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_sim
     root_output = root_inference_fn(params, observations)
 
     # 2. MCTS ausführen
-    policy_output = mctx.muzero_policy(
+    policy_output = mctx.gumbel_muzero_policy(
         params=params,               # Wird an recurrent_fn weitergereicht
         rng_key=key2,
         root=root_output,            # Startpunkt der Suche
@@ -189,8 +189,9 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_sim
         max_depth=max_depth,
         invalid_actions=invalid_actions,
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
-        dirichlet_fraction=0.25,     # Exploration Noise
-        dirichlet_alpha=0.3
+        gumbel_scale=1.0
+	#dirichlet_fraction=0.25,     # Exploration Noise
+        #dirichlet_alpha=0.3
     )
     
     # Wir geben zusätzlich den rohen Value des Root-Knotens zurück (vom Netzwerk geschätzt)

@@ -176,14 +176,14 @@ opt_state = None
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
 starttime = time()
-params, opt_state, times_per_iteration = test_training(num_games=1024, seed=1234, iterations=30, params=params, opt_state=opt_state)
+params, opt_state, times_per_iteration = test_training(num_games=1024, seed=134, iterations=30, params=params, opt_state=opt_state)
 endtime = time()
 print(f"Total training time: {(endtime - starttime) / 60:.2f} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open('muzero_madn_params_lr1e4_g1024_it30.pkl', 'wb') as f:
+with open('gumbelmuzero_madn_params_lr2e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('muzero_madn_opt_state_lr1e4_g1024_it30.pkl', 'wb') as f:
+with open('gumbelmuzero_madn_opt_state_lr2e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
