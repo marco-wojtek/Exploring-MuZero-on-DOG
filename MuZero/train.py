@@ -7,14 +7,15 @@ import optax
 from functools import partial
 import os, sys
 import pickle
+import wandb
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 # Annahme: Deine Netzwerk-Klassen und init-Funktionen sind importiert
-from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, run_muzero_mcts, load_params_from_file
+from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
-from MuZero.replay_buffer import ReplayBuffer, Episode, play_deterministic_game_for_training, play_n_games,  batch_encode, batch_env_step, batch_map_action, batch_reset, batch_valid_action, play_n_games_v3
+from MuZero.replay_buffer import ReplayBuffer, play_n_games_v3
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
-@jax.jit
+# @jax.jit
 def loss_fn(params, batch):
     """Vektorisierte Version mit scan statt Loop"""
     
@@ -99,20 +100,6 @@ def train_step(params, opt_state, batch):
     
     return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss}#, 'r_loss': r_loss}
 
-# --- Setup Optimizer ---
-learning_rate_schedule = optax.warmup_cosine_decay_schedule(
-    init_value=1e-4,          # Warmup start (höher!)
-    peak_value=1e-3,          # Peak Value (10× höher!)
-    warmup_steps=3000,        # 3 Iterationen Warmup
-    decay_steps=27000,        # Über 27 weitere Iterationen
-    end_value=2e-4            # Höherer End-Value
-)
-
-optimizer = optax.chain(
-    optax.clip_by_global_norm(5.0),
-    optax.adamw(learning_rate_schedule, weight_decay=1e-4)
-)
-
 # --- Initialisierung (Beispiel) ---
 
 def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state=None):
@@ -159,6 +146,7 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
         for i in range(train_steps):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
+            deterministic_madn_wandb_session.log(losses)
             if i % (train_steps // 3) == 0:
                 print(f"Step {i}, Losses: {losses}")
         end_time = time()
@@ -170,20 +158,48 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
         times_per_iteration.append(end_time - start_time)
     return params, opt_state, times_per_iteration
 
+config = {
+    "learning_rate": 1e-4,
+    "architecture": "MuZero Deterministic MADN with Gumbel MCTS",
+    "num_games_per_iteration": 1024,
+    "iterations": 30,
+    "optimizer": "adamw with warmup cosine decay"
+}
+# prep weights and biases
+deterministic_madn_wandb_session = wandb.init(
+    entity="marco-wojtek-tu-dortmund",
+    project="deterministic-muzero-madn",
+    config=config,
+)
+
+# --- Setup Optimizer ---
+learning_rate_schedule = optax.warmup_cosine_decay_schedule(
+    init_value=1e-3,          # Warmup start (höher!)
+    peak_value=1e-2,          # Peak Value (10× höher!)
+    warmup_steps=3000,        # 3 Iterationen Warmup
+    decay_steps=27000,        # Über 27 weitere Iterationen
+    end_value=config["learning_rate"]            # Höherer End-Value
+)
+
+optimizer = optax.chain(
+    optax.clip_by_global_norm(5.0),
+    optax.adamw(learning_rate_schedule, weight_decay=1e-4)
+)
+# --- Start Training ---
 params = None
 opt_state = None
 # params = load_params_from_file('muzero_madn_params_00001.pkl')
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
 starttime = time()
-params, opt_state, times_per_iteration = test_training(num_games=1024, seed=134, iterations=30, params=params, opt_state=opt_state)
+params, opt_state, times_per_iteration = test_training(num_games=config["num_games_per_iteration"], seed=134, iterations=config["iterations"], params=params, opt_state=opt_state)
 endtime = time()
 print(f"Total training time: {(endtime - starttime) / 60:.2f} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open('gumbelmuzero_madn_params_lr2e4_g1024_it30.pkl', 'wb') as f:
+with open('gumbelmuzero_madn_params_lr1e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('gumbelmuzero_madn_opt_state_lr2e4_g1024_it30.pkl', 'wb') as f:
+with open('gumbelmuzero_madn_opt_state_lr1e4_g1024_it30.pkl', 'wb') as f:
     pickle.dump(opt_state, f)

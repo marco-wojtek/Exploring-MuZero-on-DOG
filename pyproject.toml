@@ -12,6 +12,7 @@ dependencies = [
     "pillow>=12.0.0",
     "pygame>=2.6.1",
     "pytest>=8.4.2",
+    "wandb>=0.24.0",
 ]
 [project.optional-dependencies]
 cuda = [

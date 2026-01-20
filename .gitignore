@@ -10,3 +10,4 @@ madn_trajectories.txt
 param_memory/
 linux_terminal.md
 MuZero.pdf
+wandb/
