@@ -127,7 +127,7 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     if opt_state is None:
         opt_state = optimizer.init(params)
 
-    replay = VectorizedReplayBuffer(capacity=25000, batch_size=128, unroll_steps=5)
+    replay = VectorizedReplayBuffer(capacity=50000, batch_size=128, unroll_steps=5)
     # collect initial set of games
     print("Collecting initial games...")
     buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games)
@@ -148,7 +148,11 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
             params, opt_state, losses = train_step(params, opt_state, batch)
             deterministic_madn_wandb_session.log(losses)
             if i % (train_steps // 3) == 0:
-                print(f"Step {i}, Losses: {losses}")
+                print(f"Step {i}, Losses: {{")
+                print(f"  total_loss: {losses['total_loss']:.2f},")
+                print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/train_steps:.3f} per step),")
+                print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/train_steps:.3f} per step)")
+                print(f"}}")
         end_time = time()
         print(f"""
               Iteration {it+1} completed in {end_time - start_time:.2f} seconds.
@@ -159,10 +163,10 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     return params, opt_state, times_per_iteration
 
 config = {
-    "learning_rate": 1e-4,
+    "learning_rate": 5e-5,
     "architecture": "MuZero Deterministic MADN with Gumbel MCTS",
-    "num_games_per_iteration": 1024,
-    "iterations": 30,
+    "num_games_per_iteration": 1500,
+    "iterations": 50,
     "optimizer": "adamw with warmup cosine decay"
 }
 # prep weights and biases
@@ -174,12 +178,13 @@ deterministic_madn_wandb_session = wandb.init(
 
 # --- Setup Optimizer ---
 learning_rate_schedule = optax.warmup_cosine_decay_schedule(
-    init_value=1e-3,          # Warmup start (höher!)
-    peak_value=1e-2,          # Peak Value (10× höher!)
-    warmup_steps=3000,        # 3 Iterationen Warmup
-    decay_steps=27000,        # Über 27 weitere Iterationen
-    end_value=config["learning_rate"]            # Höherer End-Value
+    init_value=1e-4,          # Warmup start
+    peak_value=5e-3,          # Peak (reduziert wegen mehr Spielen)
+    warmup_steps=4500,        # 3 Iterationen @ 1500 steps
+    decay_steps=70500,        # 47 Iterationen @ 1500 steps
+    end_value=config["learning_rate"]            # Niedrigerer End-Value
 )
+
 
 optimizer = optax.chain(
     optax.clip_by_global_norm(5.0),
@@ -198,8 +203,8 @@ print(f"Total training time: {(endtime - starttime) / 60:.2f} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open('gumbelmuzero_madn_params_lr1e4_g1024_it30.pkl', 'wb') as f:
+with open(f'gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open('gumbelmuzero_madn_opt_state_lr1e4_g1024_it30.pkl', 'wb') as f:
+with open(f'gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
     pickle.dump(opt_state, f)

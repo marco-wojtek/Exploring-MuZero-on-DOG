@@ -116,3 +116,77 @@ Für distance 10, 2 oder 4 Spieler Immer [a, b[:
 - Hot 7: 556 - 676 | 616 - 736
 - Normal: 676 - 724 | 736 - 784
 - -4: 724 - 728 | 784 - 788
+
+# Sample und Training prozess
+
+Datenfluss vom Sampling bis zur Loss-Berechnung
+1. Sampling (vec_replay_buffer.py)
+Für jede Episode im Batch (batch_size=128):
+
+Schritt 1: Wähle zufällige Episode + zufälligen Startpunkt t
+```
+ep_indices = [ep₁, ep₂, ..., ep₁₂₈]  # 128 zufällige Episoden
+t_starts = [t₁, t₂, ..., t₁₂₈]       # 128 zufällige Startpunkte
+```
+
+Schritt 2: Extrahiere K=6 aufeinanderfolgende Timesteps (t, t+1, t+2, t+3, t+4, t+5):
+
+Root Observation: observations[t] → Shape: (batch_size, 14, 56)
+Actions: [a_t, a_{t+1}, a_{t+2}, a_{t+3}, a_{t+4}] → Shape: (batch_size, K-1=5)
+Rewards: [r_t, r_{t+1}, r_{t+2}, r_{t+3}, r_{t+4}] → Shape: (batch_size, 5)
+Policies: [π_t, π_{t+1}, ..., π_{t+5}] → Shape: (batch_size, K=6, 24)
+Values: [v_t, v_{t+1}, ..., v_{t+5}] → Shape: (batch_size, 6)
+Target Values: [z_t, z_{t+1}, ..., z_{t+5}] → Shape: (batch_size, 6)
+Masks: [m_t, m_{t+1}, ..., m_{t+5}] → Shape: (batch_size, 6)
+2. Loss-Berechnung (train.py)
+Die Loss-Funktion iteriert über K+1=6 Timesteps mit jax.lax.scan:
+
+```
+Iteration 0 (Root, k=0):
+├─ Latent State: repr_net(observations[t])
+├─ Prediction: pred_net(latent) → (policy_logits, value)
+├─ Policy Loss: CE(policy_logits, target_policies[0])  ← π_t
+├─ Value Loss: MSE(value, target_values[0])            ← z_t
+├─ Dynamics: latent ← dynamics_net(latent, actions[0]) ← a_t
+└─ step_loss = policy_loss + value_loss
+
+Iteration 1 (k=1):
+├─ Prediction: pred_net(latent) → (policy_logits, value)
+├─ Policy Loss: CE(policy_logits, target_policies[1])  ← π_{t+1}
+├─ Value Loss: MSE(value, target_values[1])            ← z_{t+1}
+├─ Dynamics: latent ← dynamics_net(latent, actions[1]) ← a_{t+1}
+└─ step_loss = policy_loss + value_loss
+
+... (Iteration 2, 3, 4 analog)
+
+Iteration 5 (k=5):
+├─ Prediction: pred_net(latent) → (policy_logits, value)
+├─ Policy Loss: CE(policy_logits, target_policies[5])  ← π_{t+5}
+├─ Value Loss: MSE(value, target_values[5])            ← z_{t+5}
+├─ NO Dynamics (k=5 ist letzter Step)
+└─ step_loss = policy_loss + value_loss
+
+Total Loss = Σ(step_loss für k=0..5)  ← SUMME über alle 6 Steps 
+```
+
+3. Wichtige Details
+Target Values Berechnung:
+
+```
+# Für jeden der K=6 Timesteps:
+if (episode_length - seq_index) >= K:
+    # Noch >= K Steps übrig → Bootstrap mit Value nach K Steps
+    target_values[k] = γ^K * value[t+k+K]  # (mit Perspektiven-Flip!)
+else:
+    # < K Steps bis Ende → Bootstrap mit finalem Reward z
+    target_values[k] = z  # (aus Perspektive von Spieler bei t+k)
+```
+
+Beispiel für Episode mit t=10, length=20:
+
+k=0 (t=10): 10 Steps bis Ende → Bootstrap: value[t+6] (mit Flip)
+k=1 (t=11): 9 Steps bis Ende → Bootstrap: value[t+7] (mit Flip)
+k=2 (t=12): 8 Steps bis Ende → Bootstrap: value[t+8] (mit Flip)
+k=3 (t=13): 7 Steps bis Ende → Bootstrap: value[t+9] (mit Flip)
+k=4 (t=14): 6 Steps bis Ende → Bootstrap: value[t+10] (mit Flip)
+k=5 (t=15): 5 Steps bis Ende → Bootstrap: z (finaler Reward)

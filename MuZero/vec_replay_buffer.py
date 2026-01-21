@@ -173,9 +173,22 @@ class VectorizedReplayBuffer:
         
         # 7.6: Bootstrap-Indizes (idx + K, aber clipped)
         bootstrap_indices = np.minimum(seq_indices + K, ep_lengths[:, None] - 1)
-        bootstrap_values = self.root_values[ep_indices_expanded, bootstrap_indices]
+        bootstrap_values_raw = self.root_values[ep_indices_expanded, bootstrap_indices]
         # Shape: (batch_size, K)
         
+        # ✅ NEU: 7.6b - Perspektiven-Flip für Bootstrap Values
+        # Extrahiere Spieler bei Bootstrap-Position
+        bootstrap_players = self.players[ep_indices_expanded, bootstrap_indices]  # (batch_size, K)
+
+        
+        # Vergleiche: Ist es der gleiche Spieler wie im Sequenz-Step?
+        same_player_bootstrap = (seq_players == bootstrap_players)  # (batch_size, K)
+
+        bootstrap_values = np.where(
+            same_player_bootstrap,
+            bootstrap_values_raw,   # Gleicher Spieler: Value behalten
+            -bootstrap_values_raw   # Anderer Spieler: Value negieren
+        )
         # 7.7: Berechne Target Values
         target_values = np.where(
             bootstrap_from_value,

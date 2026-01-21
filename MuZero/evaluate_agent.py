@@ -1,7 +1,8 @@
+import sys, os
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'  # Verhindert, dass JAX den gesamten GPU-Speicher belegt, damit mehrere eval Prozesse laufen können
 import chex
 import jax
 import jax.numpy as jnp
-import sys, os
 from time import time
 from functools import partial
 import pickle
@@ -264,10 +265,10 @@ def evaluate_agent(params1, params2, params3, params4, num_games=50):
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
 
-params1 = load_params_from_file("muzero_madn_params_lr1e4_g1024_it30.pkl") 
-params3 = load_params_from_file("muzero_madn_params_lr2e4_g1024_it30.pkl")
+params1 = None
+params3 = load_params_from_file("gumbelmuzero_madn_params_lr5e-5_g1500_it50.pkl")
 params4 = None
-params2 = load_params_from_file("gumbelmuzero_madn_params_lr2e4_g1024_it30.pkl")
+params2 = None
 start_time = time()
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=100)
 end_time = time()
