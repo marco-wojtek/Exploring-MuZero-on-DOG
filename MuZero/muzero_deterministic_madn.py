@@ -172,8 +172,7 @@ def recurrent_inference_fn(params, rng_key, action, embedding):
     return recurrent_output, next_embedding
 
 @jax.jit
-def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_simulations=50, max_depth=25):
-    batch_size = observations.shape[0]
+def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_simulations=50, max_depth=25, temperature=1.0):
     key1, key2 = jax.random.split(rng_key)
 
     # 1. Root-Knoten berechnen (Inference)
@@ -189,7 +188,7 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_sim
         max_depth=max_depth,
         invalid_actions=invalid_actions,
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
-        gumbel_scale=1.0
+        gumbel_scale=temperature
     )
     # policy_output = mctx.muzero_policy(
     #     params=params,               # Wird an recurrent_fn weitergereicht

@@ -190,3 +190,53 @@ k=2 (t=12): 8 Steps bis Ende → Bootstrap: value[t+8] (mit Flip)
 k=3 (t=13): 7 Steps bis Ende → Bootstrap: value[t+9] (mit Flip)
 k=4 (t=14): 6 Steps bis Ende → Bootstrap: value[t+10] (mit Flip)
 k=5 (t=15): 5 Steps bis Ende → Bootstrap: z (finaler Reward)
+
+# Gumbel vs standard
+
+Die Action von mctx Policy-Funktionen ist NICHT immer die meistbesuchte!
+1. Gumbel MuZero:
+    ```
+    policy_output = mctx.gumbel_muzero_policy(
+    gumbel_scale=temperature  # ← Steuert Stochastizität
+    )
+    action = policy_output.action  # ← NICHT immer die meistbesuchte!
+    ```
+    Wie funktioniert's:
+
+    Gumbel-Rauschen wird zu den Q-Werten ALLER Actions addiert
+    Die Action mit dem höchsten gerauschten Score wird gewählt
+    Bei gumbel_scale=1.0: Starkes Rauschen → oft NICHT die beste Action
+    Bei gumbel_scale=0.0: Kein Rauschen → immer die beste Action
+    Beispiel:
+
+    ```
+    Visit Counts:  [100, 50, 30, 20]  ← Action 0 am meisten besucht
+    Q-Values:      [0.8, 0.6, 0.5, 0.4]
+    Gumbel Noise:  [0.1, 0.3, -0.2, 0.0]
+    Scores:        [0.9, 0.9, 0.3, 0.4]
+                    ^^^  ^^^
+    Selected Action: 0 oder 1 (beide ~gleichauf)
+    ```
+2. Standard MuZero Policy:
+    ```
+    policy_output = mctx.muzero_policy(
+        temperature=1.0,  # ← Würde hier stehen wenn aktiv
+        dirichlet_fraction=0.25
+    )
+    ```
+    Wie funktioniert's:
+
+    Softmax-Sampling über visit counts: P(a)∝ N(a) ^1/T
+    Bei T=1.0: Proportional zu visits
+    Bei T→0: Fast immer die meistbesuchte
+    Beispiel:
+    ```
+    Visit Counts: [100, 50, 30, 20]
+    Temperature = 1.0:
+    P(action 0) = 100/200 = 50%  ← Höchste Chance
+    P(action 1) = 50/200 = 25%
+    P(action 2) = 30/200 = 15%
+    P(action 3) = 20/200 = 10%
+    
+    → Gewählte Action: Zufällig nach dieser Verteilung!
+  ```

@@ -193,7 +193,7 @@ class VectorizedReplayBuffer:
         target_values = np.where(
             bootstrap_from_value,
             # Falls True: Bootstrap mit Value nach K Steps
-            (gamma ** K) * bootstrap_values,  # = bootstrap_values (da gamma=1)
+            bootstrap_values,  # = bootstrap_values (da gamma=1)
             # Falls False: Bootstrap mit z AUS PERSPEKTIVE DIESES TIMESTEPS
             z_seq  # ← KEIN [:, None] mehr nötig, schon (batch_size, K)!
         )

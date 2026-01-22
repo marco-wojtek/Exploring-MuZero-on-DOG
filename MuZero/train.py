@@ -10,7 +10,6 @@ import pickle
 import wandb
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-# Annahme: Deine Netzwerk-Klassen und init-Funktionen sind importiert
 from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
 from MuZero.replay_buffer import ReplayBuffer, play_n_games_v3
@@ -130,16 +129,19 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     replay = VectorizedReplayBuffer(capacity=50000, batch_size=128, unroll_steps=5)
     # collect initial set of games
     print("Collecting initial games...")
-    buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games)
+    for _ in range(3):
+        print(f"Playing games to fill replay buffer...")
+        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games, temp=1.5)
     replay.save_games_from_buffers(buffers)
     times_per_iteration = []
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
-        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games)
+        temp = max(0.25, 1.5 - it * (1.25 / (iterations - 1)))  # Linearly decay temperature from 1.5 to 0.25
+        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games, temp=temp)
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
-
+        deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
         print("Training on collected data...")
         train_start = time()
         train_steps = 1500
@@ -166,7 +168,7 @@ config = {
     "learning_rate": 5e-5,
     "architecture": "MuZero Deterministic MADN with Gumbel MCTS",
     "num_games_per_iteration": 1500,
-    "iterations": 50,
+    "iterations": 40,
     "optimizer": "adamw with warmup cosine decay"
 }
 # prep weights and biases
@@ -181,10 +183,9 @@ learning_rate_schedule = optax.warmup_cosine_decay_schedule(
     init_value=1e-4,          # Warmup start
     peak_value=5e-3,          # Peak (reduziert wegen mehr Spielen)
     warmup_steps=4500,        # 3 Iterationen @ 1500 steps
-    decay_steps=70500,        # 47 Iterationen @ 1500 steps
-    end_value=config["learning_rate"]            # Niedrigerer End-Value
+    decay_steps=60000,        # 40 Iterationen @ 1500 steps
+    end_value=config["learning_rate"]            # Niedriger End-Value
 )
-
 
 optimizer = optax.chain(
     optax.clip_by_global_norm(5.0),
@@ -197,9 +198,10 @@ opt_state = None
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
 starttime = time()
-params, opt_state, times_per_iteration = test_training(num_games=config["num_games_per_iteration"], seed=134, iterations=config["iterations"], params=params, opt_state=opt_state)
+params, opt_state, times_per_iteration = test_training(num_games=config["num_games_per_iteration"], seed=7841, iterations=config["iterations"], params=params, opt_state=opt_state)
 endtime = time()
-print(f"Total training time: {(endtime - starttime) / 60:.2f} minutes.")
+passed_time = endtime - starttime
+print(f"Total training time: {passed_time / 3600:.2f} hours and {passed_time % 3600 / 60:.2f} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
