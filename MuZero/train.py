@@ -127,12 +127,15 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
         opt_state = optimizer.init(params)
 
     replay = VectorizedReplayBuffer(capacity=50000, batch_size=128, unroll_steps=5)
+    deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
     # collect initial set of games
     print("Collecting initial games...")
     for _ in range(3):
         print(f"Playing games to fill replay buffer...")
         buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games, temp=1.5)
-    replay.save_games_from_buffers(buffers)
+        replay.save_games_from_buffers(buffers)
+        deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
+
     times_per_iteration = []
     for it in range(iterations):
         start_time = time()

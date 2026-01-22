@@ -277,11 +277,11 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, max
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
     
     def cond_fn(carry):
-        _, _, dones, step_count = carry
+        _, _, dones, step_count, _ = carry
         # Stoppe wenn ALLE done ODER max_steps erreicht
         return jnp.any(~dones) & (step_count < max_steps)
     
-    final_envs, final_buffers, final_dones, _ = jax.lax.while_loop(
+    final_envs, final_buffers, final_dones, _, _ = jax.lax.while_loop(
         cond_fn,
         body_fn,
         (envs, init_buffers, init_dones, 0, rng_key)
