@@ -12,8 +12,18 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
-from MuZero.replay_buffer import ReplayBuffer, play_n_games_v3
+from MuZero.replay_buffer import ReplayBuffer
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
+from MuZero.game_agent import play_n_games_v3
+
+TEMPERATURE_SCHEDULE = [1.5, 1.0, 0.5, 0.25]
+
+def get_temperature(iteration, total_iterations):
+    """Phasenbasiert: nur 4 verschiedene Werte"""
+    phase = int(iteration / total_iterations * len(TEMPERATURE_SCHEDULE))
+    phase = min(phase, len(TEMPERATURE_SCHEDULE) - 1)
+    return TEMPERATURE_SCHEDULE[phase]
+
 # @jax.jit
 def loss_fn(params, batch):
     """Vektorisierte Version mit scan statt Loop"""
@@ -101,7 +111,17 @@ def train_step(params, opt_state, batch):
 
 # --- Initialisierung (Beispiel) ---
 
-def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state=None):
+def test_training(config, params=None, opt_state=None):
+    seed = config["seed"]
+    iterations = config["iterations"]
+    num_games = config["num_games_per_iteration"]
+    buffer_capacity = config["Buffer_Capacity"]
+    unroll_steps = config["unroll_steps"]
+    max_episode_length = config["max_episode_length"]
+    num_simulation = config["MCTS_simulations"]
+    max_depth = config["MCTS_max_depth"]
+
+
     print(f"JAX Devices: {jax.devices()}")
     print(f"JAX Backend: {jax.default_backend()}")
 
@@ -126,13 +146,13 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     if opt_state is None:
         opt_state = optimizer.init(params)
 
-    replay = VectorizedReplayBuffer(capacity=50000, batch_size=128, unroll_steps=5)
+    replay = VectorizedReplayBuffer(capacity=buffer_capacity, batch_size=config["Buffer_batch_Size"], unroll_steps=unroll_steps, max_episode_length=max_episode_length, bootstrap_value_target=config["Bootstrap_Value_Target"])
     deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
     # collect initial set of games
     print("Collecting initial games...")
-    for _ in range(3):
+    for n in range(3):
         print(f"Playing games to fill replay buffer...")
-        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+1), input_shape, num_envs=num_games, temp=1.5)
+        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed*n), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=get_temperature(0, iterations))
         replay.save_games_from_buffers(buffers)
         deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
 
@@ -140,8 +160,8 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
-        temp = max(0.25, 1.5 - it * (1.25 / (iterations - 1)))  # Linearly decay temperature from 1.5 to 0.25
-        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games, temp=temp)
+        temp = get_temperature(it, iterations)  # Phasenbasiert: nur 4 verschiedene Werte
+        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=temp)
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
         deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
@@ -155,8 +175,8 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
             if i % (train_steps // 3) == 0:
                 print(f"Step {i}, Losses: {{")
                 print(f"  total_loss: {losses['total_loss']:.2f},")
-                print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/train_steps:.3f} per step),")
-                print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/train_steps:.3f} per step)")
+                print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/unroll_steps:.3f} per step),")
+                print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/unroll_steps:.3f} per step)")
                 print(f"}}")
         end_time = time()
         print(f"""
@@ -168,11 +188,19 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     return params, opt_state, times_per_iteration
 
 config = {
-    "learning_rate": 0.1,
+    "seed": 1003,
+    "learning_rate": 0.01,
     "architecture": "MuZero Deterministic MADN with Gumbel MCTS",
     "num_games_per_iteration": 1500,
-    "iterations": 40,
-    "optimizer": "adamw with piecewise_constant_schedule (same as MuZero paper)"
+    "iterations": 30,
+    "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
+    "Buffer_Capacity": 30000,
+    "Buffer_batch_Size": 128,
+    "unroll_steps": 5,
+    "max_episode_length": 500,
+    "MCTS_simulations": 100,
+    "MCTS_max_depth": 50,
+    "Bootstrap_Value_Target": False
 }
 # prep weights and biases
 deterministic_madn_wandb_session = wandb.init(
@@ -209,15 +237,15 @@ opt_state = None
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
 starttime = time()
-params, opt_state, times_per_iteration = test_training(num_games=config["num_games_per_iteration"], seed=841, iterations=config["iterations"], params=params, opt_state=opt_state)
+params, opt_state, times_per_iteration = test_training(config=config, params=params, opt_state=opt_state)
 endtime = time()
 passed_time = endtime - starttime
 print(f"Total training time: {passed_time / 3600:.2f} hours and {passed_time % 3600 / 60:.2f} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open(f'gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
+with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open(f'gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
+with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
     pickle.dump(opt_state, f)

@@ -178,7 +178,7 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     agents = []
     for param in [params1, params2, params3, params4]:
         if param is None:
-            param = init_muzero_params(jax.random.PRNGKey(0), enc.shape)
+            param = init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
 
         agents.append(param)
 
@@ -195,76 +195,62 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
 
-
-def evaluate_agent(params1, params2, params3, params4, num_games=50):
-    '''
-    Evaluate up to 4 different agents by having them play against each other.
-    
-    params1, params2, params3, params4: Parameter dictionaries for up to 4 agents.
-    '''
-    # use random agents if params are None
-    env = env_reset(
-        0,  # <- Das wird an '_' übergeben
-        num_players=4,
-        layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=10,
-        starting_player=0,
-        seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=False,
-        enable_initial_free_pin=True,
-        enable_circular_board=False
-    )
-    enc = old_encode_board(env)[None, ...]  # z.B. (8, 56)
-    agents = []
-    for params in [params1, params2, params3, params4]:
-        if params is not None:
-            agent_fn = partial(run_muzero_mcts, params=params)
-        else:
-            rand_params = init_muzero_params(jax.random.PRNGKey(0), enc.shape)
-            agent_fn = partial(run_muzero_mcts, params=rand_params)
-        agents.append(agent_fn)
-
+def play_n_randomly(batch_size=20):
     winners = jnp.array([[0, 0, 0, 0],
                [0, 0, 0, 0],
                [0, 0, 0, 0],
                [0, 0, 0, 0]])
-    for game_idx in range(num_games):
-        env = env_reset(
-        game_idx,  # <- Das wird an '_' übergeben
-        num_players=4,
-        layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=10,
-        starting_player=game_idx % 4,
-        seed=game_idx,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=False,
-        enable_initial_free_pin=True,
-        enable_circular_board=False
-    )
+    
+    for i in range(4):
+        envs = batch_reset(jax.random.randint(jax.random.PRNGKey(i*54321), (batch_size,), 0, 1000000), jnp.full((batch_size,), i))
+        active_mask = np.ones(batch_size, dtype=bool)
+        step_counter = 0
+        MAX_STEPS = 2000
+        dones = envs.done  # Initialen Done-Status speichern
         
-        done = False
-        
-        while not done:
-            obs = old_encode_board(env)[None, ...]
-            agent_fn = agents[env.current_player]
-            val_act = valid_action(env).reshape(obs.shape[0], -1)
-            if jnp.any(val_act):
-                policy_output, root_values = agent_fn(observations=obs, invalid_actions= ~(val_act), rng_key=jax.random.PRNGKey(game_idx + int(time()*1e6)%2**32))
-                action = policy_output.action[0]
-                mapped_action = map_action(action)
-                if ~val_act[0, action]:
-                    print(env.board)
-                env, reward, done = env_step(env, mapped_action)
-            else:
-                env, reward, done = no_step(env)
-        winner = get_winner(env, env.board)
-        #winner is [True, Fals, False, False] for player 0 winning
-        winners = winners.at[game_idx % 4].add(jnp.array(winner, dtype=jnp.int32))
-        #print(f"Game {game_idx + 1}/{num_games} finished. Winner: Player {get_winner(env, env.board)}")
-    print("Final Results:")
-    winners = jnp.array(winners)
+        while np.any(active_mask) and step_counter < MAX_STEPS:
+            step_counter += 1
+            rng_key, subkey = jax.random.split(jax.random.PRNGKey(i*99999 + step_counter))
+            valid_actions = batch_valid_action(envs).reshape(envs.board.shape[0], -1)
+            
+            def random_step(env, val_actions, done, key):
+                def do_step():
+                    # Maskiere ungültige Aktionen mit -1e9
+                    logits = jnp.where(val_actions, 0.0, -1e9)
+                    action = jax.random.categorical(key, logits)
+                    mapped_act = map_action(action)
+                    next_env, reward, next_done = env_step(env, mapped_act)
+                    return next_env, reward, next_done
+                def no_step_action():
+                    next_env, reward, next_done = no_step(env)
+                    return next_env, reward, next_done
+                return jax.lax.cond(
+                    jnp.any(val_actions) & (~done),
+                    do_step,
+                    no_step_action
+                )
+            
+            envs, rewards, next_dones = jax.vmap(random_step, in_axes=(0,0,0,0))(envs, valid_actions, dones, jax.random.split(subkey, batch_size))
+            final_dones = jnp.logical_or(dones, next_dones)
+            
+            # Winner-Tracking wie in play_n_games_for_eval
+            for j in range(batch_size):
+                if active_mask[j] and final_dones[j]:
+                    active_mask[j] = False
+                    winner = manual_get_winner(envs.board[j], envs.num_players, envs.goal[j], envs.rules)
+                    winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
+            
+            dones = final_dones  # Update dones für nächsten Step
+
+    print("Final Results for Random Agents:")
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
+    print("Statisctics:")
+    print("Total win chances in %:", jnp.sum(winners,axis=0) / jnp.sum(winners) * 100)
+    print("Chance to win when starting first:", jnp.sum(jnp.diag(winners)) / jnp.sum(winners) * 100)
 
+
+#play_n_randomly(batch_size=1000)  
 params1 = None
 params3 = load_params_from_file("gumbelmuzero_madn_params_lr5e-05_g1500_it40.pkl")
 params4 = None

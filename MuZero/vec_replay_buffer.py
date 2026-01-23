@@ -8,7 +8,7 @@ import numpy as np
 import random
 class VectorizedReplayBuffer:
     def __init__(self, capacity: int, batch_size: int, unroll_steps: int,
-                 obs_shape=(14, 56), action_dim=24, max_episode_length=500):
+                 obs_shape=(14, 56), action_dim=24, max_episode_length=500, bootstrap_value_target=True):
         self.capacity = capacity
         self.batch_size = batch_size
         self.unroll_steps = unroll_steps
@@ -29,6 +29,7 @@ class VectorizedReplayBuffer:
         
         self.position = 0
         self.size = 0
+        self.bootstrap_value_target = bootstrap_value_target
     
     def save_games_from_buffers(self, all_buffers):
         """Speichert Batch von Spielen direkt."""
@@ -191,7 +192,7 @@ class VectorizedReplayBuffer:
         )
         # 7.7: Berechne Target Values
         target_values = np.where(
-            bootstrap_from_value,
+            bootstrap_from_value & self.bootstrap_value_target,
             # Falls True: Bootstrap mit Value nach K Steps
             bootstrap_values,  # = bootstrap_values (da gamma=1)
             # Falls False: Bootstrap mit z AUS PERSPEKTIVE DIESES TIMESTEPS
