@@ -266,7 +266,7 @@ def evaluate_agent(params1, params2, params3, params4, num_games=50):
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
 
 params1 = None
-params3 = load_params_from_file("gumbelmuzero_madn_params_lr5e-5_g1500_it50.pkl")
+params3 = load_params_from_file("gumbelmuzero_madn_params_lr5e-05_g1500_it40.pkl")
 params4 = None
 params2 = None
 start_time = time()

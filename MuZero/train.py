@@ -168,11 +168,11 @@ def test_training(num_games= 50, seed=42, iterations=100, params=None, opt_state
     return params, opt_state, times_per_iteration
 
 config = {
-    "learning_rate": 5e-5,
+    "learning_rate": 0.1,
     "architecture": "MuZero Deterministic MADN with Gumbel MCTS",
     "num_games_per_iteration": 1500,
     "iterations": 40,
-    "optimizer": "adamw with warmup cosine decay"
+    "optimizer": "adamw with piecewise_constant_schedule (same as MuZero paper)"
 }
 # prep weights and biases
 deterministic_madn_wandb_session = wandb.init(
@@ -182,12 +182,20 @@ deterministic_madn_wandb_session = wandb.init(
 )
 
 # --- Setup Optimizer ---
-learning_rate_schedule = optax.warmup_cosine_decay_schedule(
-    init_value=1e-4,          # Warmup start
-    peak_value=5e-3,          # Peak (reduziert wegen mehr Spielen)
-    warmup_steps=4500,        # 3 Iterationen @ 1500 steps
-    decay_steps=60000,        # 40 Iterationen @ 1500 steps
-    end_value=config["learning_rate"]            # Niedriger End-Value
+#learning_rate_schedule = optax.warmup_cosine_decay_schedule(
+#    init_value=1e-4,          # Warmup start
+#    peak_value=5e-3,          # Peak (reduziert wegen mehr Spielen)
+#    warmup_steps=4500,        # 3 Iterationen @ 1500 steps
+#    decay_steps=60000,        # 40 Iterationen @ 1500 steps
+#    end_value=config["learning_rate"]            # Niedriger End-Value
+#)
+learning_rate_schedule = optax.piecewise_constant_schedule(
+    init_value=config["learning_rate"],
+    boundaries_and_scales={
+        10 * 1500: 0.1,   # Nach Iteration 10: Drop zu 0.01
+        20 * 1500: 0.1,   # Nach Iteration 20: Drop zu 0.001
+        30 * 1500: 0.1,   # Nach Iteration 30: Drop zu 0.0001
+    }
 )
 
 optimizer = optax.chain(
@@ -201,7 +209,7 @@ opt_state = None
 # with open('muzero_madn_opt_state_00001.pkl', 'rb') as f:
 #     opt_state = pickle.load(f)
 starttime = time()
-params, opt_state, times_per_iteration = test_training(num_games=config["num_games_per_iteration"], seed=7841, iterations=config["iterations"], params=params, opt_state=opt_state)
+params, opt_state, times_per_iteration = test_training(num_games=config["num_games_per_iteration"], seed=841, iterations=config["iterations"], params=params, opt_state=opt_state)
 endtime = time()
 passed_time = endtime - starttime
 print(f"Total training time: {passed_time / 3600:.2f} hours and {passed_time % 3600 / 60:.2f} minutes.")
