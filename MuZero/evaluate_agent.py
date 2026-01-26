@@ -86,7 +86,7 @@ def multiactor_step(envs, params_list, rng_key):
             obs_batched = obs[None, ...] 
             invalid_actions_batched = (~val_act)[None, ...]
             
-            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched)
+            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, temperature=0.25)
             
             act = policy_output.action[0]
             action_weights = policy_output.action_weights[0]
@@ -212,7 +212,7 @@ def play_n_randomly(batch_size=20):
             step_counter += 1
             rng_key, subkey = jax.random.split(jax.random.PRNGKey(i*99999 + step_counter))
             valid_actions = batch_valid_action(envs).reshape(envs.board.shape[0], -1)
-            
+
             def random_step(env, val_actions, done, key):
                 def do_step():
                     # Maskiere ungültige Aktionen mit -1e9
@@ -250,11 +250,11 @@ def play_n_randomly(batch_size=20):
     print("Chance to win when starting first:", jnp.sum(jnp.diag(winners)) / jnp.sum(winners) * 100)
 
 
-#play_n_randomly(batch_size=1000)  
-params1 = None
-params3 = load_params_from_file("gumbelmuzero_madn_params_lr5e-05_g1500_it40.pkl")
+#play_n_randomly(batch_size=10000)  
 params4 = None
-params2 = None
+params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100.pkl")
+params1 = None
+params3 = None
 start_time = time()
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=100)
 end_time = time()

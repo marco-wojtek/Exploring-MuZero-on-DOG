@@ -16,7 +16,7 @@ from MuZero.replay_buffer import ReplayBuffer
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
 from MuZero.game_agent import play_n_games_v3
 
-TEMPERATURE_SCHEDULE = [1.5, 1.0, 0.5, 0.25]
+TEMPERATURE_SCHEDULE = jnp.array([1.5, 1.0, 0.5, 0.25])
 
 def get_temperature(iteration, total_iterations):
     """Phasenbasiert: nur 4 verschiedene Werte"""
@@ -46,7 +46,7 @@ def loss_fn(params, batch):
         l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
         l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
         
-        step_loss =  (l_value + l_policy) #* (1.0 / num_unroll_steps)
+        step_loss = (l_value + l_policy) #* (1.0 / num_unroll_steps)
         
         # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
         def do_dynamics(state):
@@ -157,6 +157,7 @@ def test_training(config, params=None, opt_state=None):
         deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
 
     times_per_iteration = []
+    global_step = 0
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
@@ -171,7 +172,12 @@ def test_training(config, params=None, opt_state=None):
         for i in range(train_steps):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
-            deterministic_madn_wandb_session.log(losses)
+            current_lr = learning_rate_schedule(global_step)
+            deterministic_madn_wandb_session.log({
+            	**losses,
+                'learning_rate': float(current_lr)
+            })
+            global_step += 1
             if i % (train_steps // 3) == 0:
                 print(f"Step {i}, Losses: {{")
                 print(f"  total_loss: {losses['total_loss']:.2f},")
@@ -188,19 +194,19 @@ def test_training(config, params=None, opt_state=None):
     return params, opt_state, times_per_iteration
 
 config = {
-    "seed": 1003,
+    "seed": 1010,
     "learning_rate": 0.01,
-    "architecture": "MuZero Deterministic MADN with Gumbel MCTS",
+    "architecture": "MuZero Deterministic MADN with Gumbel MCTS and no value loss scaling",
     "num_games_per_iteration": 1500,
-    "iterations": 30,
+    "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
-    "Buffer_Capacity": 30000,
+    "Buffer_Capacity": 35000,
     "Buffer_batch_Size": 128,
     "unroll_steps": 5,
     "max_episode_length": 500,
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
-    "Bootstrap_Value_Target": False
+    "Bootstrap_Value_Target": True
 }
 # prep weights and biases
 deterministic_madn_wandb_session = wandb.init(
@@ -220,9 +226,11 @@ deterministic_madn_wandb_session = wandb.init(
 learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],
     boundaries_and_scales={
-        10 * 1500: 0.1,   # Nach Iteration 10: Drop zu 0.01
-        20 * 1500: 0.1,   # Nach Iteration 20: Drop zu 0.001
-        30 * 1500: 0.1,   # Nach Iteration 30: Drop zu 0.0001
+        7 * 1500: 0.1,   # Nach Iteration 10: Drop zu 0.001
+        18 * 1500: 0.1,   # Nach Iteration 20: Drop zu 0.0001
+        33 * 1500: 0.1,   # Nach Iteration 30: Drop zu 0.00001
+        60 * 1500: 0.5,  #Nach Iteration 50: 
+        80 * 1500: 0.2  #Nach 80 Iterationen
     }
 )
 
@@ -240,12 +248,12 @@ starttime = time()
 params, opt_state, times_per_iteration = test_training(config=config, params=params, opt_state=opt_state)
 endtime = time()
 passed_time = endtime - starttime
-print(f"Total training time: {passed_time / 3600:.2f} hours and {passed_time % 3600 / 60:.2f} minutes.")
+print(f"Total training time: {int(passed_time / 3600)} hours and {int(passed_time % 3600 / 60)} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
+with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_run17.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}.pkl', 'wb') as f:
+with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_run17.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
