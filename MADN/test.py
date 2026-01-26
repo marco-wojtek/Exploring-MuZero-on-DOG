@@ -469,8 +469,9 @@ def test_normal_move_classic_MADN(pins, player, pin, move, rules, expected_valid
                     must_traverse_start=rules.get('must_traverse_start', False))
     env = env.replace(pins=pins, board=cm.set_pins_on_board(env.board, pins), current_player=player)
     env = cm.set_die(env, move)
+    valid_moves = cm.valid_action(env)
     env, reward, done = cm.env_step(env, pin)
-    print(env.pins)
+    assert valid_moves[pin] or reward == -1
     assert jnp.array_equal(env.pins, expected_valid)
 
 

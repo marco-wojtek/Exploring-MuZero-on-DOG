@@ -29,7 +29,7 @@ batch_encode = jax.vmap(old_encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_map_action = jax.vmap(map_action)
 
-@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth'])
+@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth', 'temp'])
 def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps=500, temp=1.0):
     """MCTS parallel + Early Exit + XLA optimiert
     Verwende play_batch_of_games_jitted, wenn du viele Spiele parallel simulieren möchtest, insbesondere für Training oder Datengewinnung.
