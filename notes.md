@@ -240,3 +240,12 @@ Die Action von mctx Policy-Funktionen ist NICHT immer die meistbesuchte!
     
     → Gewählte Action: Zufällig nach dieser Verteilung!
   ```
+
+Pure Random Agent:
+├─ Würfelt bei jedem Zug
+└─ 25% Winrate (fair share)
+
+Random-NN + MCTS:
+├─ Würfelt 100 mal
+├─ Nimmt häufigste Wahl
+└─ ~35% Winrate (10% boost durch Search!)

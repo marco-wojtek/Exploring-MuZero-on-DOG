@@ -121,6 +121,87 @@ def multiactor_step(envs, params_list, rng_key):
     
     return next_envs, (obs, actions, rewards, root_values, policy_output_action_weights, final_dones)
 
+def calculate_progress(env: deterministic_MADN, player_idx: int) -> int:
+    '''
+    Berechnet den Fortschritt eines Spielers im Vergleich zum Ziel.
+    Fortschritt ist die durchschnittliche Distanz der restlichen Pins zum Ziel.
+    Falls Überspringen im Ziel erlaubt ist, wird der Fortschritt so angepasst dass die mittlere Distanz aller freien Pins zum ersten freien Zielfeld bestimmt wird.
+    Falls Überspringen nicht erlaubt ist, wird der Fortschritt als die mittlere Distanz aller Pins entsprechend des Fortschritts bestimmt (e.g. Pin am weitesten bekommt distanz zum hintersten Zielfeld).
+    Falls traverse start enabled ist, wird +1 zur Distanz berechnet.
+            Args:
+                env: Die aktuelle Spielumgebung
+    Rückgabe: Gesamte Distanz aller Pins zum Ziel mit Penalty für Home-Pins.
+    '''
+    board_size = env.board_size
+    distance = board_size // env.num_players
+    pins = env.pins[player_idx]  # (num_pins,)
+    goals = env.goal[player_idx]  # (num_pins,)
+    rules = env.rules
+    travers_start_enabled = rules['must_traverse_start']
+
+
+    rotated_pins = jnp.where(
+        pins < 0,  # Home
+        pins -5, # Pins at home get penalty of 5 since 6 is needed to be freed
+        jnp.where(
+            pins < board_size,  # Auf dem Board
+            (pins - distance * player_idx) % board_size - jnp.int32(travers_start_enabled),
+            pins - 4 * player_idx  # Im Ziel
+        )
+    )
+    
+    rotated_goals = goals - 4 * player_idx 
+
+    sorted_pins = jnp.sort(rotated_pins)
+
+    distance_matrix = jnp.abs(sorted_pins[:, None] - rotated_goals[None, :])  # (num_pins, num_pins)
+    
+    def match_iteration(i, carry):
+        total_dist, mask = carry
+        
+        # Finde Minimum unter maskierten Werten
+        masked_distances = jnp.where(mask, distance_matrix, jnp.inf)
+        flat_idx = jnp.argmin(masked_distances)
+        
+        row = flat_idx // 4
+        col = flat_idx % 4
+        
+        # Addiere minimale Distanz
+        min_dist = distance_matrix[row, col]
+        new_total = total_dist + min_dist
+        
+        # Aktualisiere Maske: Zeile und Spalte blockieren
+        new_mask = mask.at[row, :].set(False)
+        new_mask = new_mask.at[:, col].set(False)
+        
+        return new_total, new_mask
+    
+    # Initialisiere
+    initial_mask = jnp.ones((4, 4), dtype=jnp.bool_)
+    initial_total = jnp.float32(0.0)
+    
+    # Führe 4 Iterationen aus (für 4 Pins)
+    final_total, _ = jax.lax.fori_loop(
+        0, 4,
+        match_iteration,
+        (initial_total, initial_mask)
+    )
+
+    return final_total
+
+@jax.jit
+def calculate_player_progress(envs):
+    """
+    Berechnet den Fortschritt jedes Spielers im Vergleich zum Ziel.
+    Rückgabe: Array der Form (num_envs, num_players) mit Fortschrittswerten.
+    """
+    def player_progress_single(env):
+        def single_player_progress(player_idx):
+            return calculate_progress(env, player_idx)
+        
+        return jax.vmap(single_player_progress)(jnp.arange(env.num_players))
+    
+    return jnp.mean(jax.vmap(player_progress_single)(envs), axis=0)
 
 def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
     """
@@ -159,8 +240,9 @@ def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
                 winner = manual_get_winner(envs.board[i], envs.num_players, envs.goal[i], envs.rules)
                 winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
     
-    # Filtern von None (falls MAX_STEPS erreicht wurde)
-    return jnp.sum(winners, axis=0)
+    # Get Progress Stats
+    progress = calculate_player_progress(envs)
+    return jnp.sum(winners, axis=0), progress
 
 def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     # use random agents if params are None
@@ -188,13 +270,22 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
                [0, 0, 0, 0],
                [0, 0, 0, 0]])
     
+    average_progress = jnp.array([[0.0, 0.0, 0.0, 0.0],
+                                 [0.0, 0.0, 0.0, 0.0],
+                                 [0.0, 0.0, 0.0, 0.0],
+                                 [0.0, 0.0, 0.0, 0.0]])
+    
     for i in range(4):
-        winners = winners.at[i].add(play_n_games_for_eval(agents, jax.random.PRNGKey(i*12345), num_envs=batch_size, starting_player=i))
+        winners_batch, progress = play_n_games_for_eval(agents, jax.random.PRNGKey(i*12345), num_envs=batch_size, starting_player=i)
+        winners = winners.at[i].add(winners_batch)
+        average_progress = average_progress.at[i].set(progress)
 
     print("Final Results:")
     winners = jnp.array(winners)
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
+    print("Average Final Pin distance per Player and different Starters:\n", average_progress)
+    print("Average Final Pin distance per Player:\n", jnp.sum(average_progress, axis=0) / 4)
 
 def play_n_randomly(batch_size=20):
     winners = jnp.array([[0, 0, 0, 0],
@@ -246,7 +337,7 @@ def play_n_randomly(batch_size=20):
     print("Final Results for Random Agents:")
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
-    print("Statisctics:")
+    print("Statistics:")
     print("Total win chances in %:", jnp.sum(winners,axis=0) / jnp.sum(winners) * 100)
     print("Chance to win when starting first:", jnp.sum(jnp.diag(winners)) / jnp.sum(winners) * 100)
 
@@ -438,12 +529,13 @@ def compare_agents_statistically(params1, params2, num_games=1000, batch_size=10
     print(f"\n{'='*60}")
     print(f"Testing Agent 1...")
     print(f"{'='*60}")
-    wins1 = test_agent_vs_random(params1, num_games, batch_size, seed=78942)
+    i = np.random.randint(0, 1000000)
+    wins1 = test_agent_vs_random(params1, num_games, batch_size, seed=i)
     
     print(f"\n{'='*60}")
     print(f"Testing Agent 2...")
     print(f"{'='*60}")
-    wins2 = test_agent_vs_random(params2, num_games, batch_size, seed=78942)  # Different seed
+    wins2 = test_agent_vs_random(params2, num_games, batch_size, seed=i)  # Different seed
     
     winrate1 = wins1 / num_games
     winrate2 = wins2 / num_games
@@ -485,20 +577,21 @@ def compare_agents_statistically(params1, params2, num_games=1000, batch_size=10
     
     return winrate1, winrate2
 
+start_time = time()
 
 #play_n_randomly(batch_size=10000)  
-params4 = None
-params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it70.pkl")
+params1 = None
 params2 = None
 params3 = None
-compare_agents_statistically(params1, params2, num_games=500, batch_size=50)
+params4 = None
 
-params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_18.pkl")
-compare_agents_statistically(params1, params2, num_games=500, batch_size=50)
+# compare_agents_statistically(params1, params2, num_games=100, batch_size=10)
 
-params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_21.pkl")
-compare_agents_statistically(params1, params2, num_games=500, batch_size=10)
-# start_time = time()
-# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=100)
-# end_time = time()
-# print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
+params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it70.pkl")
+# params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it70.pkl")
+# compare_agents_statistically(params1, params2, num_games=100, batch_size=10)
+
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+end_time = time()
+print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

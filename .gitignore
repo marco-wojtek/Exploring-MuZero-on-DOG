@@ -12,3 +12,4 @@ linux_terminal.md
 MuZero.pdf
 wandb/
 muzero_pseudocode.txt
+performance_test.py
