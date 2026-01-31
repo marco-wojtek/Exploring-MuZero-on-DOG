@@ -16,11 +16,14 @@ from MuZero.replay_buffer import ReplayBuffer
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
 from MuZero.game_agent import play_n_games_v3
 
-def get_temperature(iteration, total_iterations, schedule):
+# TEMPERATURE_SCHEDULE = [1.25, 1.0, 1.0, 0.8, 0.5]
+TEMPERATURE_SCHEDULE = [1.0]
+
+def get_temperature(iteration, total_iterations):
     """Phasenbasiert: nur 4 verschiedene Werte, garantiert gleiche Float-Instanz"""
-    phase = int(iteration / total_iterations * len(schedule))
-    phase = min(phase, len(schedule) - 1)
-    return schedule[phase]
+    phase = int(iteration / total_iterations * len(TEMPERATURE_SCHEDULE))
+    phase = min(phase, len(TEMPERATURE_SCHEDULE) - 1)
+    return TEMPERATURE_SCHEDULE[phase]
 # @jax.jit
 def loss_fn(params, batch):
     """Vektorisierte Version mit scan statt Loop"""
@@ -151,7 +154,7 @@ def test_training(config, params=None, opt_state=None):
     game_warmup = 3
     for n in range(game_warmup):
         print(f"{n+1}/{game_warmup} Playing games to fill replay buffer...")
-        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed*n), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=get_temperature(0, iterations, schedule))
+        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed*n), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=get_temperature(0, iterations))
         replay.save_games_from_buffers(buffers)
         deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
 
@@ -160,7 +163,7 @@ def test_training(config, params=None, opt_state=None):
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
-        temp = get_temperature(it, iterations, schedule)  # Phasenbasiert: nur 4 verschiedene Werte
+        temp = get_temperature(it, iterations)  # Phasenbasiert: nur 4 verschiedene Werte
         buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=temp)
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
@@ -195,8 +198,7 @@ def test_training(config, params=None, opt_state=None):
         times_per_iteration.append(end_time - start_time)
     return params, opt_state, times_per_iteration
 
-# TEMPERATURE_SCHEDULE = [1.25, 1.0, 1.0, 0.8, 0.5]
-TEMPERATURE_SCHEDULE = [1.0]
+
 config = {
     "seed": 1012,
     "learning_rate": 0.01,
