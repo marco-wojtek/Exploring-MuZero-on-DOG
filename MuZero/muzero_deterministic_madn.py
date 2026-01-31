@@ -134,8 +134,39 @@ class PredictionNetwork(nn.Module):
         policy_logits = nn.Dense(self.num_actions)(x)
         
         # B. Value (Wie gut ist der Zustand für den aktuellen Spieler?)
-        # Tanh für [-1 (Verlieren), 1 (Gewinnen)]
         value = nn.Dense(1)(x)
+        value = nn.tanh(value)
+        
+        return policy_logits, value
+
+class PredictionNetwork2(nn.Module):
+    latent_dim: int = 256
+    num_actions: int = 24
+    num_res_blocks: int = 6
+    num_head_layers: int = 2  # Neue Parameter für Head-Tiefe
+    
+    @nn.compact
+    def __call__(self, latent_state):
+        # Gemeinsamer Trunk
+        x = latent_state
+        for _ in range(self.num_res_blocks):
+            x = ResBlock(self.latent_dim)(x)
+        
+        # --- POLICY HEAD (separate Verarbeitung) ---
+        policy = x
+        for _ in range(self.num_head_layers):
+            policy = nn.Dense(self.latent_dim // 2)(policy)  # Reduzierte Dim
+            policy = nn.LayerNorm()(policy)
+            policy = nn.relu(policy)
+        policy_logits = nn.Dense(self.num_actions)(policy)
+        
+        # --- VALUE HEAD (separate Verarbeitung) ---
+        value = x
+        for _ in range(self.num_head_layers):
+            value = nn.Dense(self.latent_dim // 4)(value)  # Noch kleiner für Value
+            value = nn.LayerNorm()(value)
+            value = nn.relu(value)
+        value = nn.Dense(1)(value)
         value = nn.tanh(value)
         
         return policy_logits, value

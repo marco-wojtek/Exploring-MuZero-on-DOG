@@ -25,7 +25,7 @@ def env_reset_batched(seed):
 # 2. Vektorisierte Funktionen vorbereiten
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_action)
-batch_encode = jax.vmap(old_encode_board)
+batch_encode = jax.vmap(encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_map_action = jax.vmap(map_action)
 
@@ -45,7 +45,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
         # ✅ PARALLEL: vmap über alle aktiven Envs
         def step_single_env(env, buffer, done, key):
             def do_active_step(env, buffer):
-                obs = old_encode_board(env)[None, ...]
+                obs = encode_board(env)[None, ...]
                 valid_mask = valid_action(env).flatten()
                 invalid_mask = (~valid_mask)[None, :]
                 has_valid = jnp.any(valid_mask)

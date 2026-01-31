@@ -61,7 +61,7 @@ def env_reset_batched(seed, starting_player):
 # 2. Vektorisierte Funktionen vorbereiten
 batch_reset = jax.vmap(env_reset_batched, in_axes=(0, 0))
 batch_valid_action = jax.vmap(valid_action)
-batch_encode = jax.vmap(old_encode_board)
+batch_encode = jax.vmap(encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_map_action = jax.vmap(map_action)
 
@@ -257,7 +257,7 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
-    enc = old_encode_board(env)  # z.B. (8, 56)
+    enc = encode_board(env)  # z.B. (8, 56)
     agents = []
     for param in [params1, params2, params3, params4]:
         if param is None:
@@ -368,7 +368,7 @@ def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
-    enc = old_encode_board(env)
+    enc = encode_board(env)
     
     agent = params if params is not None else init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
     dummy_agent = init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)

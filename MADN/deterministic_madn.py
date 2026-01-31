@@ -402,66 +402,6 @@ def encode_board(env: deterministic_MADN) -> chex.Array:
     Returns:
         Ein Array, das die kodierte Spielfelddarstellung enthält.
     '''
-    def make_home_positions(home_counts, board_size, max_players=4):
-        # home_counts: (max_players,)
-        # num_players: ()
-        # board_size: ()
-        # Erzeuge immer (max_players, board_size), maskiere später
-        arr = jnp.ones((max_players, board_size), dtype=jnp.int8) * home_counts[:, None]
-        return arr[:4]  # nur die aktiven Spieler
-
-    def get_home_positions(pins, board_size, max_players=4):
-        # Einzel-Env
-        if pins.ndim == 2:
-            home_counts = jnp.count_nonzero(pins == -1, axis=1)  # (max_players,)
-            return make_home_positions(home_counts, board_size, max_players)
-        # Batch
-        else:
-            home_counts = jnp.count_nonzero(pins == -1, axis=2)  # (B, max_players)
-            return jax.vmap(make_home_positions, in_axes=(0, 0, None))(
-                home_counts, board_size, max_players
-        )
-    num_players = env.num_players
-    board = env.board
-    distance = env.board_size // 4
-    current_player = env.current_player
-    
-    #rolled idx
-    # rolled_idx = jnp.arange(env.current_player, env.current_player + env.num_players) % env.num_players
-    rolled_idx = (jnp.arange(4) + current_player) % num_players
-    # Spielerpositionen (One-hot)
-    # with roll over for current player
-    new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
-    new_pins = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
-    board = jnp.concatenate([new_board, new_pins], axis=0)
-    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
-
-    # Spielerposition im Haus
-    # home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
-    home_positions = get_home_positions(env.pins, board.shape[0])
-    home_positions = home_positions[rolled_idx]  # (4, board_size)
-    # Aktueller Spieler (optional)
-    # current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * current_player  # (1, board_size)
-
-    # Action-Häufigkeit als Kanäle
-    action_counts = env.action_set[current_player]  # shape (6,)
-    action_channels = jnp.repeat(action_counts[:, None], board.shape[0], axis=1)  # (6, board_size)
-
-    # Alles zusammenfügen
-    board_encoding = jnp.concatenate([player_channels, home_positions, action_channels], axis=0)  # (features, board_size)
-    return board_encoding
-
-
-def old_encode_board(env: deterministic_MADN) -> chex.Array:
-    '''
-    Kodiert das Spielfeld in eine Form, die von neuronalen Netzwerken verarbeitet werden kann.
-    
-    Args:
-        env: Aktuelle MADN-Umgebung 
-
-    Returns:
-        Ein Array, das die kodierte Spielfelddarstellung enthält.
-    '''
     num_players = env.num_players
     board = env.board
     distance = env.board_size // 4
@@ -475,7 +415,8 @@ def old_encode_board(env: deterministic_MADN) -> chex.Array:
     new_pins = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
     board = jnp.concatenate([new_board, new_pins], axis=0)
     player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
-
+    team_channel = jnp.sum(player_channels[::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[0:1], axis=0, keepdims=True) # (1, board_size)
+    opponent_channel = jnp.sum(player_channels[1::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[1:], axis=0, keepdims=True) # (1, board_size)
     # Spielerposition im Haus
     home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
     home_positions = home_positions[rolled_idx]  # (4, board_size)
@@ -487,7 +428,7 @@ def old_encode_board(env: deterministic_MADN) -> chex.Array:
     action_channels = jnp.repeat(action_counts[:, None], board.shape[0], axis=1)  # (6, board_size)
 
     # Alles zusammenfügen
-    board_encoding = jnp.concatenate([player_channels, home_positions, action_channels], axis=0)  # (features, board_size)
+    board_encoding = jnp.concatenate([player_channels, team_channel, opponent_channel, home_positions, action_channels], axis=0)  # (features, board_size)
     return board_encoding
 
 def encode_board_linear(env: deterministic_MADN) -> chex.Array:

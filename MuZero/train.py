@@ -11,7 +11,7 @@ import wandb
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
-from MADN.deterministic_madn import env_reset, encode_board, old_encode_board
+from MADN.deterministic_madn import env_reset, encode_board
 from MuZero.replay_buffer import ReplayBuffer
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
 from MuZero.game_agent import play_n_games_v3
@@ -134,7 +134,7 @@ def test_training(config, params=None, opt_state=None):
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
-    enc = old_encode_board(env)  # z.B. (8, 56)
+    enc = encode_board(env)  # z.B. (8, 56)
     print(enc.shape)
     input_shape = enc.shape  # (8, 56)
 
@@ -195,7 +195,8 @@ def test_training(config, params=None, opt_state=None):
         times_per_iteration.append(end_time - start_time)
     return params, opt_state, times_per_iteration
 
-TEMPERATURE_SCHEDULE = [1.25, 1.0, 1.0, 0.8, 0.5]
+# TEMPERATURE_SCHEDULE = [1.25, 1.0, 1.0, 0.8, 0.5]
+TEMPERATURE_SCHEDULE = [1.0]
 config = {
     "seed": 1012,
     "learning_rate": 0.01,
@@ -255,8 +256,8 @@ print(f"Total training time: {int(passed_time / 3600)} hours and {int(passed_tim
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_23.pkl', 'wb') as f:
+with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_23.pkl', 'wb') as f:
+with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
