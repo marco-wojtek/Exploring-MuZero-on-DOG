@@ -258,29 +258,16 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
 
 @jax.jit
 def set_pins_on_board(board, pins):
-    '''
-    Sets the pins on the board based on their positions.
-        Args:
-            board: Das aktuelle Spielfeld
-            pins: Die Positionen der Pins der Spieler
-        Returns:
-            Aktualisiertes Spielfeld mit den Pins gesetzt.
-    '''
-    num_players, num_pins = pins.shape
-
-    def body(idx, board):
-        player = idx // num_pins
-        pin = idx % num_pins
-        pos = pins[player, pin]
-        board = jax.lax.cond(
-            pos != -1,
-            lambda b: b.at[pos].set(player),
-            lambda b: b,
-            board
-        )
-        return board
-
-    board = jax.lax.fori_loop(0, num_players * num_pins, body, jnp.ones_like(board, dtype=jnp.int8) * -1)
+    positions = pins.flatten()  # (num_players * num_pins,)
+    player_ids = jnp.repeat(jnp.arange(pins.shape[0], dtype=jnp.int8), pins.shape[1])
+    
+    # Mappe -1 auf len(board) (außerhalb des gültigen Bereichs)
+    # scatter ignoriert dann diese Position automatisch
+    safe_positions = jnp.where(positions >= 0, positions, len(board))
+    
+    # Setze alle auf einmal
+    board = jnp.full_like(board, -1, dtype=jnp.int8)
+    board = board.at[safe_positions].set(player_ids, mode='drop')
     return board
 
 def refill_action_set(env:deterministic_MADN) -> chex.Array:
