@@ -16,8 +16,8 @@ from MuZero.replay_buffer import ReplayBuffer
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
 from MuZero.game_agent import play_n_games_v3
 
-# TEMPERATURE_SCHEDULE = [1.25, 1.0, 1.0, 0.8, 0.5]
-TEMPERATURE_SCHEDULE = [1.0]
+TEMPERATURE_SCHEDULE = [1.0, 1.0, 0.8]
+#TEMPERATURE_SCHEDULE = [1.0]
 
 def get_temperature(iteration, total_iterations):
     """Phasenbasiert: nur 4 verschiedene Werte, garantiert gleiche Float-Instanz"""
@@ -147,7 +147,7 @@ def test_training(config, params=None, opt_state=None):
     if opt_state is None:
         opt_state = optimizer.init(params)
 
-    replay = VectorizedReplayBuffer(capacity=buffer_capacity, batch_size=config["Buffer_batch_Size"], unroll_steps=unroll_steps, max_episode_length=max_episode_length, bootstrap_value_target=config["Bootstrap_Value_Target"])
+    replay = VectorizedReplayBuffer(capacity=buffer_capacity, batch_size=config["Buffer_batch_Size"], unroll_steps=unroll_steps, obs_shape=input_shape, max_episode_length=max_episode_length, bootstrap_value_target=config["Bootstrap_Value_Target"])
     deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
     # collect initial set of games
     print("Collecting initial games...")
@@ -168,7 +168,6 @@ def test_training(config, params=None, opt_state=None):
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
         deterministic_madn_wandb_session.log({
-            "temperature": float(temp),
             "games_in_replay_buffer": replay.size
         })
         print("Training on collected data...")
@@ -200,9 +199,9 @@ def test_training(config, params=None, opt_state=None):
 
 
 config = {
-    "seed": 1012,
+    "seed": 5001,
     "learning_rate": 0.01,
-    "architecture": "MuZero Deterministic MADN with gumbel MCTS with value loss scaling x100",
+    "architecture": "MuZero Deterministic MADN with gumbel MCTS, value loss scaled x100, deeper PredNet val/pol head",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",

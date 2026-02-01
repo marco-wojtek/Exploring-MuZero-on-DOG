@@ -173,7 +173,7 @@ class PredictionNetwork2(nn.Module):
     
 repr_net = RepresentationNetwork()
 dynamics_net = DynamicsNetwork()
-pred_net = PredictionNetwork()
+pred_net = PredictionNetwork2()
 
 def root_inference_fn(params, observation):
     embedding = repr_net.apply(params['representation'], observation)

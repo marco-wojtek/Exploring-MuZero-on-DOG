@@ -586,12 +586,12 @@ params3 = None
 params4 = None
 
 # compare_agents_statistically(params1, params2, num_games=100, batch_size=10)
-
-params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it70.pkl")
+print("5001")
+params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
 # params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it70.pkl")
-# compare_agents_statistically(params1, params2, num_games=100, batch_size=10)
+compare_agents_statistically(params1, params2, num_games=150, batch_size=30)
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+#evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

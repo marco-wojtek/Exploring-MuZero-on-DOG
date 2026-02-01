@@ -14,3 +14,7 @@ if any(device.platform == 'gpu' for device in devices):
     print("JAX is using GPU.")
 else:
     print("JAX is using CPU.")
+
+print(f"JAX Backend: {jax.default_backend()}")
+print(f"JAX Devices: {jax.devices()}")
+print(f"JAX Backend: {jax.default_backend()}")
