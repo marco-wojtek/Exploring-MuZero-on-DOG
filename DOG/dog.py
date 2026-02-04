@@ -337,8 +337,8 @@ def get_winner(env: DOG, board: Board) -> chex.Array:
             lambda: jnp.full(players_done.shape, False, dtype=jnp.bool_),  # [-1, -1]
             lambda: jax.lax.cond(
                 team_0,  # Falls Team 0&2 gewonnen hat
-                lambda:jnp.array([False, True, False, True], dtype=jnp.bool_),  # [0, 2]
-                lambda: jnp.array([True, False, True, False], dtype=jnp.bool_)   # [1, 3]
+                lambda:jnp.array([True, False, True, False], dtype=jnp.bool_),  # [0, 2]
+                lambda: jnp.array([False, True, False, True], dtype=jnp.bool_)   # [1, 3]
             )
         )
     return jax.lax.cond(env.rules['enable_teams'], four_players_case, lambda: players_done)

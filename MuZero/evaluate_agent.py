@@ -340,6 +340,8 @@ def play_n_randomly(batch_size=20):
     print("Statistics:")
     print("Total win chances in %:", jnp.sum(winners,axis=0) / jnp.sum(winners) * 100)
     print("Chance to win when starting first:", jnp.sum(jnp.diag(winners)) / jnp.sum(winners) * 100)
+    progress = calculate_player_progress(envs)
+    print("Mean Final Pin distance per Player:\n", progress)
 
 def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
     '''
@@ -375,6 +377,7 @@ def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
     
     total_wins = 0
     num_batches = (num_games + batch_size - 1) // batch_size  # Aufrunden
+    pin_progress = jnp.array([0, 0, 0, 0])
     
     for batch_idx in range(num_batches):
         # Berechne Batch-Größe für letzten Batch
@@ -428,13 +431,15 @@ def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
         # Count wins at position 0 (where the agent plays)
         batch_wins = jnp.sum(winners[:, 0])
         total_wins += int(batch_wins)
+
+        pin_progress = pin_progress + calculate_player_progress(envs)
         
         if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
             current_total = (batch_idx + 1) * batch_size
             current_total = min(current_total, num_games)
             print(f"  Progress: {current_total}/{num_games} games, Wins so far: {total_wins} ({total_wins/current_total*100:.1f}%)")
     
-    return total_wins
+    return total_wins, pin_progress/num_batches
 
 @jax.jit
 def multiactor_step_with_random_agent_v2(envs, params, use_mcts, rng_key):
@@ -530,13 +535,18 @@ def compare_agents_statistically(params1, params2, num_games=1000, batch_size=10
     print(f"Testing Agent 1...")
     print(f"{'='*60}")
     i = np.random.randint(0, 1000000)
-    wins1 = test_agent_vs_random(params1, num_games, batch_size, seed=i)
+    print(f"Using random seed: {i}")
+    wins1, progress1 = test_agent_vs_random(params1, num_games, batch_size, seed=i)
+    
+    print(f"\nAgent 1 games average pin progress: {progress1}")
     
     print(f"\n{'='*60}")
     print(f"Testing Agent 2...")
     print(f"{'='*60}")
-    wins2 = test_agent_vs_random(params2, num_games, batch_size, seed=i)  # Different seed
+    wins2, progress2 = test_agent_vs_random(params2, num_games, batch_size, seed=i)  # Different seed
     
+    print(f"\nAgent 2 games average pin progress: {progress2}")
+
     winrate1 = wins1 / num_games
     winrate2 = wins2 / num_games
     
@@ -579,7 +589,7 @@ def compare_agents_statistically(params1, params2, num_games=1000, batch_size=10
 
 start_time = time()
 
-#play_n_randomly(batch_size=10000)  
+# play_n_randomly(batch_size=500)  
 params1 = None
 params2 = None
 params3 = None
@@ -587,11 +597,14 @@ params4 = None
 
 # compare_agents_statistically(params1, params2, num_games=100, batch_size=10)
 print("5001")
-params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
+params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
 # params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it70.pkl")
-compare_agents_statistically(params1, params2, num_games=150, batch_size=30)
+compare_agents_statistically(params1, params2, num_games=120, batch_size=30)
+print("5001")
+params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
+compare_agents_statistically(params1, params2, num_games=120, batch_size=30)
 
-#evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

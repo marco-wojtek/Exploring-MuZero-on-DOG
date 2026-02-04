@@ -180,15 +180,24 @@ class VectorizedReplayBuffer:
         # ✅ NEU: 7.6b - Perspektiven-Flip für Bootstrap Values
         # Extrahiere Spieler bei Bootstrap-Position
         bootstrap_players = self.players[ep_indices_expanded, bootstrap_indices]  # (batch_size, K)
+        bootstrap_teams = self.teams[ep_indices_expanded, bootstrap_indices] 
 
         
-        # Vergleiche: Ist es der gleiche Spieler wie im Sequenz-Step?
+        # Check: Gleicher Spieler ODER gleiches Team (wenn Teams aktiv)
+        is_team_mode = seq_teams != -1  # (batch_size, K)
         same_player_bootstrap = (seq_players == bootstrap_players)  # (batch_size, K)
+        same_team_bootstrap = (seq_teams == bootstrap_teams)   
+
+        same_perspective = np.where(
+            is_team_mode,
+            same_team_bootstrap,    # Team-Modus: Check Team
+            same_player_bootstrap   # Free-For-All: Check Player
+        )
 
         bootstrap_values = np.where(
-            same_player_bootstrap,
-            bootstrap_values_raw,   # Gleicher Spieler: Value behalten
-            -bootstrap_values_raw   # Anderer Spieler: Value negieren
+            same_perspective,
+            bootstrap_values_raw,   # Gleiche Perspektive: Value behalten
+            -bootstrap_values_raw   # Andere Perspektive: Value negieren
         )
         # 7.7: Berechne Target Values
         target_values = np.where(

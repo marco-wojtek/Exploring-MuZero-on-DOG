@@ -17,7 +17,7 @@ def env_reset_batched(seed):
         distance=10,
         starting_player=0,
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=False,
+        enable_teams=True,
         enable_initial_free_pin=True,
         enable_circular_board=False
     )

@@ -133,7 +133,7 @@ def test_training(config, params=None, opt_state=None):
         distance=10,
         starting_player=0,
         seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=False,
+        enable_teams=True,
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
@@ -199,9 +199,9 @@ def test_training(config, params=None, opt_state=None):
 
 
 config = {
-    "seed": 5001,
+    "seed": 6001,
     "learning_rate": 0.01,
-    "architecture": "MuZero Deterministic MADN with gumbel MCTS, value loss scaled x100, deeper PredNet val/pol head",
+    "architecture": "MuZero Deterministic MADN with gumbel MCTS, value loss scaled x100, deeper PredNet val/pol head, with Teams",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
@@ -257,8 +257,8 @@ print(f"Total training time: {int(passed_time / 3600)} hours and {int(passed_tim
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
 # save trained parameters and optimizer state
 
-with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}.pkl', 'wb') as f:
+with open(f'models/params/TEAMgumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}.pkl', 'wb') as f:
     pickle.dump(params, f)
 
-with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}.pkl', 'wb') as f:
+with open(f'models/opt_state/TEAMgumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
