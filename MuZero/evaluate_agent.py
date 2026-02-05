@@ -36,8 +36,8 @@ def manual_get_winner(board: Board, num_players, goal, rules) -> chex.Array:
             lambda: jnp.full(players_done.shape, False, dtype=jnp.bool_),  # [-1, -1]
             lambda: jax.lax.cond(
                 team_0,  # Falls Team 0&2 gewonnen hat
-                lambda:jnp.array([False, True, False, True], dtype=jnp.bool_),  # [0, 2]
-                lambda: jnp.array([True, False, True, False], dtype=jnp.bool_)   # [1, 3]
+                lambda:jnp.array([True, False, True, False], dtype=jnp.bool_),  # [0, 2]
+                lambda: jnp.array([False, True, False, True], dtype=jnp.bool_)   # [1, 3]
             )
         )
 
@@ -53,7 +53,7 @@ def env_reset_batched(seed, starting_player):
         distance=10,
         starting_player=starting_player,
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=False,
+        enable_teams=ENABLE_TEAMS,
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
@@ -87,7 +87,7 @@ def multiactor_step(envs, params_list, rng_key):
             obs_batched = obs[None, ...] 
             invalid_actions_batched = (~val_act)[None, ...]
             
-            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, temperature=0.25)
+            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, num_simulations=NUM_SIMULATIONS, max_depth=MAX_DEPTH, temperature=0.25)
             
             act = policy_output.action[0]
             action_weights = policy_output.action_weights[0]
@@ -146,11 +146,11 @@ def calculate_progress(env: deterministic_MADN, player_idx: int) -> int:
         jnp.where(
             pins < board_size,  # Auf dem Board
             (pins - distance * player_idx) % board_size - jnp.int32(travers_start_enabled),
-            pins - 4 * player_idx  # Im Ziel
+            board_size + (pins - goals[0])  # Im Ziel
         )
     )
     
-    rotated_goals = goals - 4 * player_idx 
+    rotated_goals = jnp.arange(board_size, board_size + 4)
 
     sorted_pins = jnp.sort(rotated_pins)
 
@@ -201,7 +201,8 @@ def calculate_player_progress(envs):
         
         return jax.vmap(single_player_progress)(jnp.arange(env.num_players))
     
-    return jnp.mean(jax.vmap(player_progress_single)(envs), axis=0)
+    x = jax.vmap(player_progress_single)(envs)
+    return jnp.mean(x, axis=0), x
 
 def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
     """
@@ -241,8 +242,8 @@ def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
                 winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
     
     # Get Progress Stats
-    progress = calculate_player_progress(envs)
-    return jnp.sum(winners, axis=0), progress
+    progress_mean, progress_all = calculate_player_progress(envs)
+    return jnp.sum(winners, axis=0), progress_mean
 
 def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     # use random agents if params are None
@@ -253,7 +254,7 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
         distance=10,
         starting_player=0,
         seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=False,
+        enable_teams=ENABLE_TEAMS,
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
@@ -292,7 +293,8 @@ def play_n_randomly(batch_size=20):
                [0, 0, 0, 0],
                [0, 0, 0, 0],
                [0, 0, 0, 0]])
-    
+    average_game_length = 0
+    max_game_length = 0
     for i in range(4):
         envs = batch_reset(jax.random.randint(jax.random.PRNGKey(i*54321), (batch_size,), 0, 1000000), jnp.full((batch_size,), i))
         active_mask = np.ones(batch_size, dtype=bool)
@@ -329,6 +331,9 @@ def play_n_randomly(batch_size=20):
             for j in range(batch_size):
                 if active_mask[j] and final_dones[j]:
                     active_mask[j] = False
+                    average_game_length += step_counter
+                    if step_counter > max_game_length:
+                        max_game_length = step_counter
                     winner = manual_get_winner(envs.board[j], envs.num_players, envs.goal[j], envs.rules)
                     winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
             
@@ -340,8 +345,10 @@ def play_n_randomly(batch_size=20):
     print("Statistics:")
     print("Total win chances in %:", jnp.sum(winners,axis=0) / jnp.sum(winners) * 100)
     print("Chance to win when starting first:", jnp.sum(jnp.diag(winners)) / jnp.sum(winners) * 100)
-    progress = calculate_player_progress(envs)
-    print("Mean Final Pin distance per Player:\n", progress)
+    progress_mean, progress_all = calculate_player_progress(envs)
+    print("Mean Final Pin distance per Player:\n", progress_mean)
+    print("Average game length:", average_game_length / (4 * batch_size))
+    print("Max game length:", max_game_length)
 
 def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
     '''
@@ -366,7 +373,7 @@ def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
         distance=10,
         starting_player=0,
         seed=0,
-        enable_teams=False,
+        enable_teams=ENABLE_TEAMS,
         enable_initial_free_pin=True,
         enable_circular_board=False
     )
@@ -407,7 +414,7 @@ def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
             use_mcts_flags = []
             for i in range(current_batch_size):
                 player_idx = int(current_players[i])
-                if player_idx == 0:
+                if (player_idx == 0 ) or ((player_idx == 2) and envs.rules['enable_teams']):
                     # Trained agent plays at position 0
                     params_for_envs.append(agent)
                     use_mcts_flags.append(True)
@@ -431,8 +438,10 @@ def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
         # Count wins at position 0 (where the agent plays)
         batch_wins = jnp.sum(winners[:, 0])
         total_wins += int(batch_wins)
-
-        pin_progress = pin_progress + calculate_player_progress(envs)
+        # print(winners)
+        progress_mean, progress_all = calculate_player_progress(envs)
+        # print(progress_all)
+        pin_progress = pin_progress + progress_mean
         
         if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
             current_total = (batch_idx + 1) * batch_size
@@ -458,7 +467,7 @@ def multiactor_step_with_random_agent_v2(envs, params, use_mcts, rng_key):
             obs_batched = obs[None, ...] 
             invalid_actions_batched = (~val_act)[None, ...]
             
-            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, temperature=0.0)
+            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, num_simulations=NUM_SIMULATIONS, max_depth=MAX_DEPTH, temperature=0.0)
             
             act = policy_output.action[0]
             action_weights = policy_output.action_weights[0]
@@ -588,21 +597,24 @@ def compare_agents_statistically(params1, params2, num_games=1000, batch_size=10
     return winrate1, winrate2
 
 start_time = time()
-
-# play_n_randomly(batch_size=500)  
+NUM_SIMULATIONS = 100
+MAX_DEPTH = 50
+ENABLE_TEAMS = True
+# play_n_randomly(batch_size=1000)  
 params1 = None
 params2 = None
 params3 = None
 params4 = None
 
 # compare_agents_statistically(params1, params2, num_games=100, batch_size=10)
-print("5001")
-params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
-# params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it70.pkl")
-compare_agents_statistically(params1, params2, num_games=120, batch_size=30)
-print("5001")
-params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
-compare_agents_statistically(params1, params2, num_games=120, batch_size=30)
+print("6001")
+params1 = load_params_from_file("models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed6001.pkl")
+# params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
+compare_agents_statistically(params1, params2, num_games=100, batch_size=25)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=100)
+# print("5001")
+# params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
+# compare_agents_statistically(params1, params2, num_games=120, batch_size=30)
 
 # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
