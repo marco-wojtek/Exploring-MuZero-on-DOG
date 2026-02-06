@@ -121,6 +121,7 @@ def test_training(config, params=None, opt_state=None):
     num_simulation = config["MCTS_simulations"]
     max_depth = config["MCTS_max_depth"]
     schedule = config["Temperature_Schedule"]
+    train_steps_per_iteration = config["train_steps_per_iteration"]
 
 
     print(f"JAX Devices: {jax.devices()}")
@@ -172,8 +173,7 @@ def test_training(config, params=None, opt_state=None):
         })
         print("Training on collected data...")
         train_start = time()
-        train_steps = 1500
-        for i in range(train_steps):  
+        for i in range(train_steps_per_iteration):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
             current_lr = learning_rate_schedule(global_step)
@@ -182,7 +182,7 @@ def test_training(config, params=None, opt_state=None):
                 'learning_rate': float(current_lr)
             })
             global_step += 1
-            if i % (train_steps // 3) == 0:
+            if i % (train_steps_per_iteration // 3) == 0:
                 print(f"Step {i}, Losses: {{")
                 print(f"  total_loss: {losses['total_loss']:.2f},")
                 print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/unroll_steps:.3f} per step),")
@@ -212,7 +212,8 @@ config = {
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": True,
-    "Temperature_Schedule": TEMPERATURE_SCHEDULE
+    "Temperature_Schedule": TEMPERATURE_SCHEDULE,
+    "train_steps_per_iteration": 1500
 }
 # prep weights and biases
 deterministic_madn_wandb_session = wandb.init(
