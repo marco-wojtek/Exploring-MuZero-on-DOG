@@ -75,9 +75,10 @@ class VectorizedReplayBuffer:
         # SCHRITT 2: Sample Start-Positionen
         # ========================================
         ep_lengths = self.episode_lengths[ep_indices]  # (batch_size,)
-        max_starts = np.maximum(ep_lengths - 1, 0)     # (batch_size,)
+        max_starts = np.maximum(ep_lengths - K, 0)     # (batch_size,) minimaler Startpunkt, damit K Schritte möglich sind
         
-        t_starts = (np.random.rand(self.batch_size) * max_starts).astype(np.int32)
+        # t_starts = (np.random.rand(self.batch_size) * max_starts).astype(np.int32)
+        t_starts = np.random.randint(0, max_starts + 1)
         # Shape: (batch_size,)
         
         # ========================================
@@ -170,7 +171,7 @@ class VectorizedReplayBuffer:
         steps_until_end = ep_lengths[:, None] - 1 - seq_indices  # (batch_size, K)
         
         # 7.5: Bootstrap-Condition: steps_until_end >= K
-        bootstrap_from_value = steps_until_end >= K
+        bootstrap_from_value = (steps_until_end >= K) | (z_seq == 0)  # Bootstrap mit Value wenn noch K Schritte übrig ODER unentschieden (z=0) - KORRIGIERT! (sonst bootstrapped er nur bei unentschieden, was zu wenig ist)
         
         # 7.6: Bootstrap-Indizes (idx + K, aber clipped)
         bootstrap_indices = np.minimum(seq_indices + K, ep_lengths[:, None] - 1)
