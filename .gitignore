@@ -13,3 +13,5 @@ MuZero.pdf
 wandb/
 muzero_pseudocode.txt
 performance_test.py
+ssh_login_guide.txt
+muzero_stochastic_pseudocode.txt

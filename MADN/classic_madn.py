@@ -191,9 +191,16 @@ def is_soft_locked(env: classic_MADN) -> chex.Array:
     goal_pos = env.goal[current_player]
 
     pins_not_at_home = len(pins) - jnp.count_nonzero(pins == -1) # number of pins not at home
+    # Erstelle eine Maske für die letzten N Positionen im Zielbereich
+    # goal_pos hat 4 Elemente (indices 0-3), wir wollen die letzten pins_not_at_home Elemente prüfen
+    goal_indices = jnp.arange(4)
+    relevant_goals_mask = goal_indices >= (4 - pins_not_at_home)  # Maske für die letzten N Positionen
+    
+    # Prüfe nur die relevanten goal Positionen
+    goals_occupied_by_player = board[goal_pos] == current_player
     locked_condition = jnp.where(
-        pins_not_at_home >0,
-        jnp.all(board[goal_pos[-pins_not_at_home:]] == current_player),  # check if pins in goal area are locked
+        pins_not_at_home > 0,
+        jnp.all(goals_occupied_by_player | ~relevant_goals_mask),  # alle relevanten Positionen müssen vom Spieler besetzt sein
         True
     )
     return locked_condition
@@ -465,24 +472,17 @@ def encode_board(env: classic_MADN) -> chex.Array:
     board = env.board
     distance = env.board_size // 4
     current_player = env.current_player
-    current_pins = env.pins[current_player]
     
     #rolled idx
-    rolled_idx = jnp.arange(env.current_player, env.current_player + env.num_players) % env.num_players
-    # Pin Channel (current_player only), position jedes einzelnen pins (4xboard_size) leer wenn -1
-    pin_channel = jax.nn.one_hot(
-        jnp.clip(current_pins, 0, board.shape[0]-1),  # Werte außerhalb vermeiden
-        board.shape[0],
-        dtype=jnp.int8
-    )
-    pin_channel = jnp.where(current_pins[:, None] == -1, 0, pin_channel)
+    rolled_idx = (jnp.arange(num_players) + current_player) % num_players
     # Spielerpositionen (One-hot)
     # with roll over for current player
     new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
     new_pins = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
     board = jnp.concatenate([new_board, new_pins], axis=0)
-    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)[1:]  # (4, board_size)
-
+    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
+    team_channel = jnp.sum(player_channels[::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[0:1], axis=0, keepdims=True) # (1, board_size)
+    opponent_channel = jnp.sum(player_channels[1::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[1:], axis=0, keepdims=True) # (1, board_size)
     # Spielerposition im Haus
     home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
     home_positions = home_positions[rolled_idx]  # (4, board_size)
@@ -493,7 +493,7 @@ def encode_board(env: classic_MADN) -> chex.Array:
     die_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.die  # (1, board_size)
 
     # Alles zusammenfügen
-    board_encoding = jnp.concatenate([pin_channel, player_channels, home_positions, die_channel], axis=0)  # (features, board_size)
+    board_encoding = jnp.concatenate([player_channels, team_channel, opponent_channel, home_positions, die_channel], axis=0)  # (features, board_size)
     return board_encoding
 
 def encode_board_linear(env: classic_MADN) -> chex.Array:
