@@ -424,8 +424,14 @@ def encode_board(env: deterministic_MADN) -> chex.Array:
     # current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * current_player  # (1, board_size)
 
     # Action-Häufigkeit als Kanäle
-    action_counts = env.action_set[current_player]  # shape (6,)
-    action_channels = jnp.repeat(action_counts[:, None], board.shape[0], axis=1)  # (6, board_size)
+    # action_counts = env.action_set[current_player]  # shape (6,)
+    # action_channels = jnp.repeat(action_counts[:, None], board.shape[0], axis=1)  # (6, board_size)
+
+    action_counts = env.action_set # shape (num_players, 6)
+    action_channels = action_counts[:, :, None]  # (num_players, 6, 1)
+    action_channels = jnp.repeat(action_channels, board.shape[0], axis=2)  # (num_players, 6, board_size)
+    action_channels = action_channels[rolled_idx]
+    action_channels = action_channels.reshape(-1, board.shape[0])  # (num_players*6, board_size)
 
     # Alles zusammenfügen
     board_encoding = jnp.concatenate([player_channels, team_channel, opponent_channel, home_positions, action_channels], axis=0)  # (features, board_size)

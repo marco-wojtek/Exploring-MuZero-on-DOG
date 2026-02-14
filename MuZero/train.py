@@ -16,7 +16,6 @@ from MuZero.replay_buffer import ReplayBuffer
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
 from MuZero.game_agent import play_n_games_v3
 
-TEMPERATURE_SCHEDULE = [1.0, 1.0, 0.8]
 #TEMPERATURE_SCHEDULE = [1.0]
 
 def get_temperature(iteration, total_iterations):
@@ -136,7 +135,10 @@ def test_training(config, params=None, opt_state=None):
         seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
         enable_teams=True,
         enable_initial_free_pin=True,
-        enable_circular_board=False
+        enable_circular_board=False,
+        enable_friendly_fire=True,
+        enable_start_blocking=False,
+        enable_jump_in_goal_area=False
     )
     enc = encode_board(env)  # z.B. (8, 56)
     print(enc.shape)
@@ -195,20 +197,30 @@ def test_training(config, params=None, opt_state=None):
               Training time: {end_time - train_start:.2f} seconds.
               """)
         times_per_iteration.append(end_time - start_time)
+
+        # From 120 its save at 40 and 80 to have checkpoints for each learning rate phase
+        if it % 40 == 0:
+            print(f"Saving checkpoint at iteration {it+1}...")
+            with open(f'models/params/TEAMgumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+                pickle.dump(params, f)
+
+            with open(f'models/opt_state/TEAMgumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+                pickle.dump(opt_state, f)
+
     return params, opt_state, times_per_iteration
 
-
+TEMPERATURE_SCHEDULE = [1.0, 0.9, 0.8, 0.7]
 config = {
-    "seed": 6001,
+    "seed": 9351,
     "learning_rate": 0.01,
-    "architecture": "MuZero Deterministic MADN with gumbel MCTS, value loss scaled x100, deeper PredNet val/pol head, with Teams",
+    "architecture": "MuZero Deterministic MADN with gumbel MCTS, bigger encoding",
     "num_games_per_iteration": 1500,
-    "iterations": 100,
+    "iterations": 120,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
     "Buffer_Capacity": 35000,
     "Buffer_batch_Size": 128,
     "unroll_steps": 5,
-    "max_episode_length": 500,
+    "max_episode_length": 650,
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": True,
@@ -233,10 +245,10 @@ deterministic_madn_wandb_session = wandb.init(
 learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],
     boundaries_and_scales={
-        10 * 1500: 0.1,   # Iteration 10: LR=0.001
-        25 * 1500: 0.1,   # Iteration 25: LR=0.0001
-        50 * 1500: 0.1,   # Iteration 50: LR=0.00001
-        80 * 1500: 0.1,   # Iteration 80: LR=0.000001
+        10 * config["train_steps_per_iteration"]: 0.1,   # Iteration A: LR=0.001
+        25 * config["train_steps_per_iteration"]: 0.1,   # Iteration B: LR=0.0001
+        50 * config["train_steps_per_iteration"]: 0.1,   # Iteration C: LR=0.00001
+        80 * config["train_steps_per_iteration"]: 0.1,   # Iteration D: LR=0.000001
     }
 )
 
@@ -263,3 +275,27 @@ with open(f'models/params/TEAMgumbelmuzero_madn_params_lr{config["learning_rate"
 
 with open(f'models/opt_state/TEAMgumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}.pkl', 'wb') as f:
     pickle.dump(opt_state, f)
+
+
+# params1 = None
+# params2 = None
+# params3 = None
+# params4 = None
+
+# from MuZero.evaluate_agent import compare_agents_statistically, evaluate_agent_parallel
+
+# print("Comparing trained agent against random agents and init MuZero...")
+# params2 = load_params_from_file(f"models/params/TEAMgumbelmuzero_madn_params_lr{config['learning_rate']}_g{config['num_games_per_iteration']}_it{config['iterations']}_seed{config['seed']}.pkl")
+# params4 = load_params_from_file(f"models/params/TEAMgumbelmuzero_madn_params_lr{config['learning_rate']}_g{config['num_games_per_iteration']}_it{config['iterations']}_seed{config['seed']}.pkl")
+# print("Agent 2 is trained agent")
+# print("Agent 1 is random MuZero")
+# compare_agents_statistically(params1, params2, num_games=200, batch_size=50)
+
+# print("Evaluating trained agent (P2,P4) vs init MuZero")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=100)
+
+# params1 = load_params_from_file("models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed6001.pkl")
+# params3 = load_params_from_file("models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed6001.pkl")
+
+# print("Evaluating trained agent (P2,P4) vs 6001 MuZero")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=100)

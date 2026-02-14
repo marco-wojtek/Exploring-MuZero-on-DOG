@@ -168,10 +168,12 @@ class VectorizedReplayBuffer:
         # Shape: (batch_size, K) ← WICHTIG: Nicht mehr (batch_size,)!
         
         # 7.4: Steps bis zum Ende der Episode
+        # Bootstrap wenn: (1) >= K steps verfügbar ODER (2) Spiel nicht wirklich beendet (max_steps Abbruch)
+        # z_seq == 0 bedeutet: final_reward <= 0, d.h. kein Gewinner → max_steps Abbruch oder laufend
         steps_until_end = ep_lengths[:, None] - 1 - seq_indices  # (batch_size, K)
         
         # 7.5: Bootstrap-Condition: steps_until_end >= K
-        bootstrap_from_value = (steps_until_end >= K) | (z_seq == 0)  # Bootstrap mit Value wenn noch K Schritte übrig ODER unentschieden (z=0) - KORRIGIERT! (sonst bootstrapped er nur bei unentschieden, was zu wenig ist)
+        bootstrap_from_value = (steps_until_end >= K) | (z_seq == 0)  
         
         # 7.6: Bootstrap-Indizes (idx + K, aber clipped)
         bootstrap_indices = np.minimum(seq_indices + K, ep_lengths[:, None] - 1)

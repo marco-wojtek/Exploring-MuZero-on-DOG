@@ -52,9 +52,15 @@ def env_reset_batched(seed, starting_player):
         distance=10,
         starting_player=starting_player,
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=ENABLE_TEAMS,
-        enable_initial_free_pin=True,
-        enable_circular_board=False
+        enable_teams=RULES['enable_teams'],
+        enable_initial_free_pin=RULES['enable_initial_free_pin'],
+        enable_circular_board=RULES['enable_circular_board'],
+        enable_start_blocking=RULES['enable_start_blocking'],
+        enable_jump_in_goal_area=RULES['enable_jump_in_goal_area'],
+        enable_friendly_fire=RULES['enable_friendly_fire'],
+        enable_start_on_1=RULES['enable_start_on_1'],
+        enable_bonus_turn_on_6=RULES['enable_bonus_turn_on_6'],
+        must_traverse_start=RULES['must_traverse_start'],
     )
 
 # 2. Vektorisierte Funktionen vorbereiten
@@ -246,23 +252,21 @@ def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
 
 def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     # use random agents if params are None
-    env = env_reset(
-        0,  # <- Das wird an '_' übergeben
-        num_players=4,
-        layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=10,
-        starting_player=0,
-        seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=ENABLE_TEAMS,
-        enable_initial_free_pin=True,
-        enable_circular_board=False
-    )
+    env = env_reset_batched(0, 0)  # Dummy-Reset, um die Form der Beobachtungen zu erhalten
     enc = encode_board(env)  # z.B. (8, 56)
     agents = []
     for param in [params1, params2, params3, params4]:
         if param is None:
             param = init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
-
+            param['type'] = 1
+        elif param == 'rule_based_agent':
+            param = init_muzero_params(jax.random.PRNGKey(0), enc.shape)
+            param['type'] = 2
+        elif param == 'random_agent':
+            param = init_muzero_params(jax.random.PRNGKey(0), enc.shape)
+            param['type'] = 3
+        else:               
+            param['type'] = 0
         agents.append(param)
 
     winners = jnp.array([[0, 0, 0, 0],
@@ -280,24 +284,27 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     #     winners = winners.at[i].add(winners_batch)
     #     average_progress = average_progress.at[i].set(progress)
 
-    for i in range(4):
-        winners_batch, progress = play_n_games_for_eval_jitted(
-            agents, 
-            jax.random.PRNGKey(i * 12345),
-            num_envs=batch_size,
-            starting_player=i
-        )
-        winners = winners.at[i].set(winners_batch)
-        average_progress = average_progress.at[i].set(progress)
-    # winners_batch, progress = play_n_games_for_eval_jitted(
+    # for i in range(4):
+    #     winners_batch, progress = play_n_games_for_eval_jitted(
     #         agents, 
-    #         jax.random.PRNGKey(0),
+    #         jax.random.PRNGKey(i * 12345),
     #         num_envs=batch_size,
+    #         starting_player=i
     #     )
-    # print(winners_batch.shape)
-    # print(winners_batch)
+    #     winners = winners.at[i].set(winners_batch)
+    #     average_progress = average_progress.at[i].set(progress)
+    winners_batch, progress = play_n_games_for_eval_jitted(
+            agents, 
+            jax.random.PRNGKey(np.random.randint(0, 1000000)),
+            num_envs=batch_size,
+        )
+    print(winners_batch.shape)
+    winners_split = jnp.array_split(winners_batch, 4, axis=0)
+    progress_split = jnp.array_split(progress, 4, axis=0)
+    for i in range(4):
+        winners = winners.at[i].set(jnp.sum(winners_split[i], axis=0))
+        average_progress = average_progress.at[i].set(jnp.mean(progress_split[i], axis=0))
     print("Final Results:")
-    winners = jnp.array(winners)
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
     print("Average Final Pin distance per Player and different Starters:\n", average_progress)
@@ -361,7 +368,7 @@ def play_n_randomly(batch_size=20, seed=42):
     print("Total Wins per Player and different Starters:\n", winners)
     print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
     print("Statistics:")
-    if ENABLE_TEAMS:
+    if RULES['enable_teams']:
         total_win_chance = jnp.sum(winners,axis=0)/ jnp.sum(winners) * 100
         print("Total win chances in % for Team 0&2 and Team 1&3:", ( total_win_chance[0] + total_win_chance[2], total_win_chance[1] + total_win_chance[3]))
     else:
@@ -389,17 +396,7 @@ def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
     rng_key = jax.random.PRNGKey(seed)
     
     # Initialize dummy params if None
-    env = env_reset(
-        0,
-        num_players=4,
-        layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=10,
-        starting_player=0,
-        seed=0,
-        enable_teams=ENABLE_TEAMS,
-        enable_initial_free_pin=True,
-        enable_circular_board=False
-    )
+    env = env_reset_batched(0, 0)  # Dummy-Reset, um die Form der Beobachtungen zu erhalten
     enc = encode_board(env)
     
     agent = params if params is not None else init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
@@ -511,12 +508,10 @@ def multiactor_step_with_random_agent_v2(envs, params, use_mcts, rng_key):
         
         def rule_based_step():
             '''
-            Berechnet eine policy basierend auf den gültigen Aktionen und der aktuellen Position der Pins.
-            Illegale Aktionen werden mit 0 Wahrscheinlichkeit versehen, gültige Aktionen mit 1.
-            Bonuspunkte für folgende Fälle:
-            - Aktion bringt Pin ins Ziel (+3 Punkte, damit Agent zielorientiert spielt)
-            - Aktion bringt Pin aus dem Haus (+1 Punkt, damit Agent pins befreit)
-            - Aktion schlägt einen gegnerischen Pin (+2 Punkte, damit Agent aggressiv spielt)
+            Improved rule-based agent:
+            - Prioritizes abundant actions (saves rare moves)
+            - Adaptive strategy based on game state
+            - Stochastic selection with softmax
             '''
             current_player = env.current_player
             current_goal = env.goal[current_player] # (num_pins,)
@@ -544,40 +539,63 @@ def multiactor_step_with_random_agent_v2(envs, params, use_mcts, rng_key):
                 )
             ) 
 
-            # Calculate policy scores based on the rules
+            # Calculate opponent pins
             all_pins = env.pins
-            # setze positionen der eigenen pins und des partners auf -1, damit sie nicht als Gegnerpins zählen
             opp = jnp.ones_like(all_pins).at[current_player].set(0)
             pos = jax.lax.cond(
                 env.rules['enable_teams'],
                 lambda opp: opp.at[(current_player + 2) % 4].set(0),
                 lambda opp: opp,
                 operand=opp
-            ) # pos ist (4,) Array, das mit 1 markiert, wo Gegnerpins sind, und mit 0, wo eigene oder Partnerpins sind
+            )
             opponent_pins = jnp.where(
                 pos == 1,
                 all_pins,
-                -jnp.ones_like(all_pins)  # Setze eigene Pins auf -1, damit sie nicht als Gegnerpins zählen
-            ).flatten()  # (16,) Array mit Positionen der Gegnerpins, eigene Pins sind -1
+                -jnp.ones_like(all_pins)
+            ).flatten()
 
-            policy_scores = jnp.where(
+            # Count pins in home for early-game strategy
+            pins_in_home = jnp.sum(env.pins[current_player] < 0)
+            
+            # BASE SCORE: Prefer actions that are abundant (reshape to count per action type)
+            val_act_reshaped = val_act.reshape(4, 6)  # (num_pins, 6)
+            action_counts = jnp.sum(val_act_reshaped, axis=0)  # (6,) - count how often each action is available
+            action_abundance = action_counts / jnp.maximum(jnp.sum(action_counts), 1.0)  # Normalize to 0-1
+            base_score = jnp.repeat(action_abundance, 4)  # (24,) repeated for each pin
+            
+            # BONUS 1: Moving into goal (+5.0)
+            goal_bonus = jnp.where(
                 jnp.isin(new_positions, current_goal) & (current_positions < env.board_size),
-                3,  # Bonus for moving a pin into the goal
-                jnp.where(
-                    (current_positions < 0) & (new_positions == env.start[current_player]),
-                    1,  # Bonus for moving a pin out of the house
-                    jnp.where(
-                        (new_positions != current_positions) & (jnp.isin(new_positions, opponent_pins)),
-                        2,  # Bonus for hitting an opponent's pin
-                        0
-                    )
-                )
-            ).flatten()  # (num_pins * 6,)
+                5.0,
+                0.0
+            ).flatten()
+            
+            # BONUS 2: Getting pin out of house (+3.0 early game, +1.5 late game)
+            out_of_home_weight = jnp.where(pins_in_home >= 2, 3.0, 1.5)
+            out_bonus = jnp.where(
+                (current_positions < 0) & (new_positions == env.start[current_player]),
+                out_of_home_weight,
+                0.0
+            ).flatten()
+            
+            # BONUS 3: Hitting opponent (+2.5)
+            hit_bonus = jnp.where(
+                (new_positions != current_positions) & jnp.isin(new_positions, opponent_pins),
+                2.5,
+                0.0
+            ).flatten()
+            
+            # TOTAL SCORE
+            policy_scores = base_score + goal_bonus + out_bonus + hit_bonus
 
-            max_score = jnp.max(policy_scores)
-            policy_scores = jnp.where(policy_scores == max_score, 0.0, -jnp.inf)  # Ungültige Aktionen mit sehr niedrigem Score versehen
-            # aktion auswählen (nach wahrscheinlichkeitsverteilung) und ausführen
-            action = jax.random.categorical(rng_key, policy_scores)
+            # WICHTIG: Erst mit val_act maskieren, damit nur legale Aktionen gewählt werden!
+            policy_scores = jnp.where(val_act, policy_scores, -jnp.inf)
+            
+            # Softmax with temperature for stochastic selection
+            temperature = 0.5
+            policy_logits = policy_scores / temperature
+            
+            action = jax.random.categorical(rng_key, policy_logits)
             mapped_act = map_action(action)
             next_env, reward, next_done = env_step(env, mapped_act)
             dummy_policy = jnp.zeros_like(val_act, dtype=jnp.float32)
@@ -698,20 +716,19 @@ def play_n_games_for_eval_jitted(params_list, rng_key, num_envs=20, starting_pla
     """JIT-compilierte Version wie game_agent"""
     rng_key, subkey = jax.random.split(rng_key)
     # num_total_envs = num_envs * 4  # Wir spielen 4 separate Batches für jeden Startspieler
-    seeds = jax.random.randint(subkey, (num_envs,), 0, 1000000)
-    envs = batch_reset(seeds, jnp.full((num_envs,), starting_player))
-    # envs = batch_reset(seeds, jnp.repeat(jnp.arange(4), num_envs))
-    
+    seeds = jax.random.randint(subkey, (num_envs * 4,), 0, 1000000)
+    # envs = batch_reset(seeds, jnp.full((num_envs,), starting_player))
+    envs = batch_reset(seeds, jnp.repeat(jnp.arange(4), num_envs))
     # Konvertiere params_list zu Tuple für JIT
     params_tuple = tuple(params_list)
     
     # ✅ Verwende JAX while_loop
     final_envs, winners = play_eval_loop_jitted(
-        envs, params_tuple, subkey, num_envs
+        envs, params_tuple, subkey, num_envs*4
     )
     
-    progress_mean, _ = calculate_player_progress(final_envs)
-    return winners, progress_mean
+    progress_mean, progress = calculate_player_progress(final_envs)
+    return winners, progress
 
 @functools.partial(jax.jit, static_argnames=['num_envs'])
 def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
@@ -746,19 +763,120 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                         invalid_actions=invalid_mask,
                         num_simulations=NUM_SIMULATIONS,
                         max_depth=MAX_DEPTH,
-                        temperature=0.0
+                        temperature=TEMPERATURE
                     )
                     action = policy_output.action[0]
                     next_env, reward, next_done = env_step(env, map_action(action))
                     return next_env, next_done
                 
+                def do_random():
+                    logits = jnp.where(valid_mask, 0.0, -1e9)
+                    action = jax.random.categorical(key, logits)
+                    next_env, reward, next_done = env_step(env, map_action(action))
+                    return next_env, next_done
+                
+                def do_rule_based():
+                    current_player = env.current_player
+                    current_goal = env.goal[current_player] # (num_pins,)
+                    current_positions = env.pins[current_player][:,None] # (num_pins, 1)
+                    actions = jnp.arange(6)
+                    # normal moved positions
+                    moved_positions = current_positions + actions  # (num_pins, 6)
+                    # fitted moved positions
+                    fitted_positions = moved_positions % env.board_size # (num_pins, 6)
+                    # steps into goal area
+                    x = moved_positions - env.target[current_player] - jnp.int8(env.rules['must_traverse_start']) # (num_pins, 6)
+
+                    # calc which position is correct for each pin x action
+                    new_positions = jnp.where( # shape: (num_pins, 6)
+                        (current_positions < 0) ,
+                        env.start[current_player],  # pins in home can only move to start, shape: (num_pins, 6)
+                        jnp.where(
+                            current_positions >= env.board_size,
+                            moved_positions,  # pins in goal area move normally, shape: (num_pins, 6)
+                            jnp.where(
+                                (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
+                                env.goal[current_player, x-1],
+                                fitted_positions  # pins on board move normally, shape: (num_pins, 6)
+                            )
+                        )
+                    ) 
+                    # Calculate opponent pins
+                    all_pins = env.pins
+                    opp = jnp.ones_like(all_pins).at[current_player].set(0)
+                    pos = jax.lax.cond(
+                        env.rules['enable_teams'],
+                        lambda opp: opp.at[(current_player + 2) % 4].set(0),
+                        lambda opp: opp,
+                        operand=opp
+                    )
+                    opponent_pins = jnp.where(
+                        pos == 1,
+                        all_pins,
+                        -jnp.ones_like(all_pins)
+                    ).flatten()
+
+                    # Count pins in home for early-game strategy
+                    pins_in_home = jnp.sum(env.pins[current_player] < 0)
+                    
+                    # BASE SCORE: Prefer actions that are abundant
+                    valid_mask_reshaped = valid_mask.reshape(4, 6)  # (num_pins, 6)
+                    action_counts = jnp.sum(valid_mask_reshaped, axis=0)  # (6,)
+                    action_abundance = action_counts / jnp.maximum(jnp.sum(action_counts), 1.0)
+                    base_score = jnp.repeat(action_abundance, 4)  # (24,)
+                    
+                    # BONUS 1: Moving into goal (+5.0)
+                    goal_bonus = jnp.where(
+                        jnp.isin(new_positions, current_goal) & (current_positions < env.board_size),
+                        5.0,
+                        0.0
+                    ).flatten()
+                    
+                    # BONUS 2: Getting pin out of house
+                    out_of_home_weight = jnp.where(pins_in_home >= 2, 3.0, 2.0)
+                    out_bonus = jnp.where(
+                        (current_positions < 0) & (new_positions == env.start[current_player]),
+                        out_of_home_weight,
+                        0.0
+                    ).flatten()
+                    
+                    # BONUS 3: Hitting opponent (+2.5)
+                    hit_bonus = jnp.where(
+                        (new_positions != current_positions) & jnp.isin(new_positions, opponent_pins),
+                        2.0,
+                        0.0
+                    ).flatten()
+                    
+                    # TOTAL SCORE
+                    policy_scores = base_score + goal_bonus + out_bonus + hit_bonus
+
+                    # WICHTIG: Erst mit valid_mask maskieren, damit nur legale Aktionen gewählt werden!
+                    policy_scores = jnp.where(valid_mask, policy_scores, -jnp.inf)
+                    
+                    # Softmax with temperature
+                    temperature = 0.25
+                    policy_logits = policy_scores / temperature
+                    
+                    action = jax.random.categorical(key, policy_logits)
+                    mapped_act = map_action(action)
+                    next_env, reward, next_done = env_step(env, mapped_act)
+                    return next_env, next_done
+
                 def do_no_step():
                     next_env, reward, next_done = no_step(env)
                     return next_env, next_done
                 
                 next_env, next_done = jax.lax.cond(
                     jnp.any(valid_mask),
-                    do_mcts,
+                    lambda: jax.lax.cond(
+                        params['type'] == 3,
+                        do_random,
+                        lambda: jax.lax.cond(
+                            params['type'] == 2,
+                            do_rule_based,
+                            do_mcts
+                        )
+                    ),
                     do_no_step
                 )
                 
@@ -805,37 +923,87 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
         (envs, init_winners, init_dones, 0, rng_key)
     )
     
-    return final_envs, jnp.sum(final_winners, axis=0)
+    return final_envs, final_winners
 
+
+# Rules for evaluation games - can be adjusted to test specific rule variations
+RULES = {
+    'enable_teams': True,
+    'enable_initial_free_pin': True,
+    'enable_circular_board': False,
+    'enable_friendly_fire': False,
+    'enable_start_blocking': False,
+    'enable_jump_in_goal_area': True,
+    'enable_start_on_1': True,
+    'enable_bonus_turn_on_6': True,
+    'must_traverse_start': False
+}
 
 start_time = time()
 NUM_SIMULATIONS = 100
 MAX_DEPTH = 50
-ENABLE_TEAMS = True
+TEMPERATURE = 0.25
 # # play_n_randomly(batch_size=1000)  
 params1 = None
 params2 = None
 params3 = None
 params4 = None
 
-# # compare_agents_statistically(params1, params2, num_games=120, batch_size=30)
-# print("6001")
-# params2 = load_params_from_file("models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed6001.pkl")
-# # params3 = load_params_from_file("models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed6001.pkl")
-# # params1 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
-# compare_agents_statistically(params1, params2, num_games=150, batch_size=30)
-# # print("Versus Random init Muzero")
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=3)
-# # params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
-# # params4 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
-# # print("Versus non TEAM trained Muzero")
-# # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=35)
+# print("Begin longer evaluation session...")
 
-# print("5001")
-# params2 = load_params_from_file("models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed5001.pkl")
-# compare_agents_statistically(params1, params2, num_games=150, batch_size=30)
+# print("\nEvaluating 2 random agents vs 2 rule based agents:")
 
-# # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# print("First in Teams (0&2 vs 1&3), then all separate:")
+# params1 = 'random_agent'
+# params2 = 'rule_based_agent'
+# params3 = 'random_agent'
+# params4 = 'rule_based_agent'
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=200)
+
+# RULES['enable_teams'] = False
+# print("\nEvaluating 2 random agents vs 2 rule based agents without teams:")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=200)
+# print("\nEvaluating rule-based agent vs random agent:")
+# params1 = 'rule_based_agent'
+# params2 = 'random_agent'
+# params3 = 'rule_based_agent'
+# params4 = 'random_agent'
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+print("\nEvaluating trained agent vs random agent in larger encoding:")
+print("41 Iterations - seed 9351")
+params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it41_seed9351.pkl')
+params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it41_seed9351.pkl')
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+print("81 Iterations - seed 9351")
+params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it81_seed9351.pkl')
+params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it81_seed9351.pkl')
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+print("41 Iterations - seed 9351 vs 81 Iterations - seed 9351")
+params1 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it41_seed9351.pkl')
+params3 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it41_seed9351.pkl')
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it160_seed6115.pkl')
+# params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it160_seed6115.pkl')
+
+# print("\nEvaluating 6115 vs random, rule-based, random init, other trained:")
+# print("Vs random init")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# print("Vs random agent")
+# params1 = 'random_agent'
+# params3 = 'random_agent'
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# print("Vs rule-based")
+# params1 = 'rule_based_agent'
+# params3 = 'rule_based_agent'
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# print("Vs other trained")
+# params1 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed6001.pkl')
+# params3 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed6001.pkl')
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# print("vs 6115")
+# params1 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it160_seed6115.pkl')
+# params3 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it160_seed6115.pkl')
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

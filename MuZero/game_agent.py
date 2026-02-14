@@ -11,7 +11,7 @@ from MuZero.muzero_deterministic_madn import *
 
 def env_reset_batched(seed):
     return env_reset(
-        seed,  # <- Das wird an '_' übergeben
+        0,  # <- Das wird an '_' übergeben
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=10,
@@ -19,7 +19,10 @@ def env_reset_batched(seed):
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
         enable_teams=True,
         enable_initial_free_pin=True,
-        enable_circular_board=False
+        enable_circular_board=False,
+        enable_friendly_fire=True,
+        enable_start_blocking=False,
+        enable_jump_in_goal_area=False
     )
 
 # 2. Vektorisierte Funktionen vorbereiten
