@@ -1,3 +1,73 @@
+# Comparison without Temperature (TEMP=0.0)
+
+### Zusammenfassung: Final Wins und Average Final Pin Distance
+
+**Run 1:**
+
+| Evaluation | Player 0 Wins | Player 1 Wins | Player 2 Wins | Player 3 Wins | % |
+|-----------:|--------------:|--------------:|--------------:|--------------:|----:|
+| TEAM (100) vs random agents | 102 | 498 | 102 | 498 | **83.0%** |
+| TEAM (150) vs random agents | 86 | 514 | 86 | 514 | **85.7%** |
+| TEAM (100) vs rule-based | 153 | 447 | 153 | 447 | **74.5%** |
+| TEAM (150) vs rule-based | 23 | 577 | 23 | 577 | **96.2%** |
+
+| Evaluation | Avg Pin Distance P0 | P1 | P2 | P3 |
+|-----------:|--------------------:|---:|---:|---:|
+| TEAM (100) vs random agents | 55.60 | 5.83 | 51.02 | 5.43 |
+| TEAM (150) vs random agents | 58.69 | 4.44 | 58.06 | 3.96 |
+| TEAM (100) vs rule-based | 48.58 | 9.63 | 49.26 | 9.32 |
+| TEAM (150) vs rule-based | 91.87 | 1.19 | 89.86 | 0.61 |
+
+**Run 2 (Retry):**
+
+| Evaluation | Player 0 Wins | Player 1 Wins | Player 2 Wins | Player 3 Wins | % |
+|-----------:|--------------:|--------------:|--------------:|--------------:|----:|
+| TEAM (100) vs random agents | 106 | 494 | 106 | 494 | **82.3%** |
+| TEAM (150) vs random agents | 92 | 508 | 92 | 508 | **84.7%** |
+| TEAM (100) vs rule-based | 187 | 413 | 187 | 413 | **68.8%** |
+| TEAM (150) vs rule-based | 24 | 576 | 24 | 576 | **96.0%** |
+
+| Evaluation | Avg Pin Distance P0 | P1 | P2 | P3 |
+|-----------:|--------------------:|---:|---:|---:|
+| TEAM (100) vs random agents | 55.08 | 4.39 | 53.16 | 5.31 |
+| TEAM (150) vs random agents | 55.27 | 4.02 | 57.32 | 4.04 |
+| TEAM (100) vs rule-based | 47.22 | 11.33 | 46.88 | 13.30 |
+| TEAM (150) vs rule-based | 94.60 | 0.96 | 92.22 | 0.56 |
+
+Evaluation completed in ~800 seconds per run.
+
+**Key Insight:** Iteration 150 dominates against rule-based agents (96%+ winrate) with TEMP=0.0, while Iteration 100 is more versatile across different opponent types.
+
+
+# Comparison of Long training after clipping and new value target were added with perfect information
+Alles mit leichter Temperature von 0.25
+
+### Zusammenfassung: Final Wins (gesamt) und Average Final Pin Distance (overall)
+leichte varianz möglich gegen random agents
+| Evaluation | Player 0 Wins | Player 1 Wins | Player 2 Wins | Player 3 Wins | \%
+|-----------:|--------------:|--------------:|--------------:|--------------:|----:
+| TEAM (50) vs random agents | 464 | 136 | 464 | 136 | **77.3%**
+| TEAM (100) vs random agents | 541 | 59 | 541 | 59 | **90.1%**
+| TEAM (150) vs random agents | 520 | 80 | 520 | 80 | **86.6%**
+| TEAM (50) vs random init | 435 | 165 | 435 | 165 | **72.5%**
+| TEAM (100) vs random init | 527 | 73 | 527 | 73 | **87.8%**
+| TEAM (150) vs random init | 484 | 116 | 484 | 116 | **80.6%**
+| TEAM (150) vs TEAM (100) (head-to-head) | 377 | 423 | 377 | 423 | **53.8%**
+
+| Evaluation | Avg Final Pin Distance P0 | P1 | P2 | P3 |
+|-----------:|---------------------------:|--:|--:|--:|
+| TEAM (50) vs random agents | 7.205 | 49.317 | 6.848 | 49.420 |
+| TEAM (100) vs random agents | 2.272 | 66.027 | 2.750 | 64.977 |
+| TEAM (150) vs random agents | 3.367 | 57.570 | 3.478 | 60.925 |
+| TEAM (50) vs random init | 8.540 | 42.540 | 9.332 | 40.383 |
+| TEAM (100) vs random init | 3.410 | 61.158 | 4.095 | 67.842 |
+| TEAM (150) vs random init | 6.718 | 56.365 | 5.413 | 32.345 |
+| TEAM (150) vs TEAM (100) (head-to-head) | 15.454 | 16.201 | 16.979 | 15.944 |
+
+Evaluation completed in 1280.08 seconds.
+
+Ohne Temperature TEMP=0.0
+
 ## 6115 vs 6115
 600 games
  [[118  32 118  32]

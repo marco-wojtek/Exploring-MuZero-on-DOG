@@ -9,6 +9,17 @@ sys.path.append(project_root)
 from MADN.deterministic_madn import *
 from MuZero.muzero_deterministic_madn import *
 
+RULES = {
+    'enable_teams': True,
+    'enable_initial_free_pin': True,
+    'enable_circular_board': False,
+    'enable_friendly_fire': False,
+    'enable_start_blocking': False,
+    'enable_jump_in_goal_area': True,
+    'enable_start_on_1': True,
+    'enable_bonus_turn_on_6': True,
+    'must_traverse_start': False
+}
 def env_reset_batched(seed):
     return env_reset(
         0,  # <- Das wird an '_' übergeben
@@ -17,12 +28,15 @@ def env_reset_batched(seed):
         distance=10,
         starting_player=0,
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=True,
-        enable_initial_free_pin=True,
-        enable_circular_board=False,
-        enable_friendly_fire=True,
-        enable_start_blocking=False,
-        enable_jump_in_goal_area=False
+        enable_teams=RULES['enable_teams'],
+        enable_initial_free_pin=RULES['enable_initial_free_pin'],
+        enable_circular_board=RULES['enable_circular_board'],
+        enable_friendly_fire=RULES['enable_friendly_fire'],
+        enable_start_blocking=RULES['enable_start_blocking'],
+        enable_jump_in_goal_area=RULES['enable_jump_in_goal_area'],
+        enable_start_on_1=RULES['enable_start_on_1'],
+        enable_bonus_turn_on_6=RULES['enable_bonus_turn_on_6'],
+        must_traverse_start=RULES['must_traverse_start']
     )
 
 # 2. Vektorisierte Funktionen vorbereiten

@@ -223,7 +223,7 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_sim
         qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
         gumbel_scale=temperature
     )
-    #policy_output = mctx.muzero_policy(
+    # policy_output = mctx.muzero_policy(
     #    params=params,               # Wird an recurrent_fn weitergereicht
     #    rng_key=key2,
     #    root=root_output,            # Startpunkt der Suche
@@ -237,8 +237,12 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_sim
     #     temperature=temperature
     # )
     
-    # Wir geben zusätzlich den rohen Value des Root-Knotens zurück (vom Netzwerk geschätzt)
-    return policy_output, root_output.value
+    # Der Root-Value ist der geschätzte Wert des aktuellen Zustands (für den aktuellen Spieler) nach der MCTS-Suche.
+    root_value = policy_output.search_tree.summary().value
+    # clip root_value auf [-1, 1], da unsere Value-Head-Ausgabe auch in diesem Bereich liegt
+    root_value = jnp.clip(root_value, -1.0, 1.0)
+    # root_value = root_output.value
+    return policy_output, root_value
 
 def init_muzero_params(rng_key, input_shape):
     """
