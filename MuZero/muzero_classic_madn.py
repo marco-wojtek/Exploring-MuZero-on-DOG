@@ -66,53 +66,9 @@ class RepresentationNetwork(nn.Module):
         x = (x - min_val) / (max_val - min_val + 1e-8)
         return x
 
-class DynamicsNetwork(nn.Module):
-    latent_dim: int = 256
-    num_res_blocks: int = 6
-    num_actions: int = 24 # 4 Pins * 6 Würfelaugen
-    
-    @nn.compact
-    def __call__(self, latent_state, action):
-        # 1. Action Encoding
-        # Wir wandeln die Integer-Action in einen One-Hot Vektor um
-        action_one_hot = jax.nn.one_hot(action, num_classes=self.num_actions)
-        
-        # 2. Konkatenation: State + Action
-        x = jnp.concatenate([latent_state, action_one_hot], axis=-1)
-        
-        # 3. Verarbeitung durch ResBlocks
-        x = nn.Dense(self.latent_dim)(x)
-        x = nn.LayerNorm()(x)
-        x = nn.relu(x)
-        
-        for _ in range(self.num_res_blocks):
-            x = ResBlock(self.latent_dim)(x)
-            
-        # --- HEADS (Ausgaben) ---
-        
-        # A. Next Latent State
-        next_latent = nn.Dense(self.latent_dim)(x)
-        # ✅ PAPER: Min-Max Scaling statt Sigmoid
-        # Min-Max über Batch-Dimension
-        min_val = jnp.min(next_latent, axis=0, keepdims=True)
-        max_val = jnp.max(next_latent, axis=0, keepdims=True)
-        next_latent = (next_latent - min_val) / (max_val - min_val + 1e-8)
-        
-        # B. Reward Prediction
-        # MADN Rewards sind oft sparse (0 oder 1). 
-        # Linearer Output ist flexibel, tanh ist gut wenn Rewards [-1, 1] sind.
-        reward = nn.Dense(1)(x) 
-        
-        # C. Discount Prediction (WICHTIG!)
-        # Sagt vorher, ob das Spiel weitergeht.
-        # Ausgabe sind Logits. Positive Werte = Weiter, Negative Werte = Ende.
-        discount_logits = nn.Dense(1)(x)
-        
-        return next_latent, reward, discount_logits
-
 class PredictionNetwork(nn.Module):
     latent_dim: int = 256
-    num_actions: int = 24
+    num_actions: int = 4
     num_res_blocks: int = 6
     
     @nn.compact
@@ -135,7 +91,7 @@ class PredictionNetwork(nn.Module):
 
 class PredictionNetwork2(nn.Module):
     latent_dim: int = 256
-    num_actions: int = 24
+    num_actions: int = 4
     num_res_blocks: int = 6
     num_head_layers: int = 2  # Neue Parameter für Head-Tiefe
     
@@ -166,43 +122,89 @@ class PredictionNetwork2(nn.Module):
         return policy_logits, value
 
 class StochasticDynamicsNetwork(nn.Module):
-    latent_dim: int = 64
+    latent_dim: int = 256
     num_chance_outcomes: int = 6
+    num_res_blocks: int = 4  # Weniger als deterministic (6), aber mehr Kapazität als vorher (0)
 
-    # Teil 1: Action Dynamics
+    @nn.compact
+    def __call__(self, latent_state, action, chance_outcome=None):
+        """
+        Default call für Initialisierung.
+        Ruft BEIDE Methoden auf um alle Parameter zu initialisieren.
+        """
+        # Teil 1: Action Dynamics
+        afterstate, reward, chance_logits, discount_logits = self.action_dynamics(latent_state, action)
+        
+        # Teil 2: Chance Dynamics (nur zur Initialisierung, falls chance_outcome gegeben)
+        if chance_outcome is not None:
+            next_state = self.chance_dynamics(afterstate, chance_outcome)
+            return afterstate, reward, chance_logits, discount_logits, next_state
+        
+        return afterstate, reward, chance_logits, discount_logits
+    
+    # Teil 1: Action Dynamics (Player wählt Action)
+    @nn.compact
     def action_dynamics(self, latent_state, action):
+        """
+        Verarbeitet: latent_state + action → afterstate
+        WICHTIG: Ähnliche Komplexität wie deterministisches Dynamics Network!
+        """
         action_one_hot = jax.nn.one_hot(action, num_classes=4)
         x = jnp.concatenate([latent_state, action_one_hot], axis=-1)
         
-        x = nn.Dense(128)(x)
+        # Initial projection mit LayerNorm für Stabilität
+        x = nn.Dense(self.latent_dim, name='action_dense1')(x)
+        x = nn.LayerNorm(name='action_norm1')(x)
         x = nn.relu(x)
         
-        afterstate = nn.Dense(self.latent_dim)(x)
-        reward = nn.Dense(1)(x)
-        chance_logits = nn.Dense(self.num_chance_outcomes)(x)
+        # ResBlocks für tiefere Verarbeitung
+        for i in range(self.num_res_blocks):
+            x = ResBlock(self.latent_dim)(x)
         
-        # NEU: Discount Head
-        # Wir geben Logits aus. Ein hoher Wert bedeutet "Spiel geht weiter" (Discount ~ 1),
-        # ein niedriger Wert bedeutet "Spiel vorbei" (Discount ~ 0).
-        discount_logits = nn.Dense(1)(x) 
+        # --- HEADS (Outputs) ---
+        # A. Afterstate (latenter Zustand nach Action, vor Würfel)
+        afterstate = nn.Dense(self.latent_dim, name='action_afterstate')(x)
+        # Min-Max Normalisierung wie bei deterministischem MuZero
+        min_val = jnp.min(afterstate, axis=0, keepdims=True)
+        max_val = jnp.max(afterstate, axis=0, keepdims=True)
+        afterstate = (afterstate - min_val) / (max_val - min_val + 1e-8)
+        
+        # B. Reward (sparse in MADN)
+        reward = nn.Dense(1, name='action_reward')(x)
+        
+        # C. Chance Logits (Vorhersage der Würfelverteilung)
+        chance_logits = nn.Dense(self.num_chance_outcomes, name='action_chance_logits')(x)
+        
+        # D. Discount (Spiel-Ende Prädiktion)
+        discount_logits = nn.Dense(1, name='action_discount')(x) 
         
         return afterstate, reward, chance_logits, discount_logits
 
-    # Teil 2: Was passiert, wenn eine bestimmte Zahl gewürfelt wird?
+    # Teil 2: Chance Dynamics (Würfel wird gewürfelt)
+    @nn.compact
     def chance_dynamics(self, afterstate, chance_outcome):
-        # Input: Afterstate + Welcher Würfelwert ist gefallen?
-        # chance_outcome ist ein Index (z.B. 0 für "1", 5 für "6")
+        """
+        Verarbeitet: afterstate + chance_outcome → next_state
+        Auch hier brauchen wir ausreichend Kapazität!
+        """
         chance_one_hot = jax.nn.one_hot(chance_outcome, num_classes=self.num_chance_outcomes)
-        
-        # HIER passiert die Magie: Wir füttern den Würfelwert in das Netz.
-        # Das Netz lernt: "Wenn Afterstate X ist und eine 6 gewürfelt wird, ist der neue State Y"
         x = jnp.concatenate([afterstate, chance_one_hot], axis=-1)
         
-        x = nn.Dense(128)(x)
+        # Initial projection
+        x = nn.Dense(self.latent_dim, name='chance_dense1')(x)
+        x = nn.LayerNorm(name='chance_norm1')(x)
         x = nn.relu(x)
         
-        # Output: Der nächste echte State (in dem der nächste Spieler dran ist)
-        next_latent_state = nn.Dense(self.latent_dim)(x)
+        # ResBlocks (weniger als action_dynamics, da Würfel deterministisch ist)
+        for i in range(self.num_res_blocks // 2):  # Halb so viele ResBlocks
+            x = ResBlock(self.latent_dim)(x)
+        
+        # Output: Der nächste echte State
+        next_latent_state = nn.Dense(self.latent_dim, name='chance_next_state')(x)
+        # Min-Max Normalisierung
+        min_val = jnp.min(next_latent_state, axis=0, keepdims=True)
+        max_val = jnp.max(next_latent_state, axis=0, keepdims=True)
+        next_latent_state = (next_latent_state - min_val) / (max_val - min_val + 1e-8)
         
         return next_latent_state
 
@@ -212,35 +214,47 @@ pred_net = PredictionNetwork2()
 
 def decision_recurrent_fn(params, rng_key, action, embedding):
     # Aufruf des Netzwerks
-    afterstate, reward, chance_logits, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action, method=dynamics_net.action_dynamics)
+    afterstate, reward, chance_logits, discount_logits = dynamics_net.apply(
+        params['dynamics'], embedding, action, method=dynamics_net.action_dynamics
+    )
     
-    # Umwandlung Logits -> Wahrscheinlichkeit (0 bis 1)
-    # Wenn das Netz sicher ist, dass es weitergeht, ist das nahe 1.
-    # Wenn das Netz denkt, das Spiel ist aus, ist das nahe 0.
-    discount = jax.nn.sigmoid(discount_logits)
+    # Für Stochastic MuZero brauchen wir den Value vom Afterstate
+    # Dieser wird NACH der Aktion aber VOR dem Würfeln berechnet
+    # Da wir das Netzwerk trainieren wollen, müssen wir prediction network auf afterstate anwenden
+    afterstate_policy_logits, afterstate_value = pred_net.apply(params['prediction'], afterstate)
+    afterstate_value = afterstate_value.squeeze(-1)
     
     return mctx.DecisionRecurrentFnOutput(
-        reward=reward,
-        discount=discount, # <--- Gelernt, nicht hardcoded!
-        afterstate=afterstate,
-        chance_logits=chance_logits
-    )
+        chance_logits=chance_logits,
+        afterstate_value=afterstate_value
+    ), afterstate
 
 def chance_recurrent_fn(params, rng_key, chance_outcome, afterstate):
     # chance_outcome wird von mctx basierend auf chance_logits ausgewählt (oder alle durchprobiert)
+    # chance_outcome ist 0-5 (für Würfel 1-6)
     
-    # Rufe Teil 2 des Netzwerks auf
-    next_embedding = dynamics_net.apply(params['dynamics'], afterstate, chance_outcome, method=dynamics_net.chance_dynamics)
+    # Rufe Teil 2 des Netzwerks auf: Afterstate + Würfel -> Next State
+    next_embedding = dynamics_net.apply(
+        params['dynamics'], afterstate, chance_outcome, method=dynamics_net.chance_dynamics
+    )
     
-    # Jetzt brauchen wir Policy und Value für den NEUEN State
+    # Jetzt brauchen wir Policy und Value für den NEUEN State (nach dem Würfeln)
     # Das macht das Prediction Network
     prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
+    value = value.squeeze(-1)  # (Batch, 1) -> (Batch,)
+    
+    # Reward und Discount
+    # Für Brettspiele: Reward = 0 (außer am Ende), Discount = 1 (außer am Ende)
+    # Da wir nicht wissen ob das Spiel endet, nehmen wir konstante Werte
+    reward = jnp.zeros_like(value)  # Keine Intermediate Rewards
+    discount = jnp.ones_like(value)  # Spiel geht weiter (γ=1)
     
     return mctx.ChanceRecurrentFnOutput(
-        value=value,
-        prior_logits=prior_logits,
-        embedding=next_embedding
-    )
+        action_logits=prior_logits,  # Policy logits für nächsten Spieler
+        value=value,                  # Value des neuen States
+        reward=reward,                # Reward (0 für Brettspiele)
+        discount=discount             # Discount (1 für Brettspiele)
+    ), next_embedding
 
 def root_inference_fn(params, observation):
     embedding = repr_net.apply(params['representation'], observation)
@@ -290,8 +304,19 @@ def run_stochastic_muzero_mcts(params, rng_key, observations, invalid_actions=No
         temperature=temperature
     )
     
-    # Root value aus dem Policy Output extrahieren
-    root_value = policy_output.search_tree.node_values[0]  # Root node value
+    # ✅ KORREKT laut MuZero Paper: Verwende MCTS-verfeinerten Value als Target
+    # 
+    # WARUM MCTS-Value?
+    # - MCTS macht Lookahead und findet bessere Werte als das rohe Netzwerk
+    # - Das Netzwerk soll lernen, direkt zu sehen, was MCTS durch Suche findet
+    # - Dies ist "Knowledge Distillation" vom langsamen aber genauen MCTS zum schnellen Netzwerk
+    # 
+    # WICHTIG: Hat höhere Varianz bei wenigen Simulationen!
+    # Lösung: Höhere Loss-Gewichtung für Value (50-100× statt 10×)
+    root_value = policy_output.search_tree.node_values[0]  # MCTS-verfeinerter Value
+    
+    # Alternative (stabiler aber schlechteres Signal):
+    # root_value = root_output.value  # Raw network value 
     
     return policy_output, root_value
 
@@ -324,10 +349,14 @@ def init_muzero_params(rng_key, input_shape):
     # Hier holen wir uns den latent state, um Dynamics/Prediction zu initialisieren.
     dummy_latent = repr_net.apply(params_repr, dummy_obs)
     
-    # 2. Dynamics Network
-    # Input: Latent State + Action (Integer)
-    dummy_action = jnp.array([0]) # Batch size 1, Action 0
-    params_dyn = dynamics_net.init(key_dyn, dummy_latent, dummy_action)
+    # 2. Dynamics Network (Stochastic hat 2 Methoden!)
+    # WICHTIG: Wir müssen __call__ mit chance_outcome aufrufen, 
+    # damit BEIDE Methoden initialisiert werden
+    dummy_action = jnp.array([0])  # Batch size 1, Action 0
+    dummy_chance = jnp.array([0])  # Batch size 1, Chance outcome 0
+    
+    # Initialisiere mit __call__ und chance_outcome, um beide Pfade zu durchlaufen
+    params_dyn = dynamics_net.init(key_dyn, dummy_latent, dummy_action, dummy_chance)
     
     # 3. Prediction Network
     # Input: Latent State

@@ -21,7 +21,7 @@ def env_reset_batched(seed):
         enable_teams=False,
         enable_initial_free_pin=True,
         enable_circular_board=False,
-        enable_start_on_1=True,
+        enable_start_on_1=False,
         enable_bonus_turn_on_6=True,
         enable_dice_rethrow=True  # Wichtig für unterschiedliche Würfelverteilungen!
     )
@@ -33,8 +33,8 @@ batch_encode = jax.vmap(encode_board)  # Verwende board_to_matrix für classic M
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_throw_die = jax.vmap(throw_die)
 
-@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth'])
-def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps=500):
+@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth', 'temp'])
+def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps=500, temp=1.0):
     """
     Spielt einen Batch von Spielen parallel mit Stochastic MuZero.
     
@@ -84,12 +84,12 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 def do_mcts(env):
                     # Stochastic MuZero MCTS
                     policy_output, root_value = run_stochastic_muzero_mcts(
-                        params, key2, env, num_simulations=num_simulations, max_depth=max_depth
+                        params, key2, obs, invalid_actions=invalid_mask, num_simulations=num_simulations, max_depth=max_depth, temperature=temp
                     )
                     # Action ist ein Index (0-3 für 4 Pins)
-                    action = policy_output.action
+                    action = policy_output.action[0]
                     next_env, reward, next_done = env_step(env, action)
-                    return next_env, obs[0], action, reward, root_value, policy_output.action_weights, next_done, 1, dice_value
+                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, dice_value
                 
                 def do_skip(env):
                     # Keine validen Actions → no_step
@@ -109,7 +109,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 idx = buffer['idx']
                 current_player = env_after_dice.current_player
                 team = jax.lax.cond(env_after_dice.rules['enable_teams'], lambda: jnp.int8(current_player%2), lambda: jnp.int8(-1))
-                dice_dist = dice_probabilities(next_env)  # Würfelverteilung speichern
+                dice_dist = dice_probabilities(env_after_dice)  # Würfelverteilung speichern
                 new_buffer = {
                     'obs': buffer['obs'].at[idx].set(step_obs),
                     'act': buffer['act'].at[idx].set(action),
@@ -167,7 +167,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     
     return final_buffers
 
-def play_n_games_v3(params, rng_key, input_shape, num_envs=50, num_simulation=50, max_depth=25, max_steps=500):
+def play_n_games_v3(params, rng_key, input_shape, num_envs=50, num_simulation=50, max_depth=25, max_steps=500, temp=1.0):
     """
     Spielt n Spiele mit Stochastic MuZero.
     
@@ -189,7 +189,7 @@ def play_n_games_v3(params, rng_key, input_shape, num_envs=50, num_simulation=50
     
     all_buffers = play_batch_of_games_jitted(
         envs, num_envs, input_shape, params, subkey, 
-        num_simulation, max_depth, max_steps
+        num_simulation, max_depth, max_steps, temp
     )
     return all_buffers
 

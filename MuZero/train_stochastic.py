@@ -74,8 +74,8 @@ def loss_fn_stochastic(params, batch):
             # a) Action Dynamics: latent_state + action → afterstate + reward + chance_logits
             afterstate, pred_reward, pred_chance_logits, discount_logits = dynamics_net.apply(params['dynamics'], state, action, method=dynamics_net.action_dynamics)
             
-            
-            l_chance = optax.kl_divergence(pred_chance_logits, jnp.log(true_dice_probs + 1e-8))
+            # Chance Loss mit Maske
+            l_chance = jnp.mean(mask * optax.softmax_cross_entropy(pred_chance_logits, true_dice_probs))
             
             # b) Chance Dynamics: afterstate + dice_outcome → next_latent_state
             next_latent = dynamics_net.apply(params['dynamics'], afterstate, dice_outcome, method=dynamics_net.chance_dynamics)
@@ -101,7 +101,7 @@ def loss_fn_stochastic(params, batch):
         step_loss = (
             100 * l_value +      # Value Loss dominiert (wie im Paper)
             l_policy +           # Policy Loss
-            5 * l_chance         # Chance Loss (neue Komponente für Stochastic MuZero)
+            l_chance         # Chance Loss (neue Komponente für Stochastic MuZero)
         )
         
         return (next_latent, total_loss + step_loss), (l_value, l_policy, l_chance)
@@ -110,6 +110,7 @@ def loss_fn_stochastic(params, batch):
     k_indices = jnp.arange(num_unroll_steps + 1)
     actions_padded = jnp.concatenate([batch['actions'], jnp.zeros((batch['actions'].shape[0], 1), dtype=jnp.int32)], axis=1)
     dice_padded = jnp.concatenate([batch['dice_outcomes'], jnp.zeros((batch['dice_outcomes'].shape[0], 1), dtype=jnp.int32)], axis=1)
+    dice_prop_padded = jnp.concatenate([batch['dice_probs'], jnp.zeros((batch['dice_probs'].shape[0], 1, 6))], axis=1)  # NEU: Würfelverteilung für gepaddeten Schritt
     
     scan_inputs = (
         k_indices,
@@ -118,7 +119,7 @@ def loss_fn_stochastic(params, batch):
         jnp.transpose(batch['policies'], (1, 0, 2)),
         dice_padded.T,
         batch['masks'].T,
-        jnp.transpose(batch['dice_probs'], (1, 0, 2))  # Wahrscheinlichkeitsverteilungen für Würfelergebnisse
+        jnp.transpose(dice_prop_padded, (1, 0, 2))  # Wahrscheinlichkeitsverteilungen für Würfelergebnisse
     )
     
     (final_state, total_loss), (v_losses, p_losses, c_losses) = jax.lax.scan(
@@ -158,6 +159,7 @@ def test_training(config, params=None, opt_state=None):
     max_episode_length = config["max_episode_length"]
     num_simulation = config["MCTS_simulations"]
     max_depth = config["MCTS_max_depth"]
+    train_steps_per_iteration = config["train_steps_per_iteration"]
 
     print(f"JAX Devices: {jax.devices()}")
     print(f"JAX Backend: {jax.default_backend()}")
@@ -173,7 +175,7 @@ def test_training(config, params=None, opt_state=None):
         enable_teams=False,
         enable_initial_free_pin=True,
         enable_circular_board=False,
-        enable_start_on_1=True,
+        enable_start_on_1=False,
         enable_bonus_turn_on_6=True,
         enable_dice_rethrow=True  # Wichtig für unterschiedliche Würfelverteilungen!
     )
@@ -216,11 +218,11 @@ def test_training(config, params=None, opt_state=None):
             num_envs=num_games, 
             num_simulation=num_simulation, 
             max_depth=max_depth, 
-            max_steps=max_episode_length
+            max_steps=max_episode_length,
+            temp=get_temperature(0, iterations)  # Warmup verwendet erste Temperature
         )
         replay.save_games_from_buffers(buffers)
         stochastic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
-
     # Training Loop
     times_per_iteration = []
     global_step = 0
@@ -230,6 +232,7 @@ def test_training(config, params=None, opt_state=None):
         print(f"\nIteration {it+1}/{iterations}")
         
         # Play games
+        temp = get_temperature(it, iterations)
         buffers = play_n_games_v3(
             params, 
             jax.random.PRNGKey(seed+it**3), 
@@ -237,7 +240,8 @@ def test_training(config, params=None, opt_state=None):
             num_envs=num_games, 
             num_simulation=num_simulation, 
             max_depth=max_depth, 
-            max_steps=max_episode_length
+            max_steps=max_episode_length,
+            temp=temp
         )
         
         print("Saving collected games to replay buffer...")
@@ -247,34 +251,43 @@ def test_training(config, params=None, opt_state=None):
         # Training
         print("Training on collected data...")
         train_start = time()
-        train_steps = 1500
         
-        for i in range(train_steps):  
+        for i in range(train_steps_per_iteration):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
             
             current_lr = learning_rate_schedule(global_step)
             stochastic_madn_wandb_session.log({
-                **losses,
-                'learning_rate': float(current_lr)
+               **losses,
+               'learning_rate': float(current_lr)
             })
             global_step += 1
             
-            if i % (train_steps // 3) == 0:
+            if i % (train_steps_per_iteration // 3) == 0:
                 print(f"Step {i}, Losses: {{")
                 print(f"  total_loss: {losses['total_loss']:.2f},")
                 print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/unroll_steps:.3f} per step),")
                 print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/unroll_steps:.3f} per step),")
-                print(f"  c_loss: {losses['c_loss']:.2f} ({losses['c_loss']/unroll_steps:.3f} per step)")  # NEU: Chance Loss
+                print(f"  c_loss: {losses['c_loss']:.2f} ({losses['c_loss']/unroll_steps:.3f} per step)")  
                 print(f"}}")
         
         end_time = time()
         print(f"""
-Iteration {it+1} completed in {end_time - start_time:.2f} seconds.
-Game playing time: {train_start - start_time:.2f} seconds.
-Training time: {end_time - train_start:.2f} seconds.
-              """)
+            Iteration {it+1} completed in {end_time - start_time:.2f} seconds.
+            Game playing time: {train_start - start_time:.2f} seconds.
+            Training time: {end_time - train_start:.2f} seconds.
+        """)
         times_per_iteration.append(end_time - start_time)
+
+        # Save intermediate parameters every 25 iterations
+        if (it + 1) % 25 == 0:
+            save_prefix = f'stochastic_muzero_madn_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}'
+            with open(f'models/params/{save_prefix}.pkl', 'wb') as f:
+                pickle.dump(params, f)
+            with open(f'models/opt_state/{save_prefix}_opt_state.pkl', 'wb') as f:
+                pickle.dump(opt_state, f)
+            print(f"Saved intermediate parameters to: models/params/{save_prefix}.pkl")
+            print(f"Saved intermediate optimizer state to: models/opt_state/{save_prefix}_opt_state.pkl")
     
     return params, opt_state, times_per_iteration
 
@@ -282,27 +295,28 @@ Training time: {end_time - train_start:.2f} seconds.
 # ============================================================================
 # MAIN: Konfiguration und Training starten
 # ============================================================================
-TEMPERATURE_SCHEDULE = [1.0, 1.0, 0.8]
+TEMPERATURE_SCHEDULE = [1.0, 0.9, 0.8]
 
 if __name__ == "__main__":
     config = {
-        "seed": 1012,
+        "seed": 10001,
         "learning_rate": 0.01,
         "architecture": "Stochastic MuZero Classic MADN with chance_logits",
         "num_games_per_iteration": 1500,
-        "iterations": 100,
+        "iterations": 75,
         "optimizer": "adamw with piecewise_constant_schedule",
         "Buffer_Capacity": 35000,
         "Buffer_batch_Size": 128,
         "unroll_steps": 5,
-        "max_episode_length": 500,
+        "max_episode_length": 700,
         "MCTS_simulations": 50, # less actions to evaluate (4 Pins) → less simulations needed
         "MCTS_max_depth": 25,
         "Bootstrap_Value_Target": True,
-        "Temperature_Schedule": TEMPERATURE_SCHEDULE
+        "Temperature_Schedule": TEMPERATURE_SCHEDULE,
+        "train_steps_per_iteration": 1500
     }
     
-    # Weights & Biases Setup
+    # # Weights & Biases Setup
     stochastic_madn_wandb_session = wandb.init(
         entity="marco-wojtek-tu-dortmund",
         project="stochastic-muzero-madn",
@@ -313,10 +327,10 @@ if __name__ == "__main__":
     learning_rate_schedule = optax.piecewise_constant_schedule(
         init_value=config["learning_rate"],
         boundaries_and_scales={
-            10 * 1500: 0.1,   # Iteration 10: LR * 0.1
-            25 * 1500: 0.1,   # Iteration 25: LR * 0.01
-            50 * 1500: 0.1,   # Iteration 50: LR * 0.001
-            80 * 1500: 0.1,   # Iteration 80: LR * 0.0001
+            10 * config["train_steps_per_iteration"]: 0.1,   # Iteration 10: LR * 0.1
+            25 * config["train_steps_per_iteration"]: 0.1,   # Iteration 25: LR * 0.01
+            50 * config["train_steps_per_iteration"]: 0.1,   # Iteration 50: LR * 0.001
+            80 * config["train_steps_per_iteration"]: 0.1,   # Iteration 80: LR * 0.0001
         }
     )
 

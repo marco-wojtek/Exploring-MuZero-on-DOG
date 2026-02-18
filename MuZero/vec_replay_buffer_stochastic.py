@@ -26,12 +26,12 @@ class VectorizedReplayBufferStochastic:
         self.max_episode_length = max_episode_length
         
         self.observations = np.zeros((capacity, max_episode_length, *obs_shape), dtype=np.float32)
-        self.actions = np.zeros((capacity, max_episode_length), dtype=np.int32)
+        self.actions = np.full((capacity, max_episode_length), -1, dtype=np.int32)
         self.rewards = np.zeros((capacity, max_episode_length), dtype=np.float32)
         self.root_values = np.zeros((capacity, max_episode_length), dtype=np.float32)
         self.child_visits = np.zeros((capacity, max_episode_length, action_dim), dtype=np.float32)
         self.masks = np.zeros((capacity, max_episode_length), dtype=np.float32)
-        self.dice_outcomes = np.zeros((capacity, max_episode_length), dtype=np.int32)  # NEU!
+        self.dice_outcomes = np.full((capacity, max_episode_length), -1, dtype=np.int32)
         self.dice_distributions = np.zeros((capacity, max_episode_length, 6), dtype=np.float32)  # NEU: Würfelverteilungen (6 mögliche Ergebnisse)
         self.players = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.teams = np.zeros((capacity, max_episode_length), dtype=np.int32)
@@ -199,12 +199,24 @@ class VectorizedReplayBufferStochastic:
         
         # ✅ NEU: 7.6b - Perspektiven-Flip für Bootstrap Values
         bootstrap_players = self.players[ep_indices_expanded, bootstrap_indices]  # (batch_size, K)
+        bootstrap_teams = self.teams[ep_indices_expanded, bootstrap_indices] 
+
+        
+        # Check: Gleicher Spieler ODER gleiches Team (wenn Teams aktiv)
+        is_team_mode = seq_teams != -1  # (batch_size, K)
         same_player_bootstrap = (seq_players == bootstrap_players)  # (batch_size, K)
+        same_team_bootstrap = (seq_teams == bootstrap_teams)   
+
+        same_perspective = np.where(
+            is_team_mode,
+            same_team_bootstrap,    # Team-Modus: Check Team
+            same_player_bootstrap   # Free-For-All: Check Player
+        )
 
         bootstrap_values = np.where(
-            same_player_bootstrap,
-            bootstrap_values_raw,   # Gleicher Spieler: Value behalten
-            -bootstrap_values_raw   # Anderer Spieler: Value negieren
+            same_perspective,
+            bootstrap_values_raw,   # Gleiche Perspektive: Value behalten
+            -bootstrap_values_raw   # Andere Perspektive: Value negieren
         )
         
         # 7.7: Berechne Target Values
