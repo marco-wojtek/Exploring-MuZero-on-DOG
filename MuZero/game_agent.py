@@ -10,7 +10,7 @@ from MADN.deterministic_madn import *
 from MuZero.muzero_deterministic_madn import *
 
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -46,8 +46,8 @@ batch_encode = jax.vmap(encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_map_action = jax.vmap(map_action)
 
-@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth', 'temp'])
-def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps=500, temp=1.0):
+@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'num_simulations', 'max_depth', 'max_steps', 'temp'])
+def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps, temp):
     """MCTS parallel + Early Exit + XLA optimiert
     Verwende play_batch_of_games_jitted, wenn du viele Spiele parallel simulieren möchtest, insbesondere für Training oder Datengewinnung.
     """
@@ -147,7 +147,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     
     return final_buffers
 
-def play_n_games_v3(params, rng_key, input_shape, num_envs=50, num_simulation=50, max_depth=25, max_steps=500, temp=1.0):
+def play_n_games_v3(params, rng_key, input_shape, num_envs, num_simulation, max_depth, max_steps, temp):
     """Bester Ansatz: Alles in JAX, aber mit bedingter Ausführung"""
     rng_key, subkey = jax.random.split(rng_key)
     seeds = jax.random.randint(subkey, (num_envs,), 0, 1000000)
@@ -155,24 +155,6 @@ def play_n_games_v3(params, rng_key, input_shape, num_envs=50, num_simulation=50
     
     all_buffers = play_batch_of_games_jitted(envs, num_envs, input_shape, params, subkey, num_simulation, max_depth, max_steps, temp)
     return all_buffers
-    # Episode Extraction wie in v2
-    episodes = []
-    for i in range(num_envs):
-        length = all_buffers['idx'][i]
-        
-        ep = Episode(
-            observations=all_buffers['obs'][i, :length],
-            actions=all_buffers['act'][i, :length],
-            rewards=all_buffers['rew'][i, :length],
-            root_values=all_buffers['val'][i, :length],
-            child_visits=all_buffers['pol'][i, :length],
-            mask=all_buffers['mask'][i, :length],
-            chance_outcomes=jnp.zeros(length),
-            players=all_buffers['player'][i, :length],
-            teams=all_buffers['team'][i, :length]
-        )
-        episodes.append(ep)
-    return episodes
 
 def play_n_games_v3_batched(params, rng_key, input_shape, num_envs=2048, batch_size=256, num_simulation=50, max_depth=25, max_steps=500, temp=1.0):
     """Spiele in Batches von 256"""

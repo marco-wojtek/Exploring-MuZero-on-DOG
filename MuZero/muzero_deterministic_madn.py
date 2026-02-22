@@ -203,7 +203,7 @@ def recurrent_inference_fn(params, rng_key, action, embedding):
     return recurrent_output, next_embedding
 
 @functools.partial(jax.jit, static_argnames=['num_simulations', 'max_depth', 'temperature'])
-def run_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_simulations=50, max_depth=25, temperature=1.0):
+def run_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulations, max_depth, temperature):
     key1, key2 = jax.random.split(rng_key)
 
     # 1. Root-Knoten berechnen (Inference)

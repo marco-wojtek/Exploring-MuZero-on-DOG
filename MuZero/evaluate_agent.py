@@ -928,7 +928,7 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
 
 # Rules for evaluation games - can be adjusted to test specific rule variations
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -965,36 +965,78 @@ params4 = None
 # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=200)
 # print("\nEvaluating rule-based agent vs random agent:")
 # params1 = 'rule_based_agent'
-# params2 = 'random_agent'
+# params2 = 
 # params3 = 'rule_based_agent'
 # params4 = 'random_agent'
 # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
-params1 = 'random_agent'
+print("baseline evaluation with random agents and mcts at pos 1:")
+TEMPERATURE = 0.25
+params1 = None
+params2 = 'random_agent'
 params3 = 'random_agent'
-print("\nEvaluating No TEMPERATURE:")
-
-params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed78913.pkl')
-params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed78913.pkl')
-print("\nEvaluating TEAM Gumbel MuZero MADN (100) vs random agents:")
+params4 = 'random_agent'
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+print("\n Evaluating gumbelmuzero_madn_params_lr0.01_g1500_it100_seed336525 vs Muzero init agents (Temp 0.25):")
+TEMPERATURE = 0.25
+print("\n Iteration 50:")
+params1 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it50_seed336525.pkl')
+params2 = None
+params3 = None
+params4 = None
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
-params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
-print("\nEvaluating TEAM Gumbel MuZero MADN (150) vs random agents:")
+print("\n Iteration 100:")
+params1 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed336525.pkl')
+params2 = None
+params3 = None
+params4 = None
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+print("\n Evaluating with Temperature 0.0:")
+TEMPERATURE = 0.0
+print("\n Iteration 50:")
+params1 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it50_seed336525.pkl')
+params2 = None
+params3 = None
+params4 = None
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-params1 = 'rule_based_agent'
-params3 = 'rule_based_agent'
-params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed78913.pkl')
-params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed78913.pkl')
-print("\nEvaluating TEAM Gumbel MuZero MADN (100) vs rule-based agents:")
+print("\n Iteration 100:")
+params1 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed336525.pkl')
+params2 = None
+params3 = None
+params4 = None
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
-params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
-print("\nEvaluating TEAM Gumbel MuZero MADN (150) vs rule-based agents:")
+print("\n Evaluating with both Iterations in one game at pos 1 and 3 and 1 and 2 (Temp =0.25):")
+TEMPERATURE = 0.25
+print("\n Iteration 50 at pos 1 and Iteration 100 at pos 3:")
+params1 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it50_seed336525.pkl')
+params2 = None
+params3 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed336525.pkl')
+params4 = None
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+print("\n Iteration 50 at pos 1 and Iteration 100 at pos 2:")
+params1 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it50_seed336525.pkl')
+params2 = load_params_from_file('models/params/gumbelmuzero_madn_params_lr0.01_g1500_it100_seed336525.pkl')
+params3 = None
+params4 = None
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
+# params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
+# print("\nEvaluating TEAM Gumbel MuZero MADN (150) vs random agents:")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+# params1 = 'rule_based_agent'
+# params3 = 'rule_based_agent'
+# params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed78913.pkl')
+# params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it100_seed78913.pkl')
+# print("\nEvaluating TEAM Gumbel MuZero MADN (100) vs rule-based agents:")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+# params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
+# params4 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')
+# print("\nEvaluating TEAM Gumbel MuZero MADN (150) vs rule-based agents:")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
 # print("vs 6115")
 # params1 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it160_seed6115.pkl')

@@ -1,3 +1,49 @@
+
+# Single Player eval Model 336525
+## Versus random bots
+| Agent | Temperature | Wins (out of 600) | avg pin distance |
+|------:|------------:|------------------:|-----------------:|
+| 50 it | 0.25 | 322 | 20.99 |
+| 100 it | 0.25 | 312 | 24.31 |
+| 50 it | 0.0 | 292 | 20.97 |
+| 100 it | 0.0 | 297 | 26.965 |
+
+## Iteration 50 vs 100 (Temp = 0.25)
+50 at pos 1 and 100 at pos 3
+| Agent | Wins (out of 600) | avg pin distance |
+|------:|------------------:|-----------------:|
+| 50 it| 216 | 30.59 |
+| 100 it | 243 | 31.39 |
+
+50 at pos 1 and 100 at pos 2
+| Agent | Wins (out of 600) | avg pin distance |
+|------:|------------------:|-----------------:|
+| 50 it| 246 | 29.91 |
+| 100 it | 217 | 35.42 |
+
+## Versus random init MuZero
+| Agent | Temperature | Wins (out of 600) | avg pin distance | comment |
+|------:|------------:|------------------:|-----------------:|--------:|
+| 50 it | 0.25 | 269 | 26.21 |
+| 100 it | 0.25 | 194 | 38.46 | gegenüberliegender hatte 240
+| 50 it | 0.0 | 267 | 24.73 |
+| 100 it | 0.0 | 284 | 27.51 |
+
+
+## Iteration 50 vs 100 (Temp = 0.25)
+50 at pos 1 and 100 at pos 3
+| Agent | Wins (out of 600) | avg pin distance |
+|------:|------------------:|-----------------:|
+| 50 it| 207 | 33.51 |
+| 100 it | 220 | 30.87 |
+
+50 at pos 1 and 100 at pos 2
+| Agent | Wins (out of 600) | avg pin distance |
+|------:|------------------:|-----------------:|
+| 50 it| 193 | 32.14 |
+| 100 it | 215 | 34.22 |
+
+
 # Comparison without Temperature (TEMP=0.0)
 
 ### Zusammenfassung: Final Wins und Average Final Pin Distance
@@ -37,6 +83,7 @@
 Evaluation completed in ~800 seconds per run.
 
 **Key Insight:** Iteration 150 dominates against rule-based agents (96%+ winrate) with TEMP=0.0, while Iteration 100 is more versatile across different opponent types.
+**Overall** Iteration 150 is in generall stronger, with some variation depending on the opponent
 
 
 # Comparison of Long training after clipping and new value target were added with perfect information
@@ -52,7 +99,9 @@ leichte varianz möglich gegen random agents
 | TEAM (50) vs random init | 435 | 165 | 435 | 165 | **72.5%**
 | TEAM (100) vs random init | 527 | 73 | 527 | 73 | **87.8%**
 | TEAM (150) vs random init | 484 | 116 | 484 | 116 | **80.6%**
-| TEAM (150) vs TEAM (100) (head-to-head) | 377 | 423 | 377 | 423 | **53.8%**
+| TEAM (100) vs TEAM (150) (head-to-head) Tmp = 0.5 | 375 | 425 | 375 | 425 | **--%**
+| TEAM (100) vs TEAM (150) (head-to-head) Tmp = 0.25 | 372 | 428 | 372 | 428 | **--%**
+| TEAM (100) vs TEAM (150) (head-to-head) Tmp = 0.1 | 362 | 438 | 362 | 438 | **--%**
 
 | Evaluation | Avg Final Pin Distance P0 | P1 | P2 | P3 |
 |-----------:|---------------------------:|--:|--:|--:|
@@ -62,12 +111,17 @@ leichte varianz möglich gegen random agents
 | TEAM (50) vs random init | 8.540 | 42.540 | 9.332 | 40.383 |
 | TEAM (100) vs random init | 3.410 | 61.158 | 4.095 | 67.842 |
 | TEAM (150) vs random init | 6.718 | 56.365 | 5.413 | 32.345 |
-| TEAM (150) vs TEAM (100) (head-to-head) | 15.454 | 16.201 | 16.979 | 15.944 |
+| TEAM (100) vs TEAM (150) (head-to-head) Tmp = 0.5 | 22 | 15| 21 | 17 |
+| TEAM (100) vs TEAM (150) (head-to-head) Tmp = 0.25 | 21 | 16| 23 | 17 |
+| TEAM (100) vs TEAM (150) (head-to-head) Tmp = 0.1 | 22 | 13| 21 | 15 |
 
 Evaluation completed in 1280.08 seconds.
 
 Ohne Temperature TEMP=0.0
 
+---
+---
+---
 ## 6115 vs 6115
 600 games
  [[118  32 118  32]

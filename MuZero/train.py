@@ -15,8 +15,6 @@ from MADN.deterministic_madn import env_reset, encode_board
 from MuZero.vec_replay_buffer import VectorizedReplayBuffer
 from MuZero.game_agent import play_n_games_v3
 
-#TEMPERATURE_SCHEDULE = [1.0]
-
 def get_temperature(iteration, total_iterations):
     """Phasenbasiert: nur 4 verschiedene Werte, garantiert gleiche Float-Instanz"""
     phase = int(iteration / total_iterations * len(TEMPERATURE_SCHEDULE))
@@ -44,7 +42,7 @@ def loss_fn(params, batch):
         l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
         l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
         
-        step_loss = (VALUE_SCALING * l_value + l_policy) #* (1.0 / num_unroll_steps)
+        step_loss = (VALUE_SCALING * l_value + POLICY_SCALING * l_policy) #* (1.0 / num_unroll_steps)
         
         # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
         def do_dynamics(state):
@@ -180,21 +178,18 @@ def test_training(config, params=None, opt_state=None):
         print(f"Iteration {it+1}/{iterations}")
         temp = get_temperature(it, iterations)  # Phasenbasiert: nur 4 verschiedene Werte
         buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=temp)
+        episode_lengths = buffers['idx']
+        print(f"  Episode lengths: min={episode_lengths.min()}, max={episode_lengths.max()}, mean={episode_lengths.mean():.1f}")
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
-        deterministic_madn_wandb_session.log({
-            "games_in_replay_buffer": replay.size
-        })
+        deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
         print("Training on collected data...")
         train_start = time()
         for i in range(train_steps_per_iteration):  
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
             current_lr = learning_rate_schedule(global_step)
-            deterministic_madn_wandb_session.log({
-            	  **losses,
-                'learning_rate': float(current_lr)
-            })
+            deterministic_madn_wandb_session.log({**losses, 'learning_rate': float(current_lr)})
             global_step += 1
             if i % (train_steps_per_iteration // 3) == 0:
                 print(f"Step {i}, Losses: {{")
@@ -212,17 +207,17 @@ def test_training(config, params=None, opt_state=None):
 
         if ((it+1) % 50 == 0):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'models/params/TEAMgumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'models/opt_state/TEAMgumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
 
     return params, opt_state, times_per_iteration
 
 
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -232,16 +227,17 @@ RULES = {
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
-TEMPERATURE_SCHEDULE = [1.0, 1.0, 0.9, 0.8, 0.7]
+TEMPERATURE_SCHEDULE = [2.0, 1.5, 1.0, 1.0, 0.5]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 3.0  
+POLICY_SCALING = 1.0
 config = {
-    "seed": 78913,
+    "seed": 336525,
     "learning_rate": 0.01,
     "architecture": "MuZero Deterministic MADN with gumbel MCTS",
     "num_games_per_iteration": 1500,
-    "iterations": 150,
+    "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
-    "Buffer_Capacity": 35000,
+    "Buffer_Capacity": 25000,
     "Buffer_batch_Size": 128,
     "unroll_steps": 5,
     "td_steps": 12, # 3 full rotations 
@@ -252,7 +248,7 @@ config = {
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 1500,
     "rules": RULES,
-    "Value_Scaling": VALUE_SCALING
+    "Loss scaling": {"value": VALUE_SCALING, "policy": POLICY_SCALING}
 }
 # prep weights and biases
 deterministic_madn_wandb_session = wandb.init(
@@ -266,9 +262,9 @@ learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],
     boundaries_and_scales={
         20 * config["train_steps_per_iteration"]: 0.1,   # Iteration A: LR=0.001
-        65 * config["train_steps_per_iteration"]: 0.1,   # Iteration B: LR=0.0001
-        105 * config["train_steps_per_iteration"]: 0.1,   # Iteration C: LR=0.00001
-        130 * config["train_steps_per_iteration"]: 0.1,   # Iteration D: LR=0.000001
+        50 * config["train_steps_per_iteration"]: 0.1,   # Iteration B: LR=0.0001
+        75 * config["train_steps_per_iteration"]: 0.1,   # Iteration C: LR=0.00001
+        90 * config["train_steps_per_iteration"]: 0.1,   # Iteration D: LR=0.000001
     }
 )
 
@@ -286,5 +282,7 @@ starttime = time()
 params, opt_state, times_per_iteration = test_training(config=config, params=params, opt_state=opt_state)
 endtime = time()
 passed_time = endtime - starttime
+print(f"{'='*60}\n")
 print(f"Total training time: {int(passed_time / 3600)} hours and {int(passed_time % 3600 / 60)} minutes.")
 print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
+print(f"{'='*60}\n")
