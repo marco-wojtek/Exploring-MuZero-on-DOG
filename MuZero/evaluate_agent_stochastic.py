@@ -752,7 +752,7 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                     lambda: params_tuple[2],
                     lambda: params_tuple[3],
                 ])
-                env = throw_die(env, key)
+                env = throw_die(env)
                 obs = encode_board(env)[None, ...]
                 valid_mask = valid_action(env).flatten()
                 invalid_mask = (~valid_mask)[None, :]
@@ -766,41 +766,47 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                         temperature=TEMPERATURE
                     )
                     action = policy_output.action[0]
-                    next_env, reward, next_done = env_step(env, map_action(action))
+                    next_env, reward, next_done = env_step(env, action)
                     return next_env, next_done
                 
                 def do_random():
                     logits = jnp.where(valid_mask, 0.0, -1e9)
                     action = jax.random.categorical(key, logits)
-                    next_env, reward, next_done = env_step(env, map_action(action))
+                    next_env, reward, next_done = env_step(env, action)
                     return next_env, next_done
                 
                 def do_rule_based():
+                    # Rule-based agent for classic MADN: only pin selection (4 actions)
+                    # Dice value is given in env.die
                     current_player = env.current_player
-                    current_goal = env.goal[current_player] # (num_pins,)
-                    current_positions = env.pins[current_player][:,None] # (num_pins, 1)
-                    actions = jnp.arange(6)
-                    # normal moved positions
-                    moved_positions = current_positions + actions  # (num_pins, 6)
-                    # fitted moved positions
-                    fitted_positions = moved_positions % env.board_size # (num_pins, 6)
-                    # steps into goal area
-                    x = moved_positions - env.target[current_player] - jnp.int8(env.rules['must_traverse_start']) # (num_pins, 6)
-
-                    # calc which position is correct for each pin x action
-                    new_positions = jnp.where( # shape: (num_pins, 6)
-                        (current_positions < 0) ,
-                        env.start[current_player],  # pins in home can only move to start, shape: (num_pins, 6)
+                    die_value = env.die  # scalar, e.g., 1-6
+                    num_pins = 4
+                    current_positions = env.pins[current_player]  # (4,)
+                    current_goal = env.goal[current_player]  # (4,)
+                    board_size = env.board_size
+                    target = env.target[current_player]
+                    start_pos = env.start[current_player]
+                    
+                    # Calculate new position for each pin if it moves by die_value
+                    moved_positions = current_positions + die_value  # (4,)
+                    fitted_positions = moved_positions % board_size  # (4,)
+                    x = moved_positions - target - jnp.int8(env.rules['must_traverse_start'])  # (4,)
+                    
+                    # Calculate new positions for each pin
+                    new_positions = jnp.where(
+                        current_positions < 0,
+                        start_pos,  # pin in home moves to start
                         jnp.where(
-                            current_positions >= env.board_size,
-                            moved_positions,  # pins in goal area move normally, shape: (num_pins, 6)
+                            current_positions >= board_size,
+                            moved_positions,  # pin in goal area moves normally
                             jnp.where(
-                                (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
-                                env.goal[current_player, x-1],
-                                fitted_positions  # pins on board move normally, shape: (num_pins, 6)
+                                (4 >= x) & (x > 0) & (current_positions <= target),
+                                current_goal[x-1],  # entering goal
+                                fitted_positions  # pin on board moves normally
                             )
                         )
-                    ) 
+                    )  # (4,)
+                    
                     # Calculate opponent pins
                     all_pins = env.pins
                     opp = jnp.ones_like(all_pins).at[current_player].set(0)
@@ -815,42 +821,38 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                         all_pins,
                         -jnp.ones_like(all_pins)
                     ).flatten()
-
-                    # Count pins in home for early-game strategy
-                    pins_in_home = jnp.sum(env.pins[current_player] < 0)
                     
-                    # BASE SCORE: Prefer actions that are abundant
-                    valid_mask_reshaped = valid_mask.reshape(4, 6)  # (num_pins, 6)
-                    action_counts = jnp.sum(valid_mask_reshaped, axis=0)  # (6,)
-                    action_abundance = action_counts / jnp.maximum(jnp.sum(action_counts), 1.0)
-                    base_score = jnp.repeat(action_abundance, 4)  # (24,)
+                    pins_in_home = jnp.sum(current_positions < 0)
+                    
+                    # BASE SCORE: Start with zero
+                    base_score = jnp.zeros(num_pins)  # (4,)
                     
                     # BONUS 1: Moving into goal (+5.0)
                     goal_bonus = jnp.where(
-                        jnp.isin(new_positions, current_goal) & (current_positions < env.board_size),
+                        jnp.isin(new_positions, current_goal) & (current_positions < board_size),
                         5.0,
                         0.0
-                    ).flatten()
+                    )  # (4,)
                     
                     # BONUS 2: Getting pin out of house
                     out_of_home_weight = jnp.where(pins_in_home >= 2, 3.0, 2.0)
                     out_bonus = jnp.where(
-                        (current_positions < 0) & (new_positions == env.start[current_player]),
+                        (current_positions < 0) & (new_positions == start_pos),
                         out_of_home_weight,
                         0.0
-                    ).flatten()
+                    )  # (4,)
                     
                     # BONUS 3: Hitting opponent (+2.5)
                     hit_bonus = jnp.where(
                         (new_positions != current_positions) & jnp.isin(new_positions, opponent_pins),
-                        2.0,
+                        2.5,
                         0.0
-                    ).flatten()
+                    )  # (4,)
                     
                     # TOTAL SCORE
-                    policy_scores = base_score + goal_bonus + out_bonus + hit_bonus
-
-                    # WICHTIG: Erst mit valid_mask maskieren, damit nur legale Aktionen gewählt werden!
+                    policy_scores = base_score + goal_bonus + out_bonus + hit_bonus  # (4,)
+                    
+                    # Mask illegal pins (valid_mask is (4,) for pin selection)
                     policy_scores = jnp.where(valid_mask, policy_scores, -jnp.inf)
                     
                     # Softmax with temperature
@@ -858,8 +860,7 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                     policy_logits = policy_scores / temperature
                     
                     action = jax.random.categorical(key, policy_logits)
-                    mapped_act = map_action(action)
-                    next_env, reward, next_done = env_step(env, mapped_act)
+                    next_env, reward, next_done = env_step(env, action)
                     return next_env, next_done
 
                 def do_no_step():
@@ -928,10 +929,10 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
 
 # Rules for evaluation games - can be adjusted to test specific rule variations
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
-    'enable_friendly_fire': False,
+    'enable_friendly_fire': True,
     'enable_start_blocking': False,
     'enable_jump_in_goal_area': True,
     'enable_start_on_1': True,
@@ -944,10 +945,12 @@ NUM_SIMULATIONS = 100
 MAX_DEPTH = 50
 TEMPERATURE = 0.25
 # # play_n_randomly(batch_size=1000)  
-params1 = None
-params2 = None
-params3 = None
-params4 = None
+params1 = 'random_agent'  # Rule-Based Agent
+params2 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it150_seed12010.pkl')  # Stochastic MuZero Agent
+params3 = 'random_agent'  # MCTS Agent
+params4 = 'random_agent'  # Stochastic MuZero Agent
+
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

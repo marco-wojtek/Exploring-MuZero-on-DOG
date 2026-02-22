@@ -10,6 +10,18 @@ sys.path.append(project_root)
 from MADN.classic_madn import *
 from MuZero.muzero_classic_madn import *
 
+RULES = {
+    'enable_teams': False,
+    'enable_initial_free_pin': True,
+    'enable_circular_board': False,
+    'enable_friendly_fire': False,
+    'enable_start_blocking': False,
+    'enable_jump_in_goal_area': True,
+    'enable_start_on_1': True,
+    'enable_bonus_turn_on_6': True,
+    'must_traverse_start': False,
+    'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
+}
 def env_reset_batched(seed):
     return env_reset(
         seed,  # <- Das wird an '_' übergeben
@@ -18,12 +30,16 @@ def env_reset_batched(seed):
         distance=10,
         starting_player=0,
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
-        enable_teams=False,
-        enable_initial_free_pin=True,
-        enable_circular_board=False,
-        enable_start_on_1=False,
-        enable_bonus_turn_on_6=True,
-        enable_dice_rethrow=True  # Wichtig für unterschiedliche Würfelverteilungen!
+        enable_teams=RULES['enable_teams'],
+        enable_initial_free_pin=RULES['enable_initial_free_pin'],
+        enable_circular_board=RULES['enable_circular_board'],
+        enable_friendly_fire=RULES['enable_friendly_fire'],
+        enable_start_blocking=RULES['enable_start_blocking'],
+        enable_jump_in_goal_area=RULES['enable_jump_in_goal_area'],
+        enable_start_on_1=RULES['enable_start_on_1'],
+        enable_bonus_turn_on_6=RULES['enable_bonus_turn_on_6'],
+        must_traverse_start=RULES['must_traverse_start'],
+        enable_dice_rethrow=RULES['enable_dice_rethrow']  # Wichtig für unterschiedliche Würfelverteilungen!
     )
 
 # 2. Vektorisierte Funktionen vorbereiten
@@ -34,7 +50,7 @@ batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_throw_die = jax.vmap(throw_die)
 
 @functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth', 'temp'])
-def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps=500, temp=1.0):
+def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps, temp):
     """
     Spielt einen Batch von Spielen parallel mit Stochastic MuZero.
     
@@ -167,7 +183,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     
     return final_buffers
 
-def play_n_games_v3(params, rng_key, input_shape, num_envs=50, num_simulation=50, max_depth=25, max_steps=500, temp=1.0):
+def play_n_games_v3(params, rng_key, input_shape, num_envs, num_simulation, max_depth, max_steps, temp):
     """
     Spielt n Spiele mit Stochastic MuZero.
     
@@ -179,7 +195,7 @@ def play_n_games_v3(params, rng_key, input_shape, num_envs=50, num_simulation=50
         num_simulation: Anzahl der MCTS Simulationen
         max_depth: Maximale MCTS Suchtiefe
         max_steps: Maximale Schritte pro Spiel
-        
+        temp: Temperatur für die Aktionsauswahl
     Returns:
         all_buffers: Dictionary mit allen gesammelten Daten (für Replay Buffer)
     """

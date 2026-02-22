@@ -195,8 +195,7 @@ class StochasticDynamicsNetwork(nn.Module):
         x = nn.LayerNorm(name='chance_norm1')(x)
         x = nn.relu(x)
         
-        # ResBlocks (weniger als action_dynamics, da Würfel deterministisch ist)
-        for i in range(self.num_res_blocks // 2):  # Halb so viele ResBlocks
+        for i in range(self.num_res_blocks):  
             x = ResBlock(self.latent_dim)(x)
         
         # Output: Der nächste echte State
@@ -268,7 +267,7 @@ def root_inference_fn(params, observation):
     )
 
 @functools.partial(jax.jit, static_argnames=['num_simulations', 'max_depth', 'temperature'])
-def run_stochastic_muzero_mcts(params, rng_key, observations, invalid_actions=None, num_simulations=50, max_depth=25, temperature=1.0):
+def run_stochastic_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulations, max_depth, temperature):
     """
     Führt Stochastic MuZero MCTS auf einem Environment aus.
     WICHTIG: Das Environment muss bereits gewürfelt haben (env.die gesetzt sein)!
@@ -313,8 +312,8 @@ def run_stochastic_muzero_mcts(params, rng_key, observations, invalid_actions=No
     # 
     # WICHTIG: Hat höhere Varianz bei wenigen Simulationen!
     # Lösung: Höhere Loss-Gewichtung für Value (50-100× statt 10×)
-    root_value = policy_output.search_tree.node_values[0]  # MCTS-verfeinerter Value
-    
+    root_value = policy_output.search_tree.node_values[0] # MCTS-verfeinerter Value
+    root_value = jnp.clip(root_value, -1.0, 1.0)
     # Alternative (stabiler aber schlechteres Signal):
     # root_value = root_output.value  # Raw network value 
     

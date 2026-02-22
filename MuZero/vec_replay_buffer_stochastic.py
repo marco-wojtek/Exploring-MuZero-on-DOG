@@ -16,11 +16,12 @@ class VectorizedReplayBufferStochastic:
     2. Action dimension ist 4 (Pins) statt 24 (Pins × Dice)
     3. Gibt dice_outcomes im Batch zurück
     """
-    def __init__(self, capacity: int, batch_size: int, unroll_steps: int,
+    def __init__(self, capacity: int, batch_size: int, unroll_steps: int, td_steps: int,
                  obs_shape=(14, 56), action_dim=4, max_episode_length=500, bootstrap_value_target=True):
         self.capacity = capacity
         self.batch_size = batch_size
         self.unroll_steps = unroll_steps
+        self.td_steps = td_steps
         self.obs_shape = obs_shape
         self.action_dim = action_dim  # 4 für stochastic (nur Pins)
         self.max_episode_length = max_episode_length
@@ -77,6 +78,7 @@ class VectorizedReplayBufferStochastic:
         NEU: Gibt auch dice_outcomes zurück für das Training des chance_dynamics.
         """
         K = self.unroll_steps + 1
+        TD = self.td_steps
         gamma = 1  # Paper sagt 1 für Brettspiele
         
         # ========================================
@@ -189,11 +191,11 @@ class VectorizedReplayBufferStochastic:
         # 7.4: Steps bis zum Ende der Episode
         steps_until_end = ep_lengths[:, None] - 1 - seq_indices  # (batch_size, K)
         
-        # 7.5: Bootstrap-Condition: steps_until_end >= K
-        bootstrap_from_value = (steps_until_end >= K) | (z_seq == 0)
+        # 7.5: Bootstrap-Condition: steps_until_end >= TD
+        bootstrap_from_value = (steps_until_end >= TD)
         
-        # 7.6: Bootstrap-Indizes (idx + K, aber clipped)
-        bootstrap_indices = np.minimum(seq_indices + K, ep_lengths[:, None] - 1)
+        # 7.6: Bootstrap-Indizes (idx + TD, aber clipped)
+        bootstrap_indices = np.minimum(seq_indices + TD, ep_lengths[:, None] - 1)
         bootstrap_values_raw = self.root_values[ep_indices_expanded, bootstrap_indices]
         # Shape: (batch_size, K)
         
@@ -221,10 +223,13 @@ class VectorizedReplayBufferStochastic:
         
         # 7.7: Berechne Target Values
         target_values = np.where(
-            bootstrap_from_value & self.bootstrap_value_target,
-            bootstrap_values,
-            z_seq
+            (z_seq == 0) | (bootstrap_from_value & self.bootstrap_value_target),
+            # Falls True: Bootstrap mit Value nach K Steps
+            bootstrap_values,  # = bootstrap_values (da gamma=1)
+            # Falls False: Bootstrap mit z AUS PERSPEKTIVE DIESES TIMESTEPS
+            z_seq  # ← KEIN [:, None] mehr nötig, schon (batch_size, K)!
         )
+        target_values = np.clip(target_values, -1.0, 1.0)
         # Shape: (batch_size, K)
         
         # ========================================

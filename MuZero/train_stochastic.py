@@ -99,9 +99,9 @@ def loss_fn_stochastic(params, batch):
         
         # Gewichte die einzelnen Loss-Komponenten
         step_loss = (
-            100 * l_value +      # Value Loss dominiert (wie im Paper)
-            l_policy +           # Policy Loss
-            l_chance         # Chance Loss (neue Komponente für Stochastic MuZero)
+            VALUE_SCALING * l_value +      # Value Loss dominiert (wie im Paper)
+            POLICY_SCALING * l_policy +           # Policy Loss
+            CHANCE_SCALING * l_chance         # Chance Loss (neue Komponente für Stochastic MuZero)
         )
         
         return (next_latent, total_loss + step_loss), (l_value, l_policy, l_chance)
@@ -156,6 +156,7 @@ def test_training(config, params=None, opt_state=None):
     num_games = config["num_games_per_iteration"]
     buffer_capacity = config["Buffer_Capacity"]
     unroll_steps = config["unroll_steps"]
+    td_steps = config["td_steps"]
     max_episode_length = config["max_episode_length"]
     num_simulation = config["MCTS_simulations"]
     max_depth = config["MCTS_max_depth"]
@@ -166,18 +167,22 @@ def test_training(config, params=None, opt_state=None):
 
     # Environment Setup
     env = env_reset(
-        0,
+        0,  # <- Das wird an '_' übergeben
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=10,
         starting_player=0,
-        seed=0,
-        enable_teams=False,
-        enable_initial_free_pin=True,
-        enable_circular_board=False,
-        enable_start_on_1=False,
-        enable_bonus_turn_on_6=True,
-        enable_dice_rethrow=True  # Wichtig für unterschiedliche Würfelverteilungen!
+        seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
+        enable_teams=RULES['enable_teams'],
+        enable_initial_free_pin=RULES['enable_initial_free_pin'],
+        enable_circular_board=RULES['enable_circular_board'],
+        enable_friendly_fire=RULES['enable_friendly_fire'],
+        enable_start_blocking=RULES['enable_start_blocking'],
+        enable_jump_in_goal_area=RULES['enable_jump_in_goal_area'],
+        enable_start_on_1=RULES['enable_start_on_1'],
+        enable_bonus_turn_on_6=RULES['enable_bonus_turn_on_6'],
+        must_traverse_start=RULES['must_traverse_start'],
+        enable_dice_rethrow=RULES['enable_dice_rethrow']  # Wichtig für unterschiedliche Würfelverteilungen!
     )
     
     enc = encode_board(env)
@@ -198,6 +203,7 @@ def test_training(config, params=None, opt_state=None):
         capacity=buffer_capacity, 
         batch_size=config["Buffer_batch_Size"], 
         unroll_steps=unroll_steps, 
+        td_steps=td_steps,
         obs_shape=input_shape,
         action_dim=4,  # Nur 4 Actions (Pins) für stochastic!
         max_episode_length=max_episode_length, 
@@ -243,6 +249,8 @@ def test_training(config, params=None, opt_state=None):
             max_steps=max_episode_length,
             temp=temp
         )
+        episode_lengths = buffers['idx']
+        print(f"  Episode lengths: min={episode_lengths.min()}, max={episode_lengths.max()}, mean={episode_lengths.mean():.1f}")
         
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
@@ -279,41 +287,60 @@ def test_training(config, params=None, opt_state=None):
         """)
         times_per_iteration.append(end_time - start_time)
 
-        # Save intermediate parameters every 25 iterations
-        if (it + 1) % 25 == 0:
-            save_prefix = f'stochastic_muzero_madn_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}'
-            with open(f'models/params/{save_prefix}.pkl', 'wb') as f:
+        # Save intermediate parameters every 50 iterations
+        if (it + 1) % 30 == 0:
+            print(f"Saving checkpoint at iteration {it+1}...")
+            with open(f'models/params/stochastic_muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(params, f)
-            with open(f'models/opt_state/{save_prefix}_opt_state.pkl', 'wb') as f:
+
+            with open(f'models/opt_state/stochastic_muzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
-            print(f"Saved intermediate parameters to: models/params/{save_prefix}.pkl")
-            print(f"Saved intermediate optimizer state to: models/opt_state/{save_prefix}_opt_state.pkl")
-    
     return params, opt_state, times_per_iteration
 
 
 # ============================================================================
 # MAIN: Konfiguration und Training starten
 # ============================================================================
-TEMPERATURE_SCHEDULE = [1.0, 0.9, 0.8]
-
+RULES = {
+    'enable_teams': False,
+    'enable_initial_free_pin': True,
+    'enable_circular_board': False,
+    'enable_friendly_fire': False,
+    'enable_start_blocking': False,
+    'enable_jump_in_goal_area': True,
+    'enable_start_on_1': True,
+    'enable_bonus_turn_on_6': True,
+    'must_traverse_start': False,
+    'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
+}
+TEMPERATURE_SCHEDULE = [1.0, 0.9, 0.8, 0.7]
+VALUE_SCALING = 50.0  
+POLICY_SCALING = 1.0
+CHANCE_SCALING = 1.0 # NEU: Gewicht für Chance Loss
 if __name__ == "__main__":
     config = {
-        "seed": 10001,
+        "seed": 13020,
         "learning_rate": 0.01,
-        "architecture": "Stochastic MuZero Classic MADN with chance_logits",
+        "architecture": "Stochastic MuZero Classic MADN with larger init lr, few more MCTS simulations, env before dice as target for chance loss",
         "num_games_per_iteration": 1500,
-        "iterations": 75,
+        "iterations": 90,
         "optimizer": "adamw with piecewise_constant_schedule",
-        "Buffer_Capacity": 35000,
+        "Buffer_Capacity": 25000,
         "Buffer_batch_Size": 128,
         "unroll_steps": 5,
-        "max_episode_length": 700,
+        "td_steps": 4,
+        "max_episode_length": 800,
         "MCTS_simulations": 50, # less actions to evaluate (4 Pins) → less simulations needed
         "MCTS_max_depth": 25,
         "Bootstrap_Value_Target": True,
         "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-        "train_steps_per_iteration": 1500
+        "train_steps_per_iteration": 1500,
+        "rules": RULES,
+        "Loss Scaling": {
+            "value_loss": VALUE_SCALING,
+            "policy_loss": POLICY_SCALING,
+            "chance_loss": CHANCE_SCALING
+            }
     }
     
     # # Weights & Biases Setup
@@ -327,10 +354,10 @@ if __name__ == "__main__":
     learning_rate_schedule = optax.piecewise_constant_schedule(
         init_value=config["learning_rate"],
         boundaries_and_scales={
-            10 * config["train_steps_per_iteration"]: 0.1,   # Iteration 10: LR * 0.1
-            25 * config["train_steps_per_iteration"]: 0.1,   # Iteration 25: LR * 0.01
-            50 * config["train_steps_per_iteration"]: 0.1,   # Iteration 50: LR * 0.001
-            80 * config["train_steps_per_iteration"]: 0.1,   # Iteration 80: LR * 0.0001
+            20 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.1
+            50 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.01
+            75 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.001
+            90 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.0001
         }
     )
 
@@ -362,14 +389,3 @@ if __name__ == "__main__":
     print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
     print(f"{'='*60}\n")
     
-    # Save trained parameters and optimizer state
-    save_prefix = f'stochastic_muzero_madn_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{config["iterations"]}_seed{config["seed"]}'
-    
-    with open(f'models/params/{save_prefix}.pkl', 'wb') as f:
-        pickle.dump(params, f)
-    
-    with open(f'models/opt_state/{save_prefix}_opt_state.pkl', 'wb') as f:
-        pickle.dump(opt_state, f)
-    
-    print(f"Saved parameters to: models/params/{save_prefix}.pkl")
-    print(f"Saved optimizer state to: models/opt_state/{save_prefix}_opt_state.pkl")
