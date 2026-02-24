@@ -19,7 +19,7 @@ class ResBlock(nn.Module):
         x = nn.LayerNorm()(x)
         x = nn.relu(x)
         x = nn.Dense(self.features)(x)
-        x = nn.LayerNorm()(x)
+        x = nn.LayerNorm()(x) 
         # Skip Connection: Addiere Input zum Output
         return nn.relu(residual + x)
 
@@ -187,12 +187,18 @@ def root_inference_fn(params, observation):
     )
 
 def recurrent_inference_fn(params, rng_key, action, embedding):
+    ## Vereinfachte Darstellung:
+    # Q(s, a) = reward + discount * Value(next_state)
     next_embedding, reward, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action)
     discount = jax.nn.sigmoid(discount_logits)
-    discount = discount.squeeze(-1)  # (Batch, 1) -> (Batch,)
+    # discount wird nicht gelernt also muss es auf 1 gesetzt werden
+    discount = jnp.ones_like(discount.squeeze(-1))  # (Batch, 1) -> (Batch,)
+    # discount = discount.squeeze(-1)
     prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
     # reward, value: (Batch, 1) -> (Batch,)
-    reward = reward.squeeze(-1)
+    # reward to 0 setzen, da wir in MADN nur sparse Rewards haben und das Dynamics-Netzwerk oft 0 vorhersagt.
+    reward = jnp.zeros_like(reward.squeeze(-1))  # (Batch, 1) -> (Batch,)
+    # reward = reward.squeeze(-1)
     value = value.squeeze(-1)
     recurrent_output = mctx.RecurrentFnOutput(
         reward=reward,
@@ -240,7 +246,7 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulati
     # Der Root-Value ist der geschätzte Wert des aktuellen Zustands (für den aktuellen Spieler) nach der MCTS-Suche.
     root_value = policy_output.search_tree.summary().value
     # clip root_value auf [-1, 1], da unsere Value-Head-Ausgabe auch in diesem Bereich liegt
-    root_value = jnp.clip(root_value, -1.0, 1.0)
+    # root_value = jnp.clip(root_value, -1.0, 1.0)
     # root_value = root_output.value
     return policy_output, root_value
 

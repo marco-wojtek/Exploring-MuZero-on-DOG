@@ -217,7 +217,7 @@ def test_training(config, params=None, opt_state=None):
 
 
 RULES = {
-    'enable_teams': False,
+    'enable_teams': True,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -227,13 +227,13 @@ RULES = {
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
-TEMPERATURE_SCHEDULE = [2.0, 1.5, 1.0, 1.0, 0.5]#[1.0, 0.9, 0.8, 0.7]
+TEMPERATURE_SCHEDULE = [1.25, 1.0, 0.9, 0.7]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 3.0  
 POLICY_SCALING = 1.0
 config = {
-    "seed": 336525,
+    "seed": 63955,
     "learning_rate": 0.01,
-    "architecture": "MuZero Deterministic MADN with gumbel MCTS",
+    "architecture": "MuZero Deterministic MADN with gumbel MCTS, reward prediction disabled, discount fixed to 1",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",

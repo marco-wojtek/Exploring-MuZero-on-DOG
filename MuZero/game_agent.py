@@ -10,7 +10,7 @@ from MADN.deterministic_madn import *
 from MuZero.muzero_deterministic_madn import *
 
 RULES = {
-    'enable_teams': False,
+    'enable_teams': True,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
