@@ -302,7 +302,7 @@ def test_training(config, params=None, opt_state=None):
 # MAIN: Konfiguration und Training starten
 # ============================================================================
 RULES = {
-    'enable_teams': False,
+    'enable_teams': True,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -313,22 +313,22 @@ RULES = {
     'must_traverse_start': False,
     'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
 }
-TEMPERATURE_SCHEDULE = [1.0, 0.9, 0.8, 0.7]
-VALUE_SCALING = 50.0  
+TEMPERATURE_SCHEDULE = [1.5, 1.0, 0.7, 0.5]
+VALUE_SCALING = 75.0  
 POLICY_SCALING = 1.0
 CHANCE_SCALING = 1.0 # NEU: Gewicht für Chance Loss
 if __name__ == "__main__":
     config = {
-        "seed": 13020,
+        "seed": 68741,
         "learning_rate": 0.01,
         "architecture": "Stochastic MuZero Classic MADN with larger init lr, few more MCTS simulations, env before dice as target for chance loss",
         "num_games_per_iteration": 1500,
-        "iterations": 90,
+        "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
-        "Buffer_Capacity": 25000,
+        "Buffer_Capacity": 20000,
         "Buffer_batch_Size": 128,
         "unroll_steps": 5,
-        "td_steps": 4,
+        "td_steps": 12,
         "max_episode_length": 800,
         "MCTS_simulations": 50, # less actions to evaluate (4 Pins) → less simulations needed
         "MCTS_max_depth": 25,
