@@ -8,7 +8,7 @@ from time import time
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from MADN.classic_madn import *
-from MuZero.muzero_classic_madn import *
+from MuZero_Classic_MADN.muzero_classic_madn import *
 
 RULES = {
     'enable_teams': True,
