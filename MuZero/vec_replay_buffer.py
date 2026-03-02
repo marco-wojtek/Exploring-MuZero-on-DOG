@@ -27,6 +27,7 @@ class VectorizedReplayBuffer:
         self.players = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.teams = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.episode_lengths = np.zeros(capacity, dtype=np.int32)
+        self.discounts = np.zeros((capacity, max_episode_length), dtype=np.float32)
         
         self.position = 0
         self.size = 0
@@ -53,6 +54,7 @@ class VectorizedReplayBuffer:
             self.masks[pos, :length] = np.array(all_buffers['mask'][i, :length])
             self.players[pos, :length] = np.array(all_buffers['player'][i, :length])
             self.teams[pos, :length] = np.array(all_buffers['team'][i, :length])
+            self.discounts[pos, :length] = np.array(all_buffers['discount'][i, :length])
             self.episode_lengths[pos] = length
             
             self.position = (pos + 1) % self.capacity
@@ -137,6 +139,7 @@ class VectorizedReplayBuffer:
         masks = self.masks[ep_indices_expanded, seq_indices_clipped]
         # Shape: (batch_size, K)
         
+        discount_targets = self.discounts[ep_for_actions, action_indices]
         # ========================================
         # SCHRITT 7: Berechne Target Values (Bootstrap) - KORRIGIERT!
         # ========================================
@@ -224,6 +227,7 @@ class VectorizedReplayBuffer:
         values = np.where(valid_mask, values, 0.0)
         masks = np.where(valid_mask, masks, 0.0)
         target_values = np.where(valid_mask, target_values, 0.0)
+        discount_targets = np.where(valid_mask[:, :-1], discount_targets, 0.0)
         
         # ========================================
         # SCHRITT 9: Return Batch
@@ -235,5 +239,6 @@ class VectorizedReplayBuffer:
             'policies': jnp.array(policies),           # (batch_size, K, 24)
             'values': jnp.array(values),               # (batch_size, K)
             'masks': jnp.array(masks),                 # (batch_size, K)
-            'target_values': jnp.array(target_values)  # (batch_size, K)
+            'target_values': jnp.array(target_values),  # (batch_size, K)
+            'discount_targets': jnp.array(discount_targets)  # (batch_size, K-1)
         }

@@ -32,7 +32,7 @@ def loss_fn(params, batch):
     def unroll_step(carry, inputs):
         latent_state, total_loss = carry
         # k, action, target_value, target_policy, target_reward, mask = inputs
-        k, action, target_value, target_policy, mask = inputs
+        k, action, target_value, target_policy, mask, target_discount = inputs
         
         # Prediction
         pred_policy_logits, pred_value = pred_net.apply(params['prediction'], latent_state)
@@ -46,42 +46,56 @@ def loss_fn(params, batch):
         
         # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
         def do_dynamics(state):
-            new_state, pred_reward, _ = dynamics_net.apply(params['dynamics'], state, action)
-            # pred_reward = pred_reward.squeeze(-1)
-            # l_reward = jnp.mean(mask * (target_reward - pred_reward) ** 2)
-            return new_state#, scale * l_reward
+            new_state, pred_reward, pred_discount_logits = dynamics_net.apply(
+                params['dynamics'], state, action
+            )
+            
+            # ✅ NEU: Discount Loss
+            # Target: -1 (Spielerwechsel) oder +1 (gleicher Spieler)
+            # Prediction: tanh(logits) → [-1, +1]
+            # Loss: MSE zwischen tanh(pred) und target
+            pred_discount = jnp.tanh(pred_discount_logits).squeeze(-1)
+            l_discount = jnp.mean(mask * (target_discount - pred_discount) ** 2)
+            
+            return new_state, l_discount
         
         def skip_dynamics(state):
-            return state#, 0.0
+            return state, 0.0
         
-        next_latent = jax.lax.cond(
+        next_latent, l_discount = jax.lax.cond(
             k < num_unroll_steps,
             do_dynamics,
             skip_dynamics,
             latent_state
         )
+
+        discount_loss = (1.0 / config["unroll_steps"]) * DISCOUNT_SCALING * l_discount
         
         # Gradient scaling
         next_latent = jax.lax.stop_gradient(next_latent * 0.5) + next_latent * 0.5
         
         # return (next_latent, total_loss + step_loss + reward_loss), (l_value, l_policy, reward_loss)
-        return (next_latent, total_loss + step_loss), (l_value, l_policy)
+        return (next_latent, total_loss + step_loss + discount_loss), (l_value, l_policy, discount_loss)
     
     # Prepare scan inputs
     k_indices = jnp.arange(num_unroll_steps + 1)
     actions_padded = jnp.concatenate([batch['actions'], jnp.zeros((batch['actions'].shape[0], 1), dtype=jnp.int32)], axis=1)
     #rewards_padded = jnp.concatenate([batch['rewards'], jnp.zeros((batch['rewards'].shape[0], 1))], axis=1)
+    discount_targets_padded = jnp.concatenate([
+        batch['discount_targets'],
+        jnp.zeros((batch['discount_targets'].shape[0], 1))
+    ], axis=1)
     
     scan_inputs = (
         k_indices,
         actions_padded.T,
         batch['target_values'].T,
         jnp.transpose(batch['policies'], (1, 0, 2)),
-        #rewards_padded.T,
-        batch['masks'].T
+        batch['masks'].T,
+        discount_targets_padded.T
     )
 
-    (final_state, total_loss), (v_losses, p_losses) = jax.lax.scan(
+    (final_state, total_loss), (v_losses, p_losses, d_losses) = jax.lax.scan(
         unroll_step,
         (latent_state, 0.0),
         scan_inputs
@@ -89,21 +103,21 @@ def loss_fn(params, batch):
     
     value_loss = jnp.sum(v_losses)
     policy_loss = jnp.sum(p_losses)
-    #reward_loss = jnp.sum(r_losses)
+    discount_loss = jnp.sum(d_losses)
     
-    return total_loss, (value_loss, policy_loss)#, reward_loss)
+    return total_loss, (value_loss, policy_loss, discount_loss)
 
 @jax.jit
 def train_step(params, opt_state, batch):
     """Führt einen Trainingsschritt aus."""
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     # (loss, (v_loss, p_loss, r_loss)), grads = grad_fn(params, batch)
-    (loss, (v_loss, p_loss)), grads = grad_fn(params, batch)
+    (loss, (v_loss, p_loss, d_loss)), grads = grad_fn(params, batch)
     
     updates, new_opt_state = optimizer.update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
     
-    return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss}#, 'r_loss': r_loss}
+    return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss, 'd_loss': d_loss}
 
 # --- Initialisierung (Beispiel) ---
 
@@ -196,6 +210,7 @@ def test_training(config, params=None, opt_state=None):
                 print(f"  total_loss: {losses['total_loss']:.2f},")
                 print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/unroll_steps:.3f} per step),")
                 print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/unroll_steps:.3f} per step)")
+                print(f"  d_loss: {losses['d_loss']:.2f} ({losses['d_loss']/unroll_steps:.3f} per step)")
                 print(f"}}")
         end_time = time()
         print(f"""
@@ -212,12 +227,12 @@ def test_training(config, params=None, opt_state=None):
 
         #     with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
         #         pickle.dump(opt_state, f)
-        if ((it+1) % 40 == 0):
+        if ((it+1) % 50 == 0):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'models/params/TEST6_{it+1}.pkl', 'wb') as f:
+            with open(f'models/params/Prototype{it+1}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'models/opt_state/TEST6_{it+1}.pkl', 'wb') as f:
+            with open(f'models/opt_state/Prototype{it+1}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
 
     return params, opt_state, times_per_iteration
@@ -236,14 +251,15 @@ RULES = {
 TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.6]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 3.0  
 POLICY_SCALING = 1.0
+DISCOUNT_SCALING = 0.5 
 config = {
-    "seed": 6,
+    "seed": 10,
     "learning_rate": 0.005,
-    "architecture": "Test_training with new RepresentationNetwork2, DynamicsNetwork2 and PredictionNetwork4",
+    "architecture": "Real Training with new RepresentationNetwork2, DynamicsNetwork2 and PredictionNetwork4. Learning discount factor with new head in DynamicsNetwork only from action embedding.",
     "num_games_per_iteration": 1500,
-    "iterations": 80,
+    "iterations": 200,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
-    "Buffer_Capacity": 20000,
+    "Buffer_Capacity": 25000,
     "Buffer_batch_Size": 128,
     "unroll_steps": 5,
     "td_steps": 4, 
@@ -254,7 +270,7 @@ config = {
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 2500,
     "rules": RULES,
-    "Loss scaling": {"value": VALUE_SCALING, "policy": POLICY_SCALING}
+    "Loss scaling": {"value": VALUE_SCALING, "policy": POLICY_SCALING, "discount": DISCOUNT_SCALING}
 }
 # prep weights and biases
 deterministic_madn_wandb_session = wandb.init(
@@ -265,12 +281,11 @@ deterministic_madn_wandb_session = wandb.init(
 
 # --- Setup Optimizer ---
 learning_rate_schedule = optax.piecewise_constant_schedule(
-    init_value=config["learning_rate"],
+    init_value=config["learning_rate"],  # 0.005
     boundaries_and_scales={
-        20 * config["train_steps_per_iteration"]: 0.2,   # Iteration A: LR=0.001
-        60 * config["train_steps_per_iteration"]: 0.1,   # Iteration B: LR=0.0001
-        80 * config["train_steps_per_iteration"]: 0.1,   # Iteration C: LR=0.00001
-        90 * config["train_steps_per_iteration"]: 0.1,   # Iteration D: LR=0.000001
+        50 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
+        120 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+        170 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
     }
 )
 

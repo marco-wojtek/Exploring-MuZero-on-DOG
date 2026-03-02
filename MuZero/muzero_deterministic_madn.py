@@ -294,7 +294,12 @@ class DynamicsNetwork2(nn.Module):
         
         # --- Unused Heads ---
         reward = jnp.zeros_like(latent_state[:, :1])
-        discount_logits = jnp.zeros_like(latent_state[:, :1])
+        
+        # --- Discount Head ---
+        # NUR action_embed als Input (kein latent_state!)
+        discount_logits = nn.Dense(32)(action_embed)
+        discount_logits = nn.relu(discount_logits)
+        discount_logits = nn.Dense(1)(discount_logits)
         
         return next_latent, reward, discount_logits
     
@@ -525,9 +530,11 @@ def recurrent_inference_fn(params, rng_key, action, embedding):
     ## Vereinfachte Darstellung:
     # Q(s, a) = reward + discount * Value(next_state)
     next_embedding, reward, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action)
-    discount = jax.nn.sigmoid(discount_logits)
-    # discount wird nicht gelernt also muss es auf 1 gesetzt werden
-    discount = -jnp.ones_like(discount.squeeze(-1))  # (Batch, 1) -> (Batch,) # Positive or negative 
+    # ✅ NEU: Discount aus Netzwerk-Output berechnen
+    # tanh → [-1, +1]
+    # -1 = Gegnerzug (Value negieren)
+    # +1 = eigener Zug / Teammate (Value beibehalten)
+    discount = jnp.tanh(discount_logits).squeeze(-1)  # (Batch,)
     # discount = discount.squeeze(-1)
     prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
     # reward, value: (Batch, 1) -> (Batch,)

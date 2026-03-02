@@ -7,9 +7,9 @@ from MuZero.muzero_deterministic_madn import (
     run_muzero_mcts, load_params_from_file, repr_net, pred_net, 
     dynamics_net, init_muzero_params
 )
-sys.stdout = open("simple_test_output.txt", "w")
+sys.stdout = open("simple_test_output200.txt", "w")
 input_shape = (34, 56)
-params = load_params_from_file("models/params/TEST6_80.pkl")
+params = load_params_from_file("models/params/Prototype200.pkl")
 # params = init_muzero_params(jax.random.PRNGKey(0), input_shape)
 
 env_base = env_reset(0, num_players=4, layout=jnp.array([True, True, True, True]),
@@ -21,9 +21,9 @@ env_base = env_reset(0, num_players=4, layout=jnp.array([True, True, True, True]
 # ============================================================
 pins_winning = jnp.array([
     [38, 41, 42, 40],
-    [1, 44, 12, 0],
+    [1, 44, 35, 0],
     [48, 49, 50, 51],
-    [52, 55, 54, 53],
+    [52, 55, 10, 53],
 ])
 
 pins_losing = jnp.array([
