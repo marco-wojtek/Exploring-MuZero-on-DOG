@@ -67,7 +67,10 @@ class VectorizedReplayBuffer:
         """
         K = self.unroll_steps + 1
         TD = self.td_steps
-        gamma = 1 # Paper sagt 1 für Brettspiele
+        # gamma_temporal = 0.997 → nach 300 Zügen: 0.997^300 ≈ 0.41
+        # gamma_temporal = 0.999 → nach 300 Zügen: 0.999^300 ≈ 0.74
+        # gamma_temporal = 0.995 → nach 300 Zügen: 0.995^300 ≈ 0.22
+        GAMMA = 1.0
         
         # ========================================
         # SCHRITT 1: Sample Episode-Indizes
@@ -171,7 +174,8 @@ class VectorizedReplayBuffer:
             0.0
         )
         # Shape: (batch_size, K) ← WICHTIG: Nicht mehr (batch_size,)!
-        
+
+
         # 7.4: Steps bis zum Ende der Episode
         # Bootstrap wenn: (1) >= K steps verfügbar ODER (2) Spiel nicht wirklich beendet (max_steps Abbruch)
         # z_seq == 0 bedeutet: final_reward <= 0, d.h. kein Gewinner → max_steps Abbruch oder laufend
@@ -208,10 +212,16 @@ class VectorizedReplayBuffer:
             -bootstrap_values_raw   # Andere Perspektive: Value negieren
         )
         # 7.7: Berechne Target Values
+
+        # Temporaler Discount anwenden
+        steps_to_end = np.maximum(steps_until_end, 0)
+        temporal_discount = GAMMA ** steps_to_end
+        z_seq = z_seq * temporal_discount
+
         target_values = np.where(
             (z_seq == 0) | (bootstrap_from_value & self.bootstrap_value_target),
             # Falls True: Bootstrap mit Value nach K Steps
-            bootstrap_values,  # = bootstrap_values (da gamma=1)
+            bootstrap_values * (GAMMA ** np.minimum(TD, steps_until_end)),
             # Falls False: Bootstrap mit z AUS PERSPEKTIVE DIESES TIMESTEPS
             z_seq  # ← KEIN [:, None] mehr nötig, schon (batch_size, K)!
         )

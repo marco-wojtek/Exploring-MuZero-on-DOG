@@ -292,16 +292,51 @@ class DynamicsNetwork2(nn.Module):
         max_val = jnp.max(x, axis=-1, keepdims=True)
         next_latent = (x - min_val) / (max_val - min_val + 1e-8)
         
-        # --- Unused Heads ---
-        reward = jnp.zeros_like(latent_state[:, :1])
-        
+        # --- Reward Head ---
+        # ✅ NEU: Gelernter Reward statt jnp.zeros!
+        # Braucht next_latent + action_embed
+        # Weil: "Gibt es einen Reward NACH diesem Zug in diesem State?"
+        # Terminal-Reward hängt davon ab OB der Zug das Spiel beendet
+        # → Braucht State-Info (wie nah am Ziel?) UND Action-Info (welcher Zug?)
+        # stop_gradient: Reward-Gradient fließt NUR durch den Reward Head
+        # NICHT zurück durch DynNet → next_latent bleibt ungestört
+        # (seed 12 variante: reward-gradient fließt durch next_latent → instabiler Training)
+        # reward_input = jnp.concatenate([
+        #     jax.lax.stop_gradient(next_latent),
+        #     jax.lax.stop_gradient(action_embed)
+        # ], axis=-1)
+        # reward_logits = nn.Dense(32)(reward_input)
+        # reward_logits = nn.relu(reward_logits)
+        # reward_logits = nn.Dense(1)(reward_logits)
+
+        # --- Reward Head ---
+        # NUR next_latent → DynNet muss Terminal-Information in Latent kodieren
+        # Kein action_embed nötig weil:
+        # DynNet(state, action) → next_latent
+        # next_latent NACH einem Sieg-Zug sollte "terminal" aussehen
+        # next_latent NACH einem normalen Zug sollte "normal" aussehen
+        # → Der Reward Head muss nur "terminal vs normal" unterscheiden
+        # Seed 14, neu:
+        # Eigenes Encoding: latent_state (VOR DynNet!) + action
+        # stop_gradient auf latent_state: Kein Gradient zurück durch RepNet
+        # ABER: latent_state enthält State-Info die next_latent auch hat
+        # UND: action_one_hot ist roh → eigenes Embedding für Reward
+        # reward_state_input = jax.lax.stop_gradient(latent_state)
+        # reward_action_embed = nn.Dense(32, name='reward_action_embed')(action_one_hot)
+        # reward_action_embed = nn.relu(reward_action_embed)
+        # reward_input = jnp.concatenate([reward_state_input, reward_action_embed], axis=-1)
+        # reward_logits = nn.Dense(64, name='reward_dense1')(reward_input)
+        # reward_logits = nn.relu(reward_logits)
+        # reward_logits = nn.Dense(1, name='reward_dense2')(reward_logits)
+        # # --- Unused Heads ---
+        reward_logits = jnp.zeros_like(latent_state[:, :1])
         # --- Discount Head ---
         # NUR action_embed als Input (kein latent_state!)
         discount_logits = nn.Dense(32)(action_embed)
         discount_logits = nn.relu(discount_logits)
         discount_logits = nn.Dense(1)(discount_logits)
         
-        return next_latent, reward, discount_logits
+        return next_latent, reward_logits, discount_logits
     
 class DynamicsNetwork3(nn.Module):
     latent_dim: int = 256
@@ -529,7 +564,7 @@ def root_inference_fn(params, observation):
 def recurrent_inference_fn(params, rng_key, action, embedding):
     ## Vereinfachte Darstellung:
     # Q(s, a) = reward + discount * Value(next_state)
-    next_embedding, reward, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action)
+    next_embedding, reward_logits, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action)
     # ✅ NEU: Discount aus Netzwerk-Output berechnen
     # tanh → [-1, +1]
     # -1 = Gegnerzug (Value negieren)
@@ -537,11 +572,17 @@ def recurrent_inference_fn(params, rng_key, action, embedding):
     discount = jnp.tanh(discount_logits).squeeze(-1)  # (Batch,)
     # discount = discount.squeeze(-1)
     prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
-    # reward, value: (Batch, 1) -> (Batch,)
     # reward to 0 setzen, da wir in MADN nur sparse Rewards haben und das Dynamics-Netzwerk oft 0 vorhersagt.
-    reward = jnp.zeros_like(reward.squeeze(-1))  # (Batch, 1) -> (Batch,)
-    # reward = reward.squeeze(-1)
+    # ✅ NEU: Gelernter Reward statt hardcoded 0!
+    # tanh → [-1, +1]
+    # Normal: ≈ 0 (kein Reward)
+    # Terminal Win: ≈ +1
+    # Terminal Lose: ≈ -1
+    # reward = jnp.tanh(reward_logits).squeeze(-1)
+    reward = jnp.zeros_like(reward_logits.squeeze(-1))
+
     value = value.squeeze(-1)
+
     recurrent_output = mctx.RecurrentFnOutput(
         reward=reward,
         discount=discount,

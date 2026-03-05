@@ -40,7 +40,18 @@ def loss_fn(params, batch):
         
         # Losses
         l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
-        l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
+        # l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
+        # Policy Loss (Cross-Entropy)
+        l_policy = -jnp.sum(target_policy * jax.nn.log_softmax(pred_policy_logits), axis=-1)
+        l_policy = jnp.mean(mask * l_policy)
+        
+        # ✅ Entropy Regularisierung: Policy soll nicht zu spitz werden
+        pred_probs = jax.nn.softmax(pred_policy_logits, axis=-1)
+        entropy = -jnp.sum(pred_probs * jnp.log(pred_probs + 1e-8), axis=-1)
+        entropy_loss = -jnp.mean(mask * entropy)  # Negativ: Maximiere Entropy
+        
+        ENTROPY_SCALING = 0.01  # Klein genug um Policy nicht zu zerstören
+        l_policy = l_policy + ENTROPY_SCALING * entropy_loss
         
         step_loss = (1.0 / config["unroll_steps"]) * (VALUE_SCALING * l_value + POLICY_SCALING * l_policy) #* (1.0 / num_unroll_steps)
         
@@ -117,7 +128,12 @@ def train_step(params, opt_state, batch):
     updates, new_opt_state = optimizer.update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
     
-    return new_params, new_opt_state, {'total_loss': loss, 'v_loss': v_loss, 'p_loss': p_loss, 'd_loss': d_loss}
+    return new_params, new_opt_state, {
+        'total_loss': loss, 
+        'v_loss': v_loss, 
+        'p_loss': p_loss, 
+        'd_loss': d_loss
+    }
 
 # --- Initialisierung (Beispiel) ---
 
@@ -205,7 +221,7 @@ def test_training(config, params=None, opt_state=None):
             current_lr = learning_rate_schedule(global_step)
             deterministic_madn_wandb_session.log({**losses, 'learning_rate': float(current_lr)})
             global_step += 1
-            if i % (train_steps_per_iteration // 3) == 0:
+            if i % (train_steps_per_iteration // 4) == 0:
                 print(f"Step {i}, Losses: {{")
                 print(f"  total_loss: {losses['total_loss']:.2f},")
                 print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/unroll_steps:.3f} per step),")
@@ -229,10 +245,10 @@ def test_training(config, params=None, opt_state=None):
         #         pickle.dump(opt_state, f)
         if ((it+1) % 50 == 0):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'models/params/Prototype{it+1}.pkl', 'wb') as f:
+            with open(f'models/params/EntropyModel{it+1}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'models/opt_state/Prototype{it+1}.pkl', 'wb') as f:
+            with open(f'models/opt_state/EntropyModel{it+1}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
 
     return params, opt_state, times_per_iteration
@@ -248,20 +264,20 @@ RULES = {
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
-TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.6]#[1.0, 0.9, 0.8, 0.7]
-VALUE_SCALING = 3.0  
+TEMPERATURE_SCHEDULE = [2.0, 1.5, 1.25, 1.0, 1.0]#[1.0, 0.9, 0.8, 0.7]
+VALUE_SCALING = 4.0  
 POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 0.5 
 config = {
-    "seed": 10,
+    "seed": 21,
     "learning_rate": 0.005,
-    "architecture": "Real Training with new RepresentationNetwork2, DynamicsNetwork2 and PredictionNetwork4. Learning discount factor with new head in DynamicsNetwork only from action embedding.",
+    "architecture": "RepNet2, DynNet2, PredNet4.  Double unroll_steps, add entropy to policy loss, GAMMA=1.0",
     "num_games_per_iteration": 1500,
-    "iterations": 200,
+    "iterations": 150,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
-    "Buffer_Capacity": 25000,
+    "Buffer_Capacity": 20000,
     "Buffer_batch_Size": 128,
-    "unroll_steps": 5,
+    "unroll_steps": 10,
     "td_steps": 4, 
     "max_episode_length": 700,
     "MCTS_simulations": 100,
@@ -280,12 +296,13 @@ deterministic_madn_wandb_session = wandb.init(
 )
 
 # --- Setup Optimizer ---
+# Auf 150 Iterationen angepasste steps: 0.005 → 0.001 → 0.0002 → 0.0001
 learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],  # 0.005
     boundaries_and_scales={
-        50 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
-        120 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-        170 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+           50 * config["train_steps_per_iteration"]: 0.2,    #  0.005 → 0.001
+          90 * config["train_steps_per_iteration"]: 0.2,   # 0.001 → 0.0002
+          120 * config["train_steps_per_iteration"]: 0.5,   # 0.0002 → 0.0001
     }
 )
 
