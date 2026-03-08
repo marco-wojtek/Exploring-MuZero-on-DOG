@@ -20,14 +20,14 @@ class VectorizedReplayBuffer:
         # ✅ Alle Daten als zusammenhängende NumPy Arrays
         self.observations = np.zeros((capacity, max_episode_length, *obs_shape), dtype=np.float32)
         self.actions = np.zeros((capacity, max_episode_length), dtype=np.int32)
-        self.rewards = np.zeros((capacity, max_episode_length), dtype=np.float32)
+        self.rewards = np.zeros((capacity, max_episode_length), dtype=np.int32)  # Klassen-Index statt Float
         self.root_values = np.zeros((capacity, max_episode_length), dtype=np.float32)
         self.child_visits = np.zeros((capacity, max_episode_length, action_dim), dtype=np.float32)
         self.masks = np.zeros((capacity, max_episode_length), dtype=np.float32)
         self.players = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.teams = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.episode_lengths = np.zeros(capacity, dtype=np.int32)
-        self.discounts = np.zeros((capacity, max_episode_length), dtype=np.float32)
+        self.discounts = np.zeros((capacity, max_episode_length), dtype=np.int32)  # Klassen-Index statt Float
         
         self.position = 0
         self.size = 0
@@ -67,25 +67,35 @@ class VectorizedReplayBuffer:
         """
         K = self.unroll_steps + 1
         TD = self.td_steps
-        # gamma_temporal = 0.997 → nach 300 Zügen: 0.997^300 ≈ 0.41
-        # gamma_temporal = 0.999 → nach 300 Zügen: 0.999^300 ≈ 0.74
-        # gamma_temporal = 0.995 → nach 300 Zügen: 0.995^300 ≈ 0.22
         GAMMA = 1.0
+        TERMINAL_RATIO = 0.25  # 25% des Batches enthält Terminal-Steps
         
-        # ========================================
-        # SCHRITT 1: Sample Episode-Indizes
-        # ========================================
-        ep_indices = np.random.randint(0, self.size, size=self.batch_size)
-        # Shape: (batch_size,)
+        n_terminal = int(self.batch_size * TERMINAL_RATIO)
+        n_normal = self.batch_size - n_terminal
         
-        # ========================================
-        # SCHRITT 2: Sample Start-Positionen
-        # ========================================
-        ep_lengths = self.episode_lengths[ep_indices]  # (batch_size,)
-        max_starts = np.maximum(ep_lengths - K, 0)     # (batch_size,) minimaler Startpunkt, damit K Schritte möglich sind
+        # --- Normal Sampling: kann an JEDER Position starten ---
+        # Auch nahe am Ende! Dann gibt es partielle Windows (mask=0 für padding)
+        # aber Terminal-Steps können natürlich im Dynamics-Bereich landen
+        ep_indices_normal = np.random.randint(0, self.size, size=n_normal)
+        ep_lengths_normal = self.episode_lengths[ep_indices_normal]
+        max_starts_normal = ep_lengths_normal - 1  # kann überall starten
+        t_starts_normal = np.random.randint(0, max_starts_normal + 1)
         
-        # t_starts = (np.random.rand(self.batch_size) * max_starts).astype(np.int32)
-        t_starts = np.random.randint(0, max_starts + 1)
+        # --- Terminal Sampling: Terminal-Step an ZUFÄLLIGER Position k im Fenster ---
+        # Nicht immer k=9! Bei k=0 kommt latent_state direkt aus RepNet → beste Qualität
+        ep_indices_terminal = np.random.randint(0, self.size, size=n_terminal)
+        ep_lengths_terminal = self.episode_lengths[ep_indices_terminal]
+        # terminal_k = zufällige Position (0..K-2) wo der letzte Step der Episode landen soll
+        # K-1 = 10 Positionen für Actions (k=0..9), davon nutzen wir k=0..K-2
+        max_terminal_k = np.minimum(self.unroll_steps - 1, ep_lengths_terminal - 1)  # kann nicht vor Episode-Start
+        terminal_k = np.array([np.random.randint(0, int(m) + 1) for m in max_terminal_k])
+        # t_start so setzen dass ep_length-1 (letzter Step) bei Position terminal_k liegt
+        t_starts_terminal = np.maximum(ep_lengths_terminal - 1 - terminal_k, 0)
+        
+        # --- Zusammenführen ---
+        ep_indices = np.concatenate([ep_indices_normal, ep_indices_terminal])
+        t_starts = np.concatenate([t_starts_normal, t_starts_terminal])
+        ep_lengths = self.episode_lengths[ep_indices]
         # Shape: (batch_size,)
         
         # ========================================
@@ -157,7 +167,7 @@ class VectorizedReplayBuffer:
         final_teams_expanded = final_teams[:, None]      # (batch_size, 1)
         
         # 7.3: Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
-        game_won_seq = final_rewards_expanded > 0                    # (batch_size, K)
+        game_won_seq = final_rewards_expanded == 2                   # (batch_size, K)
         is_single_player_seq = seq_teams == -1                       # (batch_size, K)
         player_won_seq = (final_players_expanded == seq_players)     # (batch_size, K)
         team_won_seq = (final_teams_expanded == seq_teams)           # (batch_size, K)
@@ -232,12 +242,12 @@ class VectorizedReplayBuffer:
         # SCHRITT 8: Padding für ungültige Positionen
         # ========================================
         actions = np.where(valid_mask[:, :-1], actions, 0)
-        rewards_seq = np.where(valid_mask[:, :-1], rewards_seq, 0.0)
+        rewards_seq = np.where(valid_mask[:, :-1], rewards_seq, 1)  # Klasse 1 = reward=0 (neutral)
         policies = np.where(valid_mask[:, :, None], policies, 0.0)
         values = np.where(valid_mask, values, 0.0)
         masks = np.where(valid_mask, masks, 0.0)
         target_values = np.where(valid_mask, target_values, 0.0)
-        discount_targets = np.where(valid_mask[:, :-1], discount_targets, 0.0)
+        discount_targets = np.where(valid_mask[:, :-1], discount_targets, 1)  # Klasse 1 = discount=0 (neutral)
         
         # ========================================
         # SCHRITT 9: Return Batch

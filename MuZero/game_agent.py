@@ -90,25 +90,32 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                         lambda: jnp.int8(-1)
                     )
                     
-                    # ✅ NEU: Discount Target berechnen
-                    # Teams Modus: gleiche Team = +1, anderes Team = -1
-                    # FFA Modus: gleicher Spieler = +1, anderer Spieler = -1
-                    discount_target = jax.lax.cond(
-                        env.rules['enable_teams'],
-                        lambda: jnp.where(current_team_before == next_team, 1.0, -1.0),
-                        lambda: jnp.where(current_player_before == next_player, 1.0, -1.0)
+                    # Reward Target: Klasse 0=-1, Klasse 1=0, Klasse 2=+1
+                    reward_target = jnp.where(
+                        next_done & (reward > 0), 2,
+                        jnp.where(next_done & (reward < 0), 0, 1)
                     )
 
-                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, discount_target
+                    # Discount Target: Klasse 0=-1, Klasse 1=0, Klasse 2=+1
+                    discount_target = jnp.where(
+                        next_done, 1,  # Terminal → Klasse 1 (discount=0)
+                        jax.lax.cond(
+                            env.rules['enable_teams'],
+                            lambda: jnp.where(current_team_before == next_team, 2, 0),
+                            lambda: jnp.where(current_player_before == next_player, 2, 0)
+                        )
+                    )
+
+                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, discount_target, reward_target
                 
                 def do_skip(env):
                     # Keine validen Actions → no_step
                     next_env, reward, next_done = no_step(env)
                     dummy_obs = jnp.zeros_like(obs[0])
-                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done, 0, 0.0
+                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done, 0, 1, 1
                 
                 # Wähle zwischen MCTS und no_step
-                next_env, step_obs, action, reward, value, policy, next_done, mask, discount_target = jax.lax.cond(
+                next_env, step_obs, action, reward, value, policy, next_done, mask, discount_target, reward_target = jax.lax.cond(
                     has_valid,
                     do_mcts,
                     do_skip,
@@ -122,7 +129,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 new_buffer = {
                     'obs': buffer['obs'].at[idx].set(step_obs),
                     'act': buffer['act'].at[idx].set(action),
-                    'rew': buffer['rew'].at[idx].set(reward),
+                    'rew': buffer['rew'].at[idx].set(reward_target),  # Klassen-Index statt Float!
                     'val': buffer['val'].at[idx].set(value),
                     'pol': buffer['pol'].at[idx].set(policy),
                     'mask': buffer['mask'].at[idx].set(mask),
@@ -150,13 +157,13 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     init_buffers = {
         'obs': jnp.zeros((num_envs, max_steps, *input_shape)),
         'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
-        'rew': jnp.zeros((num_envs, max_steps)),
+        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # Klassen-Index statt Float
         'val': jnp.zeros((num_envs, max_steps)),
         'pol': jnp.zeros((num_envs, max_steps, 24)),
         'mask': jnp.zeros((num_envs, max_steps)),
         'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
         'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
-        'discount': jnp.zeros((num_envs, max_steps)),
+        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # Klassen-Index statt Float
         'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
     }
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)

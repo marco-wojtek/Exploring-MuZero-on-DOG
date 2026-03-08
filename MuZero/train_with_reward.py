@@ -49,27 +49,42 @@ def loss_fn(params, batch):
             new_state, pred_reward_logits, pred_discount_logits = dynamics_net.apply(
                 params['dynamics'], state, action
             )
-            # Class weights: Klasse 0 (lose) und Klasse 2 (win) für Reward stark gewichten
-            REWARD_CLASS_WEIGHTS = jnp.array([20.0, 1.0, 20.0])  # -1, 0, +1
-            DISCOUNT_CLASS_WEIGHTS = jnp.array([1.0, 20.0, 1.0])   # -1, 0, +1
             
-            # ✅ Cross-Entropy Loss für Reward (3 Klassen: -1, 0, +1)
-            target_reward_class = target_reward.astype(jnp.int32)  # Klasse 0, 1, oder 2
+            # ✅ REWARD: Balanced per-class loss
+            target_reward_class = target_reward.astype(jnp.int32)
             reward_ce = optax.softmax_cross_entropy_with_integer_labels(
                 pred_reward_logits, target_reward_class
             )
-            reward_weights = REWARD_CLASS_WEIGHTS[target_reward_class]
-
-            l_reward = jnp.mean(mask * reward_weights * reward_ce)
             
-            # ✅ Cross-Entropy Loss für Discount (3 Klassen: -1, 0, +1)
+            # Separate Mittelwerte pro Klasse → gleiche Gradient-Stärke
+            is_neutral = (target_reward_class == 1)
+            n_neutral = jnp.maximum(jnp.sum(mask * is_neutral), 1.0)
+            n_non_neutral = jnp.maximum(jnp.sum(mask * (~is_neutral)), 1.0)
+            
+            loss_neutral = jnp.sum(mask * jnp.where(is_neutral, reward_ce, 0.0)) / n_neutral
+            loss_non_neutral = jnp.sum(mask * jnp.where(~is_neutral, reward_ce, 0.0)) / n_non_neutral
+            
+            # 50/50 Gewichtung: Neutral lernt "default 0", Non-Neutral lernt Win/Lose
+            l_reward = 0.1 * loss_neutral + 1.0 * loss_non_neutral
+            
+            # ✅ DISCOUNT: Balanced per-class loss (analog zu Reward)
+            # Klasse 0=-1 (Gegner), Klasse 1=0 (Terminal), Klasse 2=+1 (eigener Zug)
+            # Terminal (Klasse 1) ist extrem selten → separate Normierung
             target_discount_class = target_discount.astype(jnp.int32)
             discount_ce = optax.softmax_cross_entropy_with_integer_labels(
                 pred_discount_logits, target_discount_class
             )
-            discount_weights = DISCOUNT_CLASS_WEIGHTS[target_discount_class]
-
-            l_discount = jnp.mean(mask * discount_weights * discount_ce)
+            
+            is_terminal = (target_discount_class == 1)
+            n_non_terminal = jnp.maximum(jnp.sum(mask * (~is_terminal)), 1.0)
+            n_terminal = jnp.maximum(jnp.sum(mask * is_terminal), 1.0)
+            
+            loss_non_terminal = jnp.sum(mask * jnp.where(~is_terminal, discount_ce, 0.0)) / n_non_terminal
+            loss_terminal = jnp.sum(mask * jnp.where(is_terminal, discount_ce, 0.0)) / n_terminal
+            
+            # Non-Terminal (6er-Regel) funktioniert schon gut → niedrige Gewichtung
+            # Terminal muss stärker lernen
+            l_discount = 0.1 * loss_non_terminal + 1.0 * loss_terminal
             
             return new_state, l_discount, l_reward
         
@@ -220,7 +235,7 @@ def test_training(config, params=None, opt_state=None):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
         # ✅ Automatically switch to bootstrap after Phase 1
-        if (it) == 50:
+        if (it) == 70:
             print("=" * 60)
             print("SWITCHING TO BOOTSTRAP VALUE TARGETS")
             print("=" * 60)
@@ -264,7 +279,7 @@ def test_training(config, params=None, opt_state=None):
 
         #     with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
         #         pickle.dump(opt_state, f)
-        if ((it+1) % 50 == 0):
+        if ((it+1) % 100 == 0):
             print(f"Saving checkpoint at iteration {it+1}...")
             with open(f'models/params/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
                 pickle.dump(params, f)
@@ -289,11 +304,11 @@ TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.6]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 4.0  
 POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
-REWARD_SCALING = 2.0
+REWARD_SCALING = 1.0
 config = {
-    "seed": 27,
+    "seed": 29,
     "learning_rate": 0.005,
-    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Reward loss with Cross-Entropy (3 Klassen: -1, 0, +1) und Discount loss mit Cross-Entropy (3 Klassen: -1, 0, +1). Ziel: Stabileres Training durch diskrete Klassen für Rewards und Discounts, da kontinuierliche Werte in MADN oft sehr spiky und schwer vorherzusagen sind. Mit Klassengewichtung, um wichtige Ereignisse (Sieg/Niederlage) stärker zu gewichten und Priority Sampling im Replay Buffer (fixed).",
+    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Reward loss with Cross-Entropy (3 Klassen: -1, 0, +1) + Per-Class Balanced Loss und Discount loss mit Cross-Entropy (3 Klassen: -1, 0, +1). Ziel: Stabileres Training durch diskrete Klassen für Rewards und Discounts, da kontinuierliche Werte in MADN oft sehr spiky und schwer vorherzusagen sind. Mit Klassengewichtung, um wichtige Ereignisse (Sieg/Niederlage) stärker zu gewichten und Priority Sampling im Replay Buffer (fixed).",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
