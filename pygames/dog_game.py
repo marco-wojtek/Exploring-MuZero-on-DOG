@@ -1,4 +1,5 @@
 import pygame
+import numpy as np
 import jax.numpy as jnp
 import jax
 import sys, os
@@ -6,44 +7,11 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from DOG.dog import *
 from utils.visualize import board_to_mat, matrix_to_string
+from pygames.pygame_utils import *
 # import warnings
 # warnings.filterwarnings("error", category=FutureWarning)
 
 ENABLE_PIN_IMAGES = True
-
-# Farben wie im Bild
-BACKGROUND_COLOR = (250, 235, 180)  # Cremefarbener Hintergrund
-FIELD_WHITE = (255, 255, 255)       # Weiße Felder
-FIELD_OUTLINE = (50, 50, 50)        # Umrandung
-BLAU = (0, 120, 220)
-ROT = (220, 50, 50)
-GELB = (220, 200, 0)
-GRUEN = (40, 160, 40)
-COLORS = {
-    (-1, 9): FIELD_WHITE,  # Leeres Feld (weiß)
-    (-1, 1): FIELD_WHITE,  # Leeres Feld (weiß)
-    (0, 7): (150, 150, 150),   # Deaktiviertes Feld (grau)
-    (1, 0): (0, 50, 150),     # Blau Zielfeld
-    (1, 1): BLAU,     # Blaue Figur
-    (1, 2): BLAU,     # Blaue Figur
-    (1, 3): BLAU,     # Blaue Figur
-    (1, 4): BLAU,     # Blaue Figur
-    (2, 0): (180, 50, 50),     # Rot Zielfeld
-    (2, 1): ROT,     # Rote Figur
-    (2, 2): ROT,     # Rote Figur
-    (2, 3): ROT,     # Rote Figur
-    (2, 4): ROT,     # Rote Figur
-    (3, 0): (200, 180, 0),     # Gelb Zielfeld
-    (3, 1): GELB,     # Gelbe Figur
-    (3, 2): GELB,     # Gelbe Figur
-    (3, 3): GELB,     # Gelbe Figur
-    (3, 4): GELB,     # Gelbe Figur
-    (4, 0): (40, 140, 40),     # Grün Zielfeld
-    (4, 1): GRUEN,     # Grüne Figur
-    (4, 2): GRUEN,     # Grüne Figur
-    (4, 3): GRUEN,     # Grüne Figur
-    (4, 4): GRUEN,     # Grüne Figur
-}
 
 pin_images = {}
 for color in ['blue', 'red', 'yellow', 'green']:
@@ -376,6 +344,73 @@ def draw_ui(screen, font, current_player, hands, game_phase):
     screen.blit(player_text, (center_x - player_text.get_width() // 2, center_y - 30))
     screen.blit(dice_text, (center_x - dice_text.get_width() // 2, center_y + 5))
 
+def create_player_functions(player_types):
+    """
+    Erstellt Funktionen für jeden Spieler.
+
+    Args:
+        player_types: Liste mit 0 (Human) oder 2 (Random) für jeden Spieler
+
+    Returns:
+        Liste von Funktionen (env) -> action_int oder None für Human
+    """
+    players = []
+    for player_type in player_types:
+        if player_type == 0:
+            players.append(None)  # Human – wird manuell gesteuert
+        else:  # player_type == 2  –  Random Bot
+            def random_player(obs, invalid_actions):
+                logits = jnp.where(invalid_actions, -1e9, 0)  # Ungültige Aktionen mit sehr niedrigem Logit bestrafen
+                key = jax.random.PRNGKey(np.random.randint(0, 100000))
+                action = jax.random.categorical(key, logits)
+                return action
+            players.append(random_player)
+    return players
+
+
+def create_game_over_buttons(screen_width, screen_height):
+    center_x = screen_width // 2
+    center_y = screen_height // 2
+    bw, bh, sp = 200, 40, 10
+
+    quit_button = Button(
+        center_x - bw // 2, center_y + 60,
+        bw, bh, "Beenden", color=(220, 50, 50), text_color=(255, 255, 255)
+    )
+    restart_button = Button(
+        center_x - bw // 2, center_y + 60 + bh + sp,
+        bw, bh, "Neu starten (gleiche Teams)", color=(50, 150, 220), text_color=(255, 255, 255)
+    )
+    menu_button = Button(
+        center_x - bw // 2, center_y + 60 + 2 * (bh + sp),
+        bw, bh, "Zurück zum Menü", color=(220, 200, 0), text_color=(0, 0, 0)
+    )
+    return quit_button, restart_button, menu_button
+
+
+def draw_game_over_screen(screen, font, winner_player, quit_button, restart_button, menu_button):
+    center_x = screen.get_width() // 2
+    center_y = screen.get_height() // 2
+
+    box_rect = pygame.Rect(center_x - 200, center_y - 150, 400, 300)
+    pygame.draw.rect(screen, BACKGROUND_COLOR, box_rect)
+    pygame.draw.rect(screen, FIELD_OUTLINE, box_rect, 4)
+
+    title_font = pygame.font.SysFont("Arial", 32, bold=True)
+    winner_color = COLORS.get((winner_player + 1, 1), (0, 0, 0))
+
+    title_text = title_font.render("Spiel beendet!", True, (0, 0, 0))
+    team_nr = (winner_player // 2) + 1
+    winner_text = title_font.render(f"Gewinner: Team {team_nr}", True, winner_color)
+
+    screen.blit(title_text, (center_x - title_text.get_width() // 2, center_y - 110))
+    screen.blit(winner_text, (center_x - winner_text.get_width() // 2, center_y - 60))
+
+    quit_button.draw(screen)
+    restart_button.draw(screen)
+    menu_button.draw(screen)
+
+
 def main():
     pygame.init()
     scale = 50  # Größe pro Feld
@@ -398,6 +433,32 @@ def main():
     screen = pygame.display.set_mode((w * scale, h * scale))
     pygame.display.set_caption("DOG")
     clock = pygame.time.Clock()
+
+    # === SPIELER-AUSWAHL MENÜ ===
+    menu = PlayerSelectionMenu(w * scale, h * scale)
+    player_types = None
+    selecting_players = True
+    while selecting_players:
+        mouse_pos = pygame.mouse.get_pos()
+        menu.update_hover(mouse_pos)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                result = menu.handle_click(mouse_pos)
+                if result is not None:
+                    player_types = result
+                    selecting_players = False
+        screen.fill(BACKGROUND_COLOR)
+        menu.draw(screen)
+        pygame.display.flip()
+        clock.tick(60)
+
+    # === SPIELER-FUNKTIONEN ERSTELLEN ===
+    player_functions = create_player_functions(player_types)
+    pause_time = 200 if any(t == 0 for t in player_types) else 50
+
     # Statisches Board-Surface erstellen (nur einmal!)
     board_surface = create_board_surface(matrix, scale)
     # UI-Elemente
@@ -406,6 +467,10 @@ def main():
     game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
     joker_clicked = False
     running = True
+    winner_player = None
+
+    # Game-Over-Buttons erstellen
+    quit_button, restart_button, menu_button = create_game_over_buttons(w * scale, h * scale)
 
     # Karten-Buttons erstellen
     card_buttons = create_all_card_buttons(w * scale, h * scale)
@@ -419,9 +484,56 @@ def main():
     while running:
 
         mouse_pos = pygame.mouse.get_pos()
-        
+        current_player_idx = int(env.current_player)
+        is_human = (player_types[current_player_idx] == 0)
+        val_actions = valid_actions(env).flatten()
+        invalid_actions = ~val_actions
+
+        if jnp.sum(val_actions) == 0:
+            print(f"Spieler {current_player_idx + 1} hat keine gültigen Züge und muss aussetzen!")
+            env, _, done = no_step(env) # no-op Aktion
+            matrix = board_to_mat(env, layout)
+            game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
+            continue
+        # === BOT-SPIELER AUTOMATISCHER ZUG ===
+        if not is_human and game_phase in ('CARD', 'CARD_EXCHANGE'):
+            # obs = encode_board(env)
+            print("="*20)
+            print("Game Phase:", game_phase)
+            print("hands:", env.hands[current_player_idx])
+            if game_phase=='CARD':
+                print("board:\n", board_to_mat(env, layout))
+            if jnp.sum(env.hands[env.current_player]) == 0:
+                env, _, done = no_step(env)
+            else:
+                bot_action = player_functions[current_player_idx](env, invalid_actions)
+                env, r, done = env_step(env, bot_action)
+            matrix = board_to_mat(env, layout)
+            board_surface = create_board_surface(matrix, scale)
+            game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
+            selected_action = jnp.zeros(6, dtype=jnp.int32)
+            joker_clicked = False
+            if done:
+                w_arr = jnp.argwhere(get_winner(env, env.board))
+                winner_player = int(w_arr[0][0]) if len(w_arr) > 0 else 0
+                print(f"Spiel vorbei! Gewinner ist Spieler {winner_player + 1}")
+                game_phase = 'GAME_OVER'
+            print(f"Bot Spieler {current_player_idx + 1} wählt Aktion {map_action_to_move(env, bot_action)}")
+            print("Is valid?", r)
+            print("Bot action int:", bot_action)
+            print("Bot action mapped:", map_action_to_card(map_action_to_move(env, bot_action)))
+            print(jnp.arange(val_actions.shape[0])[val_actions])
+            print("="*20)
+            pygame.time.wait(pause_time)
+
+        # === GAME OVER HOVER ===
+        if game_phase == 'GAME_OVER':
+            quit_button.update_hover(mouse_pos)
+            restart_button.update_hover(mouse_pos)
+            menu_button.update_hover(mouse_pos)
+
         # Hover-Effekte aktualisieren
-        if game_phase == 'CARD':
+        if game_phase == 'CARD' and is_human:
             for button in card_buttons:
                 button.update_hover(mouse_pos)
 
@@ -429,16 +541,63 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
+            # === GAME OVER BUTTON HANDLING ===
+            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'GAME_OVER':
+                if quit_button.is_clicked(mouse_pos):
+                    running = False
+                elif restart_button.is_clicked(mouse_pos):
+                    env = env_reset(0, seed=np.random.randint(0, 100000), num_players=4, distance=10,
+                                    enable_initial_free_pin=True, layout=layout, enable_teams=True)
+                    _ = env_step(env, jnp.array(2))
+                    matrix = board_to_mat(env, layout)
+                    board_surface = create_board_surface(matrix, scale)
+                    game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
+                    selected_action = jnp.zeros(6, dtype=jnp.int32)
+                    joker_clicked = False
+                    winner_player = None
+                elif menu_button.is_clicked(mouse_pos):
+                    # Zurück zum Spieler-Auswahlmenü
+                    selecting_players = True
+                    while selecting_players:
+                        mouse_pos = pygame.mouse.get_pos()
+                        menu.update_hover(mouse_pos)
+                        for ev in pygame.event.get():
+                            if ev.type == pygame.QUIT:
+                                pygame.quit()
+                                return
+                            if ev.type == pygame.MOUSEBUTTONDOWN:
+                                result = menu.handle_click(mouse_pos)
+                                if result is not None:
+                                    player_types = result
+                                    selecting_players = False
+                        screen.fill(BACKGROUND_COLOR)
+                        menu.draw(screen)
+                        pygame.display.flip()
+                        clock.tick(60)
+                    player_functions = create_player_functions(player_types)
+                    pause_time = 200 if any(t == 0 for t in player_types) else 50
+                    env = env_reset(0, seed=np.random.randint(0, 100000), num_players=4, distance=10,
+                                    enable_initial_free_pin=True, layout=layout, enable_teams=True)
+                    _ = env_step(env, jnp.array(2))
+                    matrix = board_to_mat(env, layout)
+                    board_surface = create_board_surface(matrix, scale)
+                    game_phase = 'CARD' if env.phase == 0 else 'CARD_EXCHANGE'
+                    selected_action = jnp.zeros(6, dtype=jnp.int32)
+                    joker_clicked = False
+                    winner_player = None
+
             if game_phase == 'CARD' and jnp.sum(env.hands[env.current_player]) == 0:
                 print(f"Spieler {int(env.current_player) + 1} hat keine Karten mehr, überspringe Zug.")
                 env, r, done = no_step(env) # Aktion -1 zum Überspringen
                 matrix = board_to_mat(env, layout)
                 if done:
-                    print(f"Spiel vorbei! Gewinner ist Spieler {jnp.argwhere(get_winner(env, env.board))[0][0]+1}")
-                    running = False
+                    w_arr = jnp.argwhere(get_winner(env, env.board))
+                    winner_player = int(w_arr[0][0]) if len(w_arr) > 0 else 0
+                    print(f"Spiel vorbei! Gewinner ist Spieler {winner_player + 1}")
+                    game_phase = 'GAME_OVER'
                     
-            # Button-Klicks für Karten
-            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD':
+            # Button-Klicks für Karten (nur Human)
+            if is_human and event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD':
                 for i, button in enumerate(card_buttons):
                     player_hand = env.hands[env.current_player]
                     if button.is_clicked(mouse_pos) and ((player_hand[i] > 0) or joker_clicked):
@@ -477,8 +636,10 @@ def main():
                     game_phase = 'CARD'
                     
                     if done:
-                        print(f"Spiel vorbei! Gewinner ist Spieler {jnp.argwhere(get_winner(env, env.board))[0][0]+1}")
-                        running = False
+                        w_arr = jnp.argwhere(get_winner(env, env.board))
+                        winner_player = int(w_arr[0][0]) if len(w_arr) > 0 else 0
+                        print(f"Spiel vorbei! Gewinner ist Spieler {winner_player + 1}")
+                        game_phase = 'GAME_OVER'
 
             if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'POSNEG4':
                 for i, button in enumerate(posneg4_buttons):
@@ -535,15 +696,17 @@ def main():
                         joker_clicked = False
                         
                         if done:
-                            print(f"Spiel vorbei! Gewinner ist Spieler {jnp.argwhere(get_winner(env, env.board))[0][0]+1}")
-                            running = False
+                            w_arr = jnp.argwhere(get_winner(env, env.board))
+                            winner_player = int(w_arr[0][0]) if len(w_arr) > 0 else 0
+                            print(f"Spiel vorbei! Gewinner ist Spieler {winner_player + 1}")
+                            game_phase = 'GAME_OVER'
                     else:
                         print("Das ist nicht dein Pin!")
 
-            if event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD_EXCHANGE':
+            if is_human and event.type == pygame.MOUSEBUTTONDOWN and game_phase == 'CARD_EXCHANGE':
                 for i, button in enumerate(card_buttons):
                     if button.is_clicked(mouse_pos) and env.hands[env.current_player, i] > 0:
-                        action = i + get_play_action_size(env) 
+                        action = i + get_play_action_size(env)
                         env, _, done = env_step(env, jnp.array(action))
                         matrix = board_to_mat(env, layout)
                         selected_action = jnp.zeros(6, dtype=jnp.int32)
@@ -552,29 +715,32 @@ def main():
         # --- Zeichnen ---
         # 1. Statisches Board (nur kopieren, nicht neu zeichnen)
         screen.blit(board_surface, (0, 0))
-        
+
         # 2. Dynamische Pins
         draw_pins(screen, matrix, scale)
-        
-        # 3. UI
-        draw_ui(screen, font, int(env.current_player), env.hands, game_phase)
 
-        # Würfel-Buttons zeichnen (nur in CARD-Phase)
-        if game_phase == 'CARD':
-            for button in card_buttons:
-                button.draw(screen)
-        if game_phase == 'HOT7':
-            hot7_buttons.draw(screen, center_x=screen.get_width()//2, center_y=screen.get_height()//2)
-        if game_phase == 'POSNEG4':
-            for button in posneg4_buttons:
-                button.draw(screen)
-        if game_phase == '1OR11':
-            for button in oneor11_buttons:
-                button.draw(screen)
-        if game_phase == 'CARD_EXCHANGE':
-            for button in card_buttons:
-                button.draw(screen)
-        
+        if game_phase == 'GAME_OVER':
+            draw_game_over_screen(screen, font, winner_player, quit_button, restart_button, menu_button)
+        else:
+            # 3. UI
+            draw_ui(screen, font, int(env.current_player), env.hands, game_phase)
+
+            # Karten-Buttons (nur Human)
+            if is_human and game_phase == 'CARD':
+                for button in card_buttons:
+                    button.draw(screen)
+            if game_phase == 'HOT7':
+                hot7_buttons.draw(screen, center_x=screen.get_width()//2, center_y=screen.get_height()//2)
+            if game_phase == 'POSNEG4':
+                for button in posneg4_buttons:
+                    button.draw(screen)
+            if game_phase == '1OR11':
+                for button in oneor11_buttons:
+                    button.draw(screen)
+            if is_human and game_phase == 'CARD_EXCHANGE':
+                for button in card_buttons:
+                    button.draw(screen)
+
         pygame.display.flip()
         clock.tick(60)
 

@@ -56,7 +56,7 @@ class DOG:
     rules : dict  = struct.field(pytree_node=False)
 
 def get_play_action_size(env: DOG):
-    return jnp.int32(2 * (4 * (12 + 1 + env.total_board_size) + 120))
+    return int(2 * (4 * (12 + 1 + env.total_board_size) + 120))
 
 def index_to_dist(idx: int) -> jnp.ndarray:
     '''
@@ -377,9 +377,9 @@ def val_swap(env):
 
     swap_mat = jnp.tile(board, (4,1))
     cond_a = jnp.where(~jnp.isin(swap_mat, jnp.array([-1, current_player])), True, False)
-    cond_b = cond_a.at[:,start].set(~((board[start] == player_ids) & env.rules['enable_start_blocking']))  # start positions cannot be swapped if blocked except the rule is disabled
-    cond_c = cond_b.at[:, goal].set(False)  # goal positions cannot be swapped
-    condA = cond_a & cond_b & cond_c
+    cond_b = cond_a.at[:,start].set(~((board[start] == player_ids) & env.rules['enable_start_blocking']) & (board[start] != -1))  # start positions cannot be swapped if blocked except the rule is disabled
+    cond_c = cond_b.at[:, current_pins].set(False)  # own pins cannot be swapped
+    condA = cond_c.at[:, goal].set(False)  # goal positions cannot be swapped
 
     disallowed_pos = jax.lax.cond(
         env.rules['enable_start_blocking'],
@@ -613,6 +613,7 @@ def val_neg_move(env:DOG, move:int):
 
     return result
 
+
 # @jax.jit
 def valid_step_actions(env: DOG) -> chex.Array:
     """
@@ -631,24 +632,29 @@ def valid_step_actions(env: DOG) -> chex.Array:
     valid_action = jnp.where(hand > 0, True, False)
     
     num_total_actions = get_play_action_size(env)  # actions without joker copy :==>  num_pins * (num_normal_moves + -4 move + swap moves) + move 7 distributions
-    all_actions = jnp.full((num_total_actions,), False)
+    all_actions = jnp.full((int(num_total_actions/2),), False)
+    joker_actions = jnp.copy(all_actions)
 
     # filter actions based on effect (handle special cards seperatly if necessary)
     num_swaps = 4*env.total_board_size
+    valid_swap_actions = val_swap(env).flatten()
     valid_swaps = jax.lax.cond(
         valid_action[1],
-        lambda: val_swap(env).flatten(),
+        lambda: valid_swap_actions,
         lambda: jnp.full((num_swaps,), False)
     )
     all_actions = all_actions.at[:num_swaps].set(valid_swaps)
+    joker_actions = joker_actions.at[:num_swaps].set(valid_swap_actions) # Joker can copy swap actions
 
     traversed_moves = num_swaps + len(DISTS_7_4)
+    valid_hot_7_actions = jax.vmap(val_action_7, in_axes=(None, 0))(env, DISTS_7_4).T.flatten()
     valid_hot_7 = jax.lax.cond(
         valid_action[7],
-        lambda: jax.vmap(val_action_7, in_axes=(None, 0))(env, DISTS_7_4).flatten(),
+        lambda: valid_hot_7_actions,
         lambda: jnp.full((len(DISTS_7_4),), False)
     )
     all_actions = all_actions.at[num_swaps:traversed_moves].set(valid_hot_7)
+    joker_actions = joker_actions.at[num_swaps:traversed_moves].set(valid_hot_7_actions) # Joker can copy hot 7 actions
 
 
     normal_card_indices = jnp.array([2,3,4,5,6,8,9,10,11,12,13])  # 2-6, 8-13
@@ -663,19 +669,25 @@ def valid_step_actions(env: DOG) -> chex.Array:
     # 1: one_mask, Rest: normal_mask
     final_mask = jnp.concatenate([one_mask[None], normal_mask])
 
-    moves = jnp.where(final_mask, jnp.array([1,2,3,4,5,6,8,9,10,11,12,13]), 0)
-    normal_actions = jax.vmap(val_action_normal_move, in_axes=(None, 0))(env, final_mask).flatten()
-    all_actions = all_actions.at[traversed_moves:-4].set(normal_actions)
+    # moves = jnp.where(final_mask, jnp.array([1,2,3,4,5,6,8,9,10,11,12,13]), 0)
+    # get all normal actions mit dim (num_pins, num_normal_moves) 
+    normal_actions = jax.vmap(val_action_normal_move, in_axes=(None, 0))(env, jnp.array([1,2,3,4,5,6,8,9,10,11,12,13]))
+    # filter normal actions based on final_mask
+    filtered_normal_actions = jnp.where(final_mask[:, None], normal_actions, False)  # broadcasting der Maske über die Pins
+    flat_normal_actions = filtered_normal_actions.T.flatten()  # flache Liste aller normalen Aktionen
+    flat_normal_actions_joker = normal_actions.T.flatten()  # Joker kann alle normalen Aktionen kopieren, also ohne Maske
 
-    valid_neg_4 = jax.lax.cond(hand[4] > 0, lambda: val_neg_move(env, -4), lambda: jnp.full((4,), False))
+    all_actions = all_actions.at[traversed_moves:-4].set(flat_normal_actions)
+    joker_actions = joker_actions.at[traversed_moves:-4].set(flat_normal_actions_joker) # Joker can copy normal actions
+
+    valid_neg_4_actions = val_neg_move(env, -4)
+    valid_neg_4 = jax.lax.cond(hand[4] > 0, lambda: valid_neg_4_actions, lambda: jnp.full((4,), False))
+
     all_actions = all_actions.at[-4:].set(valid_neg_4)
+    joker_actions = joker_actions.at[-4:].set(valid_neg_4_actions) # Joker can copy -4 actions
 
     # joker can replicate any action
-    valid_joker = jax.lax.cond(
-        hand[0] > 0,
-        lambda: all_actions,
-        lambda: jnp.zeros_like(all_actions, dtype=bool)
-    )
+    valid_joker = joker_actions & (hand[0] > 0)  # Joker ist Karte 0, also nur gültig wenn im Handkartenstapel vorhanden
     return jnp.concatenate([valid_joker, all_actions])
 
 def valid_actions(env: DOG) -> chex.Array:
