@@ -235,7 +235,7 @@ def test_training(config, params=None, opt_state=None):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
         # ✅ Automatically switch to bootstrap after Phase 1
-        if (it) == 70:
+        if (it) == 120:
             print("=" * 60)
             print("SWITCHING TO BOOTSTRAP VALUE TARGETS")
             print("=" * 60)
@@ -306,9 +306,9 @@ POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 config = {
-    "seed": 29,
+    "seed": 33,
     "learning_rate": 0.005,
-    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Reward loss with Cross-Entropy (3 Klassen: -1, 0, +1) + Per-Class Balanced Loss und Discount loss mit Cross-Entropy (3 Klassen: -1, 0, +1). Ziel: Stabileres Training durch diskrete Klassen für Rewards und Discounts, da kontinuierliche Werte in MADN oft sehr spiky und schwer vorherzusagen sind. Mit Klassengewichtung, um wichtige Ereignisse (Sieg/Niederlage) stärker zu gewichten und Priority Sampling im Replay Buffer (fixed).",
+    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Reward loss with Cross-Entropy (3 Klassen: -1, 0, +1) + Per-Class Balanced Loss und Discount loss mit Cross-Entropy (3 Klassen: -1, 0, +1). Ziel: Stabileres Training durch diskrete Klassen für Rewards und Discounts, da kontinuierliche Werte in MADN oft sehr spiky und schwer vorherzusagen sind. Mit Klassengewichtung, um wichtige Ereignisse (Sieg/Niederlage) stärker zu gewichten und Priority Sampling im Replay Buffer (fixed). Jetzt mit next_latent als Input für Reward- und Discount-Head, um Leaking von Reward/Discount-Informationen in die Value-Estimation zu verhindern. Neues qtransform",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
@@ -321,7 +321,7 @@ config = {
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": False,
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-    "train_steps_per_iteration": 2500,
+    "train_steps_per_iteration": 2000,
     "rules": RULES,
     "Loss scaling": {"value": VALUE_SCALING, "policy": POLICY_SCALING, "discount": DISCOUNT_SCALING, "reward": REWARD_SCALING}
 }
@@ -336,9 +336,9 @@ deterministic_madn_wandb_session = wandb.init(
 learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],  # 0.005
     boundaries_and_scales={
-        30 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
-        60 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-        80 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+        40 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
+        90 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+        130 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
     }
 )
 

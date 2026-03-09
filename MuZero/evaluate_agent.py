@@ -969,27 +969,27 @@ params4 = None
 # params3 = 'rule_based_agent'
 # params4 = 'random_agent'
 # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-print("Seed Experiment_29_100 vs random agents TEMP 0.20:")
-TEMPERATURE = 0.0
-params1 = load_params_from_file('models/params/Experiment_29_100.pkl')
+print("Seed Experiment_33_100 vs random agents TEMP 0.20:")
+TEMPERATURE = 0.20
+params1 = load_params_from_file('models/params/Experiment_33_100.pkl')
 params2 = 'random_agent'
-params3 = load_params_from_file('models/params/Experiment_29_100.pkl')
+params3 = load_params_from_file('models/params/Experiment_33_100.pkl')
 params4 = 'random_agent'
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-print("Seed Experiment_29_100 vs rule-based agents TEMP 0.20:")
-TEMPERATURE = 0.0
-params1 = load_params_from_file('models/params/Experiment_29_100.pkl')
+print("Seed Experiment_33_100 vs rule-based agents TEMP 0.20:")
+TEMPERATURE = 0.20
+params1 = load_params_from_file('models/params/Experiment_33_100.pkl')
 params2 = 'rule_based_agent'
-params3 = load_params_from_file('models/params/Experiment_29_100.pkl')
+params3 = load_params_from_file('models/params/Experiment_33_100.pkl')
 params4 = 'rule_based_agent'
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-print("Seed Experiment_29_100 vs None agents TEMP 0.20:")
-TEMPERATURE = 0.0
-params1 = load_params_from_file('models/params/Experiment_29_100.pkl')
+print("Seed Experiment_33_100 vs None agents TEMP 0.20:")
+TEMPERATURE = 0.20
+params1 = load_params_from_file('models/params/Experiment_33_100.pkl')
 params2 = None
-params3 = load_params_from_file('models/params/Experiment_29_100.pkl')
+params3 = load_params_from_file('models/params/Experiment_33_100.pkl')
 params4 = None
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 

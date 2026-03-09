@@ -23,7 +23,7 @@ from MuZero.muzero_deterministic_madn import (
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG — hier anpassen!
 # ═══════════════════════════════════════════════════════════════
-filename = "Experiment_29_100"
+filename = "Experiment_33_100"
 PARAM_FILE = f"models/params/{filename}.pkl"  # ← Anpassen!
 # PARAM_FILE = None  # ← Uncomment für frische (untrainierte) Params
 
@@ -345,9 +345,54 @@ for scenario_name, pins, current_player, expected_win_action in [
 
 
 # ════════════════════════════════════════════════════════════
-#  TEST 5: MCTS Q-VALUES für PRE-WIN State
+#  TEST 5: DIREKTE POLICY PREDICTION (ohne MCTS)
 # ════════════════════════════════════════════════════════════
-print_header("TEST 5: MCTS Q-VALUES - Erkennt MCTS den Winning Move?")
+print_header("TEST 5: DIREKTE POLICY - Prior Logits vs MCTS")
+print("Zeigt die rohe Policy-Ausgabe des PredictionNetwork (ohne MCTS)")
+print("Vergleich: Wo legt das Netz von sich aus Gewicht hin?")
+print()
+
+for scenario_name, pins, current_player, winning_action_idx in [
+    ("PRE-WIN",   pins_pre_win,   0, 4),
+    ("PRE-WIN-6", pins_pre_win_6, 0, 5),
+    ("PRE-LOSE",  pins_pre_lose,  0, None),
+    ("NORMAL",    pins_normal,    0, None),
+]:
+    board = set_pins_on_board(env_base.board, pins)
+    env = env_base.replace(board=board, pins=pins, current_player=current_player)
+    obs = encode_board(env)[None, ...]
+    valid_mask = valid_action(env).flatten()
+    latent = repr_net.apply(params['representation'], obs)
+    prior_logits, value = pred_net.apply(params['prediction'], latent)
+    prior_logits = prior_logits[0]
+    value = float(value.squeeze())
+
+    # Maskiere invalide Actions für Softmax
+    masked_logits = jnp.where(valid_mask, prior_logits, -1e9)
+    prior_probs = jax.nn.softmax(masked_logits)
+
+    top5 = jnp.argsort(-prior_probs)[:5]
+
+    print(f"--- {scenario_name} ---")
+    print(f"   Direct Value: {value:.4f}")
+    print(f"   Top 5 by Prior Probability:")
+    for rank, a in enumerate(top5):
+        a = int(a)
+        marker = " < WINNING" if a == winning_action_idx else ""
+        print(f"     #{rank+1}: {action_str(a):<22} P={float(prior_probs[a]):.4f}, "
+              f"Logit={float(prior_logits[a]):+.2f}{marker}")
+    if winning_action_idx is not None:
+        win_rank = int(jnp.sum(prior_probs > prior_probs[winning_action_idx])) + 1
+        print(f"   Winning Action Rank: #{win_rank} "
+              f"(P={float(prior_probs[winning_action_idx]):.4f}, "
+              f"Logit={float(prior_logits[winning_action_idx]):+.2f})")
+    print()
+
+
+# ════════════════════════════════════════════════════════════
+#  TEST 6: MCTS Q-VALUES für PRE-WIN State
+# ════════════════════════════════════════════════════════════
+print_header("TEST 6: MCTS Q-VALUES - Erkennt MCTS den Winning Move?")
 print("Erwartet: Winning Action hat höchsten Q-Value / höchstes Gewicht")
 print()
 
@@ -365,8 +410,8 @@ for scenario_name, pins, current_player, winning_action_idx in [
     invalid_actions = (~valid_action(env).flatten())[None, :]
 
     policy_out, mcts_value = run_muzero_mcts(
-        params, jax.random.PRNGKey(42), obs, invalid_actions,
-        num_simulations=200, max_depth=50, temperature=0.25
+        params, jax.random.PRNGKey(np.random.randint(0, 10000)), obs, invalid_actions,
+        num_simulations=100, max_depth=50, temperature=0.25
     )
 
     q_values = policy_out.search_tree.summary().qvalues[0]
@@ -374,7 +419,6 @@ for scenario_name, pins, current_player, winning_action_idx in [
     weights = policy_out.action_weights[0]
 
     top5 = jnp.argsort(-weights)[:5]
-
     print(f"--- {scenario_name} ---")
     print(f"   MCTS Value: {float(mcts_value.squeeze()):.4f}")
     if winning_action_idx is not None:

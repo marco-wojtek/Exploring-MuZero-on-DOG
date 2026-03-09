@@ -67,7 +67,7 @@ class VectorizedReplayBuffer:
         """
         K = self.unroll_steps + 1
         TD = self.td_steps
-        GAMMA = 1.0
+        GAMMA = 0.997
         TERMINAL_RATIO = 0.25  # 25% des Batches enthält Terminal-Steps
         
         n_terminal = int(self.batch_size * TERMINAL_RATIO)

@@ -438,7 +438,7 @@ class DynamicsNetwork4(nn.Module):
         
         # --- Reward Head: 3 Klassen {-1, 0, +1} ---
         reward_input = jnp.concatenate([
-            jax.lax.stop_gradient(latent_state), 
+            next_latent, # NEU: Sollte Leakying von reward scores in Q-Values verhindern 
             action_one_hot
         ], axis=-1)
         reward_logits = nn.Dense(64)(reward_input)
@@ -447,7 +447,7 @@ class DynamicsNetwork4(nn.Module):
         
         # --- Discount Head: 3 Klassen {-1, 0, +1} ---
         discount_input = jnp.concatenate([
-            jax.lax.stop_gradient(latent_state),
+            next_latent, # NEU: Sollte Leakying von discount scores in Q-Values verhindern
             action_one_hot
         ], axis=-1)
         discount_logits = nn.Dense(64)(discount_input)
@@ -678,8 +678,9 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulati
         num_simulations=num_simulations,
         max_depth=max_depth,
         invalid_actions=invalid_actions,
-        qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
-        gumbel_scale=temperature
+        # qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
+        qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.5),
+        gumbel_scale=temperature,    
     )
     # policy_output = mctx.muzero_policy(
     #    params=params,               # Wird an recurrent_fn weitergereicht
