@@ -7,9 +7,10 @@ from MuZero.muzero_deterministic_madn import (
     run_muzero_mcts, load_params_from_file, repr_net, pred_net, 
     dynamics_net, init_muzero_params
 )
-sys.stdout = open("simple_test_output200.txt", "w")
+filename = "Expermiment100"
+sys.stdout = open(f"{filename}.txt", "w")
 input_shape = (34, 56)
-params = load_params_from_file("models/params/Prototype200.pkl")
+params = load_params_from_file(f"models/params/{filename}.pkl")
 # params = init_muzero_params(jax.random.PRNGKey(0), input_shape)
 
 env_base = env_reset(0, num_players=4, layout=jnp.array([True, True, True, True]),
@@ -20,7 +21,7 @@ env_base = env_reset(0, num_players=4, layout=jnp.array([True, True, True, True]
 # TEST STATES
 # ============================================================
 pins_winning = jnp.array([
-    [38, 41, 42, 40],
+    [37, 42, 43, 41],
     [1, 44, 35, 0],
     [48, 49, 50, 51],
     [52, 55, 10, 53],
@@ -28,7 +29,7 @@ pins_winning = jnp.array([
 
 pins_losing = jnp.array([
     [-1, -1, -1, 11],
-    [39, 44, 45, 46],
+    [7, 44, 45, 47],
     [1, 2, 3, 4],
     [52, 55, 54, 53],
 ])
@@ -48,14 +49,15 @@ test_states = [
 
 # ============================================================
 # TEST 1: Direct Value (RepNet + PredNet)
+# Was es testet: Das rohe Netzwerk ohne MCTS — RepNet kodiert den Board-State, PredNet gibt Value und Policy aus.
 # ============================================================
 print("=" * 70)
 print("TEST 1: DIRECT VALUES (RepNet → PredNet)")
 print("=" * 70)
-
+CURRENT_PLAYER = 0  # Teste aus Sicht von Spieler 1 (der kurz vor Sieg ist)
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     
     latent = repr_net.apply(params['representation'], obs)
@@ -81,6 +83,7 @@ for name, pins in test_states:
 # ============================================================
 # TEST 2: DynNet Latent Consistency
 # Prüft ob DynNet-Latents ähnlich wie RepNet-Latents aussehen
+# Interpretation: Das Value-Vorzeichen flippt nach jedem DynNet-Step. Das ist korrekt und erwartet in deinem Setup! 
 # ============================================================
 print("\n" + "=" * 70)
 print("TEST 2: DYNAMICS NETWORK CONSISTENCY")
@@ -88,7 +91,7 @@ print("=" * 70)
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     valid_mask = valid_action(env).flatten()
     
@@ -141,7 +144,7 @@ print("=" * 70)
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     valid_mask = valid_action(env).flatten()
     
@@ -167,6 +170,7 @@ for name, pins in test_states:
 
 # ============================================================
 # TEST 4: MCTS Analyse
+# Was es testet: Wie stark MCTS den Direct Value verändert bei 100 Simulationen.
 # ============================================================
 print("\n" + "=" * 70)
 print("TEST 4: MCTS VALUES")
@@ -174,7 +178,7 @@ print("=" * 70)
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     invalid_actions = (~valid_action(env).flatten())[None, :]
     
@@ -186,17 +190,20 @@ for name, pins in test_states:
     
     policy_out, mcts_value = run_muzero_mcts(
         params, jax.random.PRNGKey(42), obs, invalid_actions,
-        num_simulations=100, max_depth=50, temperature=0.25
+        num_simulations=100, max_depth=50, temperature=1.0
     )
     
     top3 = jnp.argsort(-policy_out.action_weights[0])[:3]
     top3_weights = [float(policy_out.action_weights[0, a]) for a in top3]
+    visit_counts = policy_out.search_tree.summary().visit_counts  # Anzahl der Besuche pro Action im Suchbaum
     
     print(f"  Sims={100:3d}: MCTS Value={float(mcts_value.squeeze()):.4f}, "
-            f"Top3={[int(a) for a in top3]} weights={[f'{w:.3f}' for w in top3_weights]}")
+            f"Top3={[int(a) for a in top3]} weights={[f'{w:.3f}' for w in top3_weights]}, "
+            f"Visit Counts={[visit_counts]}")
 
 # ============================================================
 # TEST 5: Seed Robustheit (gleicher State, verschiedene MCTS Seeds)
+# Was es testet: Ob verschiedene Random Seeds in MCTS zu unterschiedlichen Ergebnissen führen.
 # ============================================================
 print("\n" + "=" * 70)
 print("TEST 5: MCTS SEED ROBUSTNESS")
@@ -204,7 +211,7 @@ print("=" * 70)
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     invalid_actions = (~valid_action(env).flatten())[None, :]
     
@@ -212,7 +219,7 @@ for name, pins in test_states:
     for seed in range(10):
         policy_out, mcts_value = run_muzero_mcts(
             params, jax.random.PRNGKey(seed), obs, invalid_actions,
-            num_simulations=100, max_depth=10, temperature=0.25
+            num_simulations=100, max_depth=10, temperature=1.0
         )
         mcts_values.append(float(mcts_value.squeeze()))
     
@@ -224,6 +231,7 @@ for name, pins in test_states:
 
 # ============================================================
 # TEST 6: Cosine Similarity RepNet vs DynNet Latents
+# Was es testet: Wie ähnlich die Latent-Repräsentationen von RepNet und DynNet sind.
 # ============================================================
 print("\n" + "=" * 70)
 print("TEST 6: LATENT SPACE SIMILARITY (RepNet vs DynNet)")
@@ -237,7 +245,7 @@ def l2_dist(a, b):
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     valid_mask = valid_action(env).flatten()
     
@@ -266,7 +274,7 @@ print("=" * 70)
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     invalid_actions = (~valid_action(env).flatten())[None, :]
     
@@ -279,7 +287,7 @@ for name, pins in test_states:
     for num_sims in [10, 50, 100, 200]:
         policy_out, mcts_value = run_muzero_mcts(
             params, jax.random.PRNGKey(42), obs, invalid_actions,
-            num_simulations=num_sims, max_depth=10, temperature=0.25
+            num_simulations=num_sims, max_depth=10, temperature=1.0
         )
         
         top3 = jnp.argsort(-policy_out.action_weights[0])[:3]
@@ -297,7 +305,7 @@ print("=" * 70)
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     invalid_actions = (~valid_action(env).flatten())[None, :]
     
@@ -309,7 +317,7 @@ for name, pins in test_states:
     for max_depth in [1, 3, 5, 10, 20, 50]:
         policy_out, mcts_value = run_muzero_mcts(
             params, jax.random.PRNGKey(42), obs, invalid_actions,
-            num_simulations=100, max_depth=max_depth, temperature=0.25
+            num_simulations=100, max_depth=max_depth, temperature=1.0
         )
         print(f"  Depth={max_depth:2d}: MCTS Value={float(mcts_value.squeeze()):.4f}")
 # ============================================================
@@ -324,7 +332,7 @@ print("-" * 60)
 
 for name, pins in test_states:
     board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=0)
+    env = env_base.replace(board=board, pins=pins, current_player=CURRENT_PLAYER)
     obs = encode_board(env)[None, ...]
     invalid_actions = (~valid_action(env).flatten())[None, :]
     valid_mask = valid_action(env).flatten()
@@ -340,7 +348,7 @@ for name, pins in test_states:
     
     policy_out, mcts_value = run_muzero_mcts(
         params, jax.random.PRNGKey(42), obs, invalid_actions,
-        num_simulations=100, max_depth=10, temperature=0.25
+        num_simulations=100, max_depth=10, temperature=1.0
     )
     
     d = float(direct_value.squeeze())

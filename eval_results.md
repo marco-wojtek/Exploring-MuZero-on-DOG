@@ -8,11 +8,11 @@
 |  random MuZero |  600 | 100%  | 0.0  | 0.0  |
 
 ### Temp=0.2
-| Opponent | Wins (out of 600) | % | avg pin distance 1 | avg pin distance 2 |
+| Opponent | Wins (out of 1000) | % | avg pin distance 1 | avg pin distance 2 |
 |------:|------------------:|-------:|-----------------:|-----------------:|
-|  random agent | 588  | 98.0% |  0.48 | 0.55  |
-|  rule based | 600  |  100% | 0.0 |  0.0  |
-|  random MuZero |  515 | 85.6%  |  5.5 |  4.69 |
+|  random agent | 988  | 98.8% |  0.29 | 0.42  |
+|  rule based | 997  |  99.7% | 0.09|  0.17  |
+|  random MuZero |  971 | 97.1%  |  0.6 |  1.16 |
 
 
 
