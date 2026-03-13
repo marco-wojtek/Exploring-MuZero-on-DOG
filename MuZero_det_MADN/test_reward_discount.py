@@ -16,42 +16,15 @@ from MADN.deterministic_madn import (
     env_reset, encode_board, valid_action, set_pins_on_board,
     env_step, map_action, get_winner, winning_action
 )
-from MuZero.muzero_deterministic_madn import (
+from MuZero_det_MADN.muzero_deterministic_madn import (
     repr_net, pred_net, dynamics_net, load_params_from_file, init_muzero_params
 )
-
-# ═══════════════════════════════════════════════════════════════
-#  CONFIG — hier anpassen!
-# ═══════════════════════════════════════════════════════════════
-filename = "Experiment_33_100"
-PARAM_FILE = f"models/params/{filename}.pkl"  # ← Anpassen!
+filename = "Expermiment100"
+sys.stdout = open(f"MuZero_det_MADN/evaluation/{filename}_reward_discount.txt", "w")
+# --- Config ---------------------------------------------------------------------------
+PARAM_FILE = f"MuZero_det_MADN/models/params/{filename}.pkl"  # ← Anpassen!
 # PARAM_FILE = None  # ← Uncomment für frische (untrainierte) Params
 
-# True  = Kategorisches System (3 Klassen: {-1, 0, +1}, softmax → Erwartungswert)
-# False = Klassisches System  (1 Logit, tanh → [-1, +1])
-USE_CLASSIFICATION = True
-
-sys.stdout = open(f"{filename}_reward_discount.txt", "w")
-
-# --- Logit → Scalar Konvertierung -------------------------------------------------
-SUPPORT = jnp.array([-1.0, 0.0, 1.0])
-
-def logits_to_scalar(logits):
-    """Konvertiert Reward/Discount-Logits zu Skalar, je nach Modus."""
-    if USE_CLASSIFICATION:
-        probs = jax.nn.softmax(logits, axis=-1)
-        return float(jnp.sum(probs * SUPPORT, axis=-1).squeeze())
-    else:
-        return float(jnp.tanh(logits).squeeze())
-
-def logits_to_probs(logits):
-    """Gibt Klassen-Wahrscheinlichkeiten zurück (nur Klassifikation)."""
-    if USE_CLASSIFICATION:
-        probs = jax.nn.softmax(logits, axis=-1)
-        return probs.squeeze()
-    return None
-
-# --- Params laden ------------------------------------------------------------------
 input_shape = (34, 56)
 if PARAM_FILE:
     params = load_params_from_file(PARAM_FILE)
@@ -60,10 +33,12 @@ else:
     params = init_muzero_params(jax.random.PRNGKey(0), input_shape)
     print("Frische (untrainierte) Params initialisiert")
 
-mode_str = "KLASSIFIKATION (3 Klassen: {-1, 0, +1})" if USE_CLASSIFICATION else "KLASSISCH (tanh)"
-print(f"Modus: {mode_str}\n")
-
 # --- Basis-Environment ---------------------------------------------------------─
+# distance=10 -> board_size=40, total=56
+# Player 0: start=0,  target=39, goal=[40,41,42,43]
+# Player 1: start=10, target=9,  goal=[44,45,46,47]
+# Player 2: start=20, target=19, goal=[48,49,50,51]
+# Player 3: start=30, target=29, goal=[52,53,54,55]
 env_base = env_reset(
     0, num_players=4,
     layout=jnp.array([True, True, True, True]),
@@ -89,32 +64,51 @@ def print_header(title):
 #  TEST-ZUSTÄNDE: 1 Aktion vor Sieg / Niederlage
 # ════════════════════════════════════════════════════════════
 
+# --- PRE-WIN: Player 0 (Team A) gewinnt mit EINER Aktion ---
+# Player 0: Pin 0 bei Pos 35 -> Move 5 -> x=35+5-39=1 -> goal[0]=40 O
+#           Pin 1,2,3 bereits im Ziel [41,42,43]
+# Player 2: Alle 4 Pins im Ziel (Teammate muss auch fertig sein!)
+# Player 1,3: irgendwo auf dem Brett (ungefährlich)
 pins_pre_win = jnp.array([
-    [35, 41, 42, 43],
-    [ 5, 15,  7, 12],
-    [48, 49, 50, 51],
-    [25, 28, 33, 30],
+    [35, 41, 42, 43],    # P0: Pin 0 bei 35, Rest im Ziel
+    [ 5, 15,  7, 12],    # P1: verstreut
+    [48, 49, 50, 51],    # P2: alle im Ziel (Team A komplett)
+    [25, 28, 33, 30],    # P3: verstreut
 ], dtype=jnp.int32)
+# Winning Action: action_index = 0*6 + (5-1) = 4 -> Pin 0, Move 5
 
+# --- PRE-WIN-6: Sieg durch eine 6er-Aktion ---
+# Player 0: Pin 0 bei Pos 34 -> Move 6 -> x=34+6-39=1 -> goal[0]=40 O
+# (Interessant weil die 6er-Regel auch einen Extra-Zug gibt)
 pins_pre_win_6 = jnp.array([
-    [34, 41, 42, 43],
-    [ 5, 15,  7, 12],
-    [48, 49, 50, 51],
-    [25, 28, 33, 30],
+    [34, 41, 42, 43],    # P0: Pin 0 bei 34, Rest im Ziel
+    [ 5, 15,  7, 12],    # P1: verstreut
+    [48, 49, 50, 51],    # P2: alle im Ziel
+    [25, 28, 33, 30],    # P3: verstreut
 ], dtype=jnp.int32)
+# Winning Action: action_index = 0*6 + (6-1) = 5 -> Pin 0, Move 6
 
+# --- PRE-LOSE: Gegner (Player 1, Team B) gewinnt mit einer Aktion ---
+# Wir testen aus Sicht von Player 0.
+# Player 1 am Zug -> nach diesem Zug verliert Team A.
+# Aber: DynNet sieht nur den latent state von Player 0's Perspektive
+# -> Wir testen stattdessen: State wo Player 0 NICHTS tun kann und
+#   der Gegner im nächsten Zug gewinnt. Hier zeigen wir den State
+#   aus P0-Sicht und prüfen ob Value ≈ -1.
+# Alternativ: Normal-Zustand zum Vergleich.
 pins_pre_lose = jnp.array([
-    [-1, -1, -1,  2],
-    [ 5, 44, 45, 46],
-    [ 1,  3, 20, 21],
-    [52, 53, 54, 55],
+    [-1, -1, -1,  2],    # P0: 3 Pins im Haus, 1 auf Feld 2
+    [ 5, 44, 45, 46],    # P1: Pin 0 bei 5, Rest im Ziel -> Move 5 gewinnt
+    [ 1,  3, 20, 21],    # P2: verstreut (Teammate von P0)
+    [52, 53, 54, 55],    # P3: alle im Ziel (Team B komplett)
 ], dtype=jnp.int32)
 
+# --- NORMAL: Mittlerer Spielzustand (Reward sollte ≈ 0 sein) ---
 pins_normal = jnp.array([
-    [10, 20, 30, -1],
-    [15, 25, -1, -1],
-    [ 5, 35, -1, -1],
-    [ 8, 18, -1, -1],
+    [10, 20, 30, -1],    # P0: verstreut
+    [15, 25, -1, -1],    # P1: verstreut
+    [ 5, 35, -1, -1],    # P2: verstreut
+    [ 8, 18, -1, -1],    # P3: verstreut
 ], dtype=jnp.int32)
 
 
@@ -123,14 +117,12 @@ pins_normal = jnp.array([
 # ════════════════════════════════════════════════════════════
 print_header("TEST 1: REWARD HEAD - Terminal vs Normal")
 print("Erwartet: Winning Action -> reward ≈ +1, Normal Actions -> reward ≈ 0")
-if USE_CLASSIFICATION:
-    print("Modus: Klassifikation — Klasse 0=-1, Klasse 1=0, Klasse 2=+1")
 print()
 
 test_scenarios = [
-    ("PRE-WIN (Move 5 gewinnt)",   pins_pre_win,   0, 4),
-    ("PRE-WIN-6 (Move 6 gewinnt)", pins_pre_win_6, 0, 5),
-    ("PRE-LOSE (P0 Perspektive)",  pins_pre_lose,  0, None),
+    ("PRE-WIN (Move 5 gewinnt)",   pins_pre_win,   0, 4),   # action 4 = Pin 0, Move 5
+    ("PRE-WIN-6 (Move 6 gewinnt)", pins_pre_win_6, 0, 5),   # action 5 = Pin 0, Move 6
+    ("PRE-LOSE (P0 Perspektive)",  pins_pre_lose,  0, None), # kein spezifischer Gewinn-Zug
     ("NORMAL (Mittelspiel)",       pins_normal,    0, None),
 ]
 
@@ -139,8 +131,11 @@ for scenario_name, pins, current_player, winning_action_idx in test_scenarios:
     env = env_base.replace(board=board, pins=pins, current_player=current_player)
     obs = encode_board(env)[None, ...]
     valid_mask = valid_action(env).flatten()
-    win_mask = winning_action(env).flatten()
 
+    # Ground Truth: Welche Aktionen gewinnen wirklich?
+    win_mask = winning_action(env).flatten()  # (24,) bool
+
+    # RepNet -> Latent
     latent = repr_net.apply(params['representation'], obs)
     _, direct_value = pred_net.apply(params['prediction'], latent)
 
@@ -149,13 +144,8 @@ for scenario_name, pins, current_player, winning_action_idx in test_scenarios:
     print(f"   Valid actions: {int(valid_mask.sum())}")
     print(f"   Ground-truth winning actions: {[int(i) for i in jnp.where(win_mask)[0]]}")
     print()
-
-    if USE_CLASSIFICATION:
-        header = f"   {'Action':<22} {'Valid':>5} {'Wins':>5} {'Reward':>8} {'P(-1)':>6} {'P(0)':>6} {'P(+1)':>6} {'Disc':>8} {'NextVal':>8}"
-    else:
-        header = f"   {'Action':<22} {'Valid':>5} {'Wins':>5} {'Reward':>8} {'Discount':>9} {'NextVal':>8}"
-    print(header)
-    print(f"   {'-' * (len(header) - 3)}")
+    print(f"   {'Action':<22} {'Valid':>5} {'Wins':>5} {'Reward':>8} {'Discount':>9} {'NextVal':>8}")
+    print(f"   {'-'*62}")
 
     for a_idx in range(24):
         if not valid_mask[a_idx]:
@@ -165,48 +155,36 @@ for scenario_name, pins, current_player, winning_action_idx in test_scenarios:
         next_latent, reward_logits, discount_logits = dynamics_net.apply(
             params['dynamics'], latent, action
         )
-        reward = logits_to_scalar(reward_logits)
-        discount = logits_to_scalar(discount_logits)
+        reward = float(jnp.tanh(reward_logits).squeeze())
+        discount = float(jnp.tanh(discount_logits).squeeze())
         _, next_value = pred_net.apply(params['prediction'], next_latent)
         next_val = float(next_value.squeeze())
 
         wins = "O WIN" if win_mask[a_idx] else ""
         marker = " <<<" if a_idx == winning_action_idx else ""
 
-        if USE_CLASSIFICATION:
-            rp = logits_to_probs(reward_logits)
-            print(f"   {action_str(a_idx):<22} {'O':>5} {wins:>5} {reward:>+8.4f} "
-                  f"{float(rp[0]):>6.3f} {float(rp[1]):>6.3f} {float(rp[2]):>6.3f} "
-                  f"{discount:>+8.4f} {next_val:>+8.4f}{marker}")
-        else:
-            print(f"   {action_str(a_idx):<22} {'O':>5} {wins:>5} {reward:>+8.4f} "
-                  f"{discount:>+9.4f} {next_val:>+8.4f}{marker}")
+        print(f"   {action_str(a_idx):<22} {'O':>5} {wins:>5} {reward:>+8.4f} {discount:>+9.4f} {next_val:>+8.4f}{marker}")
 
     print()
 
 
 # ════════════════════════════════════════════════════════════
-#  TEST 2: DISCOUNT HEAD - 6er-Regel + Terminal
+#  TEST 2: DISCOUNT HEAD - 6er-Regel
 # ════════════════════════════════════════════════════════════
-print_header("TEST 2: DISCOUNT HEAD - 6er-Regel" + (" + Terminal" if USE_CLASSIFICATION else ""))
+print_header("TEST 2: DISCOUNT HEAD - 6er-Regel")
 print("Erwartet: Move 6 (Action 5,11,17,23) -> discount ≈ +1 (eigener Zug)")
 print("          Andere Moves              -> discount ≈ -1 (Gegnerzug)")
-if USE_CLASSIFICATION:
-    print("          Terminal (Winning Move)   -> discount ≈  0 (Spiel vorbei)")
 print()
 
+# Verwende den NORMAL State -> keine besonderen Terminal-Effekte
 board = set_pins_on_board(env_base.board, pins_normal)
 env = env_base.replace(board=board, pins=pins_normal, current_player=0)
 obs = encode_board(env)[None, ...]
 valid_mask = valid_action(env).flatten()
 latent = repr_net.apply(params['representation'], obs)
 
-if USE_CLASSIFICATION:
-    header = f"   {'Action':<22} {'Valid':>5} {'Disc':>8} {'P(-1)':>6} {'P(0)':>6} {'P(+1)':>6} {'Exp':>6} {'Match':>6}"
-else:
-    header = f"   {'Action':<22} {'Valid':>5} {'Discount':>9} {'Expected':>9} {'Match':>6}"
-print(header)
-print(f"   {'-' * (len(header) - 3)}")
+print(f"   {'Action':<22} {'Valid':>5} {'Discount':>9} {'Expected':>9} {'Match':>6}")
+print(f"   {'-'*55}")
 
 correct = 0
 total = 0
@@ -216,7 +194,7 @@ for a_idx in range(24):
 
     action = jnp.array([a_idx])
     _, _, discount_logits = dynamics_net.apply(params['dynamics'], latent, action)
-    discount = logits_to_scalar(discount_logits)
+    discount = float(jnp.tanh(discount_logits).squeeze())
 
     move = a_idx % 6 + 1
     expected = +1.0 if move == 6 else -1.0
@@ -224,14 +202,7 @@ for a_idx in range(24):
     correct += int(match)
     total += 1
 
-    if USE_CLASSIFICATION:
-        dp = logits_to_probs(discount_logits)
-        print(f"   {action_str(a_idx):<22} {'O':>5} {discount:>+8.4f} "
-              f"{float(dp[0]):>6.3f} {float(dp[1]):>6.3f} {float(dp[2]):>6.3f} "
-              f"{expected:>+6.1f} {'O' if match else 'X':>6}")
-    else:
-        print(f"   {action_str(a_idx):<22} {'O':>5} {discount:>+9.4f} "
-              f"{expected:>+9.1f} {'O' if match else 'X':>6}")
+    print(f"   {action_str(a_idx):<22} {'O':>5} {discount:>+9.4f} {expected:>+9.1f} {'O' if match else 'X':>6}")
 
 print(f"\n   Discount Accuracy: {correct}/{total} ({100*correct/total:.0f}%)")
 
@@ -241,8 +212,6 @@ print(f"\n   Discount Accuracy: {correct}/{total} ({100*correct/total:.0f}%)")
 # ════════════════════════════════════════════════════════════
 print_header("TEST 3: DISCOUNT - Konsistenz über verschiedene States")
 print("Discount hängt NUR von action_embed ab -> sollte über States gleich sein")
-if USE_CLASSIFICATION:
-    print("(Bei Klassifikation: Terminal-States könnten abweichen → discount≈0)")
 print()
 
 all_states = [
@@ -251,6 +220,7 @@ all_states = [
     ("NORMAL",   pins_normal),
 ]
 
+# Sammle Discounts für jede Action über alle States
 discounts_per_action = {a: [] for a in range(24)}
 
 for name, pins in all_states:
@@ -262,7 +232,7 @@ for name, pins in all_states:
     for a_idx in range(24):
         action = jnp.array([a_idx])
         _, _, discount_logits = dynamics_net.apply(params['dynamics'], latent, action)
-        discount = logits_to_scalar(discount_logits)
+        discount = float(jnp.tanh(discount_logits).squeeze())
         discounts_per_action[a_idx].append(discount)
 
 print(f"   {'Action':<22} {'PRE-WIN':>9} {'PRE-LOSE':>9} {'NORMAL':>9} {'Std':>7}")
@@ -273,41 +243,6 @@ for a_idx in range(24):
     std = np.std(vals)
     marker = " ← WARNUNG: state-abhängig!" if std > 0.1 else ""
     print(f"   {action_str(a_idx):<22} {vals[0]:>+9.4f} {vals[1]:>+9.4f} {vals[2]:>+9.4f} {std:>7.4f}{marker}")
-
-
-# ════════════════════════════════════════════════════════════
-#  TEST 3b: REWARD KLASSEN-VERTEILUNG (nur Klassifikation)
-# ════════════════════════════════════════════════════════════
-if USE_CLASSIFICATION:
-    print_header("TEST 3b: REWARD KLASSEN-VERTEILUNG über States")
-    print("Zeigt P(-1), P(0), P(+1) für jede Action in verschiedenen States")
-    print("Erwartet: PRE-WIN Winning Action → P(+1) hoch")
-    print()
-
-    for scenario_name, pins, current_player, winning_action_idx in test_scenarios:
-        board = set_pins_on_board(env_base.board, pins)
-        env = env_base.replace(board=board, pins=pins, current_player=current_player)
-        obs = encode_board(env)[None, ...]
-        valid_mask = valid_action(env).flatten()
-        win_mask = winning_action(env).flatten()
-        latent = repr_net.apply(params['representation'], obs)
-
-        print(f"--- {scenario_name} ---")
-        print(f"   {'Action':<22} {'Wins':>5} {'E[R]':>7} {'P(-1)':>7} {'P(0)':>7} {'P(+1)':>7}")
-        print(f"   {'-'*57}")
-
-        for a_idx in range(24):
-            if not valid_mask[a_idx]:
-                continue
-            action = jnp.array([a_idx])
-            _, reward_logits, _ = dynamics_net.apply(params['dynamics'], latent, action)
-            reward = logits_to_scalar(reward_logits)
-            rp = logits_to_probs(reward_logits)
-            wins = "O WIN" if win_mask[a_idx] else ""
-            marker = " <<<" if a_idx == winning_action_idx else ""
-            print(f"   {action_str(a_idx):<22} {wins:>5} {reward:>+7.4f} "
-                  f"{float(rp[0]):>7.4f} {float(rp[1]):>7.4f} {float(rp[2]):>7.4f}{marker}")
-        print()
 
 
 # ════════════════════════════════════════════════════════════
@@ -345,58 +280,13 @@ for scenario_name, pins, current_player, expected_win_action in [
 
 
 # ════════════════════════════════════════════════════════════
-#  TEST 5: DIREKTE POLICY PREDICTION (ohne MCTS)
+#  TEST 5: MCTS Q-VALUES für PRE-WIN State
 # ════════════════════════════════════════════════════════════
-print_header("TEST 5: DIREKTE POLICY - Prior Logits vs MCTS")
-print("Zeigt die rohe Policy-Ausgabe des PredictionNetwork (ohne MCTS)")
-print("Vergleich: Wo legt das Netz von sich aus Gewicht hin?")
-print()
-
-for scenario_name, pins, current_player, winning_action_idx in [
-    ("PRE-WIN",   pins_pre_win,   0, 4),
-    ("PRE-WIN-6", pins_pre_win_6, 0, 5),
-    ("PRE-LOSE",  pins_pre_lose,  0, None),
-    ("NORMAL",    pins_normal,    0, None),
-]:
-    board = set_pins_on_board(env_base.board, pins)
-    env = env_base.replace(board=board, pins=pins, current_player=current_player)
-    obs = encode_board(env)[None, ...]
-    valid_mask = valid_action(env).flatten()
-    latent = repr_net.apply(params['representation'], obs)
-    prior_logits, value = pred_net.apply(params['prediction'], latent)
-    prior_logits = prior_logits[0]
-    value = float(value.squeeze())
-
-    # Maskiere invalide Actions für Softmax
-    masked_logits = jnp.where(valid_mask, prior_logits, -1e9)
-    prior_probs = jax.nn.softmax(masked_logits)
-
-    top5 = jnp.argsort(-prior_probs)[:5]
-
-    print(f"--- {scenario_name} ---")
-    print(f"   Direct Value: {value:.4f}")
-    print(f"   Top 5 by Prior Probability:")
-    for rank, a in enumerate(top5):
-        a = int(a)
-        marker = " < WINNING" if a == winning_action_idx else ""
-        print(f"     #{rank+1}: {action_str(a):<22} P={float(prior_probs[a]):.4f}, "
-              f"Logit={float(prior_logits[a]):+.2f}{marker}")
-    if winning_action_idx is not None:
-        win_rank = int(jnp.sum(prior_probs > prior_probs[winning_action_idx])) + 1
-        print(f"   Winning Action Rank: #{win_rank} "
-              f"(P={float(prior_probs[winning_action_idx]):.4f}, "
-              f"Logit={float(prior_logits[winning_action_idx]):+.2f})")
-    print()
-
-
-# ════════════════════════════════════════════════════════════
-#  TEST 6: MCTS Q-VALUES für PRE-WIN State
-# ════════════════════════════════════════════════════════════
-print_header("TEST 6: MCTS Q-VALUES - Erkennt MCTS den Winning Move?")
+print_header("TEST 5: MCTS Q-VALUES - Erkennt MCTS den Winning Move?")
 print("Erwartet: Winning Action hat höchsten Q-Value / höchstes Gewicht")
 print()
 
-from MuZero.muzero_deterministic_madn import run_muzero_mcts
+from MuZero_det_MADN.muzero_deterministic_madn import run_muzero_mcts
 
 for scenario_name, pins, current_player, winning_action_idx in [
     ("PRE-WIN",   pins_pre_win,   0, 4),
@@ -410,15 +300,17 @@ for scenario_name, pins, current_player, winning_action_idx in [
     invalid_actions = (~valid_action(env).flatten())[None, :]
 
     policy_out, mcts_value = run_muzero_mcts(
-        params, jax.random.PRNGKey(np.random.randint(0, 10000)), obs, invalid_actions,
-        num_simulations=100, max_depth=50, temperature=0.25
+        params, jax.random.PRNGKey(42), obs, invalid_actions,
+        num_simulations=200, max_depth=50, temperature=0.25
     )
 
-    q_values = policy_out.search_tree.summary().qvalues[0]
-    visit_counts = policy_out.search_tree.summary().visit_counts[0]
-    weights = policy_out.action_weights[0]
+    # Q-Values aus dem Search Tree
+    q_values = policy_out.search_tree.summary().qvalues[0]  # (24,)
+    visit_counts = policy_out.search_tree.summary().visit_counts[0]  # (24,)
+    weights = policy_out.action_weights[0]  # (24,)
 
     top5 = jnp.argsort(-weights)[:5]
+
     print(f"--- {scenario_name} ---")
     print(f"   MCTS Value: {float(mcts_value.squeeze()):.4f}")
     if winning_action_idx is not None:
@@ -449,38 +341,28 @@ for scenario_name, pins, current_player, winning_action_idx in test_scenarios:
     valid_mask = valid_action(env).flatten()
     latent = repr_net.apply(params['representation'], obs)
 
+    # Sammle Rewards für gültige Actions
     rewards = []
     for a_idx in range(24):
         if not valid_mask[a_idx]:
             continue
         action = jnp.array([a_idx])
         _, reward_logits, _ = dynamics_net.apply(params['dynamics'], latent, action)
-        rewards.append(logits_to_scalar(reward_logits))
+        rewards.append(float(jnp.tanh(reward_logits).squeeze()))
 
     rewards = np.array(rewards)
     win_reward = None
     if winning_action_idx is not None:
         action = jnp.array([winning_action_idx])
         _, reward_logits, _ = dynamics_net.apply(params['dynamics'], latent, action)
-        win_reward = logits_to_scalar(reward_logits)
+        win_reward = float(jnp.tanh(reward_logits).squeeze())
 
     print(f"\n  {scenario_name}:")
     print(f"    Reward range:  [{rewards.min():+.4f}, {rewards.max():+.4f}]")
     print(f"    Reward mean:   {rewards.mean():+.4f}")
     print(f"    Reward std:    {rewards.std():.4f}")
     if win_reward is not None:
-        print(f"    Winning reward: {win_reward:+.4f}  "
-              f"{'O GOOD' if win_reward > 0.3 else 'X ZU NIEDRIG - Reward Head lernt nicht!'}")
-
-        if USE_CLASSIFICATION:
-            action = jnp.array([winning_action_idx])
-            _, reward_logits, discount_logits = dynamics_net.apply(
-                params['dynamics'], latent, action
-            )
-            rp = logits_to_probs(reward_logits)
-            dp = logits_to_probs(discount_logits)
-            print(f"    Winning R-Probs: P(-1)={float(rp[0]):.4f}, P(0)={float(rp[1]):.4f}, P(+1)={float(rp[2]):.4f}")
-            print(f"    Winning D-Probs: P(-1)={float(dp[0]):.4f}, P(0)={float(dp[1]):.4f}, P(+1)={float(dp[2]):.4f}")
+        print(f"    Winning reward: {win_reward:+.4f}  {'O GOOD' if win_reward > 0.3 else 'X ZU NIEDRIG - Reward Head lernt nicht!'}")
 
 sys.stdout.close()
 sys.stdout = sys.__stdout__

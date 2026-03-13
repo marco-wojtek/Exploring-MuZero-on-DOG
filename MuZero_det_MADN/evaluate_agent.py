@@ -11,7 +11,7 @@ import math
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from MADN.deterministic_madn import *
-from MuZero.muzero_deterministic_madn import *
+from MuZero_det_MADN.muzero_deterministic_madn import *
 
 def manual_get_winner(board: Board, num_players, goal, rules) -> chex.Array:
     '''

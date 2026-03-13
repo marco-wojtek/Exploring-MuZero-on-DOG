@@ -7,19 +7,9 @@ from time import time
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from MADN.deterministic_madn import *
-from MuZero.muzero_deterministic_madn import *
+from MuZero_det_MADN.muzero_deterministic_madn import *
+from MuZero_det_MADN.train_with_reward import RULES
 
-RULES = {
-    'enable_teams': True,
-    'enable_initial_free_pin': True,
-    'enable_circular_board': False,
-    'enable_friendly_fire': False,
-    'enable_start_blocking': False,
-    'enable_jump_in_goal_area': True,
-    'enable_start_on_1': True,
-    'enable_bonus_turn_on_6': True,
-    'must_traverse_start': False
-}
 def env_reset_batched(seed):
     return env_reset(
         0,  # <- Das wird an '_' übergeben

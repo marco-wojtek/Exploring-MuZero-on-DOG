@@ -1,4 +1,4 @@
-Params geladen: models/params/Experiment_33_100.pkl
+Params geladen: MuZero_det_MADN/models/params/Experiment_33_100.pkl
 Modus: KLASSIFIKATION (3 Klassen: {-1, 0, +1})
 
 
@@ -318,7 +318,7 @@ Erwartet: Winning Action hat höchsten Q-Value / höchstes Gewicht
      #2: Pin 0, Move 6 (6er!)   Q=-0.9849, Visits= 28, Weight=0.002
      #3: Pin 1, Move 6 (6er!)   Q=-0.9856, Visits= 14, Weight=0.001
      #4: Pin 3, Move 6 (6er!)   Q=-0.9866, Visits= 28, Weight=0.000
-     #5: Pin 3, Move 1          Q=-0.9990, Visits=  2, Weight=0.000
+     #5: Pin 3, Move 2          Q=-0.9991, Visits=  2, Weight=0.000
 
 --- NORMAL ---
    MCTS Value: 0.2078

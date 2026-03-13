@@ -10,10 +10,10 @@ import pickle
 import wandb
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
+from MuZero_det_MADN.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board
-from MuZero.vec_replay_buffer import VectorizedReplayBuffer
-from MuZero.game_agent import play_n_games_v3
+from MuZero_det_MADN.vec_replay_buffer import VectorizedReplayBuffer
+from MuZero_det_MADN.game_agent import play_n_games_v3
 
 def get_temperature(iteration, total_iterations):
     """Phasenbasiert: nur 4 verschiedene Werte, garantiert gleiche Float-Instanz"""
@@ -292,17 +292,17 @@ def test_training(config, params=None, opt_state=None):
 
         # if ((it+1) % 50 == 0):
         #     print(f"Saving checkpoint at iteration {it+1}...")
-        #     with open(f'models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+        #     with open(f'MuZero_det_MADN/models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
         #         pickle.dump(params, f)
 
-        #     with open(f'models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+        #     with open(f'MuZero_det_MADN/models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
         #         pickle.dump(opt_state, f)
         if ((it+1) % 100 == 0):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'models/params/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/params/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'models/opt_state/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/opt_state/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
 
     return params, opt_state, times_per_iteration
@@ -314,7 +314,7 @@ RULES = {
     'enable_friendly_fire': False,
     'enable_start_blocking': False,
     'enable_jump_in_goal_area': True,
-    'enable_start_on_1': True,
+    'enable_start_on_1': False,
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
@@ -324,9 +324,9 @@ POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 config = {
-    "seed": 33,
+    "seed": 34,
     "learning_rate": 0.005,
-    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Reward loss with Cross-Entropy (3 Klassen: -1, 0, +1) + Per-Class Balanced Loss und Discount loss mit Cross-Entropy (3 Klassen: -1, 0, +1). Ziel: Stabileres Training durch diskrete Klassen für Rewards und Discounts, da kontinuierliche Werte in MADN oft sehr spiky und schwer vorherzusagen sind. Mit Klassengewichtung, um wichtige Ereignisse (Sieg/Niederlage) stärker zu gewichten und Priority Sampling im Replay Buffer (fixed). Jetzt mit next_latent als Input für Reward- und Discount-Head, um Leaking von Reward/Discount-Informationen in die Value-Estimation zu verhindern. Neues qtransform",
+    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Different rules (start on 1 disabled)",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
@@ -339,7 +339,7 @@ config = {
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": False,
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-    "train_steps_per_iteration": 2000,
+    "train_steps_per_iteration": 2500,
     "rules": RULES,
     "Loss scaling": {
         "value": VALUE_SCALING, 

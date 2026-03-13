@@ -10,10 +10,10 @@ import pickle
 import wandb
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-from MuZero.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
+from MuZero_det_MADN.muzero_deterministic_madn import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
 from MADN.deterministic_madn import env_reset, encode_board
-from MuZero.vec_replay_buffer import VectorizedReplayBuffer
-from MuZero.game_agent import play_n_games_v3
+from MuZero_det_MADN.vec_replay_buffer import VectorizedReplayBuffer
+from MuZero_det_MADN.game_agent import play_n_games_v3
 
 def get_temperature(iteration, total_iterations):
     """Phasenbasiert: nur 4 verschiedene Werte, garantiert gleiche Float-Instanz"""
