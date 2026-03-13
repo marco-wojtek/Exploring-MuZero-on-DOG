@@ -225,7 +225,16 @@ def test_training(config, params=None, opt_state=None):
     game_warmup = 3
     for n in range(game_warmup):
         print(f"{n+1}/{game_warmup} Playing games to fill replay buffer...")
-        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed*n), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=get_temperature(0, iterations))
+        buffers = play_n_games_v3(
+            params, 
+            jax.random.PRNGKey(seed*n), 
+            input_shape, 
+            num_envs=num_games, 
+            num_simulation=num_simulation, 
+            max_depth=max_depth, 
+            max_steps=max_episode_length, 
+            temp=get_temperature(0, iterations)
+        )
         replay.save_games_from_buffers(buffers)
         deterministic_madn_wandb_session.log({"games_in_replay_buffer": replay.size})
 
@@ -242,7 +251,16 @@ def test_training(config, params=None, opt_state=None):
             replay.bootstrap_value_target = True
 
         temp = get_temperature(it, iterations)  # Phasenbasiert: nur 4 verschiedene Werte
-        buffers = play_n_games_v3(params, jax.random.PRNGKey(seed+it**3), input_shape, num_envs=num_games, num_simulation=num_simulation, max_depth=max_depth, max_steps=max_episode_length, temp=temp)
+        buffers = play_n_games_v3(
+            params, 
+            jax.random.PRNGKey(seed+it**3), 
+            input_shape, 
+            num_envs=num_games, 
+            num_simulation=num_simulation, 
+            max_depth=max_depth, 
+            max_steps=max_episode_length, 
+            temp=temp
+        )
         episode_lengths = buffers['idx']
         print(f"  Episode lengths: min={episode_lengths.min()}, max={episode_lengths.max()}, mean={episode_lengths.mean():.1f}")
         print("Saving collected games to replay buffer...")
@@ -323,7 +341,12 @@ config = {
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 2000,
     "rules": RULES,
-    "Loss scaling": {"value": VALUE_SCALING, "policy": POLICY_SCALING, "discount": DISCOUNT_SCALING, "reward": REWARD_SCALING}
+    "Loss scaling": {
+        "value": VALUE_SCALING, 
+        "policy": POLICY_SCALING, 
+        "discount": DISCOUNT_SCALING, 
+        "reward": REWARD_SCALING
+    }
 }
 # prep weights and biases
 deterministic_madn_wandb_session = wandb.init(

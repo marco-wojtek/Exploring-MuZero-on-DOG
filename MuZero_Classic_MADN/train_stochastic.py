@@ -22,6 +22,14 @@ def get_temperature(iteration, total_iterations):
     phase = min(phase, len(TEMPERATURE_SCHEDULE) - 1)
     return TEMPERATURE_SCHEDULE[phase]
 
+def balanced_loss(ce, is_rare, mask, n_valid, w_rare=1.0, w_common=0.1):
+    masked_rare = mask * is_rare
+    n_rare    = jnp.maximum(jnp.sum(masked_rare), 1.0)
+    n_common  = jnp.maximum(n_valid - n_rare, 1.0)
+    loss_rare   = jnp.sum(masked_rare * ce) / n_rare
+    loss_common = jnp.sum((mask - masked_rare) * ce) / n_common
+    return w_rare * loss_rare + w_common * loss_common
+
 # @jax.jit
 def loss_fn_stochastic(params, batch):
     """
@@ -56,7 +64,7 @@ def loss_fn_stochastic(params, batch):
     
     def unroll_step(carry, inputs):
         latent_state, total_loss = carry
-        k, action, target_value, target_policy, dice_outcome, mask, true_dice_probs = inputs
+        k, action, target_value, target_policy, dice_outcome, mask, true_dice_probs, target_discount, target_reward = inputs
         
         # ===== PREDICTION LOSS (am aktuellen State) =====
         pred_policy_logits, pred_value = pred_net.apply(params['prediction'], latent_state)
@@ -68,26 +76,39 @@ def loss_fn_stochastic(params, batch):
         # Value Loss (MSE)
         l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
         
+        # prep targets for classification
+        n_valid = jnp.sum(mask)
+        target_reward_class = target_reward.astype(jnp.int32)
+        target_discount_class = target_discount.astype(jnp.int32)
+        # Erkennung: L2-Abstand von uniform > threshold → non-uniform
+        is_non_uniform = jnp.sum((true_dice_probs - 1.0/6.0) ** 2, axis=-1) > 1e-6  # (B,)
+
         # ===== DYNAMICS LOSS (State Transition) =====
         # Schritt 1: Action Dynamics (Spieler wählt Aktion)
         def do_dynamics(state, action, dice_outcome):
-            # a) Action Dynamics: latent_state + action → afterstate + reward + chance_logits
-            afterstate, pred_reward, pred_chance_logits, discount_logits = dynamics_net.apply(params['dynamics'], state, action, method=dynamics_net.action_dynamics)
-            
-            # Chance Loss mit Maske
-            l_chance = jnp.mean(mask * optax.softmax_cross_entropy(pred_chance_logits, true_dice_probs))
-            
-            # b) Chance Dynamics: afterstate + dice_outcome → next_latent_state
-            next_latent = dynamics_net.apply(params['dynamics'], afterstate, dice_outcome, method=dynamics_net.chance_dynamics)
-            
-            return next_latent, l_chance
+            afterstate, pred_reward_logits, pred_chance_logits, pred_discount_logits = dynamics_net.apply(
+                params['dynamics'], state, action, method=dynamics_net.action_dynamics
+            )
+
+            reward_ce   = optax.softmax_cross_entropy_with_integer_labels(pred_reward_logits,   target_reward_class)
+            discount_ce = optax.softmax_cross_entropy_with_integer_labels(pred_discount_logits, target_discount_class)
+            chance_ce   = optax.softmax_cross_entropy(pred_chance_logits, true_dice_probs)
+
+            l_reward   = balanced_loss(reward_ce,   target_reward_class != 1,   mask, n_valid) # != 1 → seltene Klassen (reward≠0)
+            l_discount = balanced_loss(discount_ce, target_discount_class == 1, mask, n_valid) # == 1 → seltene Klasse (terminal)
+            l_chance   = balanced_loss(chance_ce,   is_non_uniform,             mask, n_valid)
+
+            next_latent = dynamics_net.apply(
+                params['dynamics'], afterstate, dice_outcome, method=dynamics_net.chance_dynamics
+            )
+            return next_latent, l_chance, l_discount, l_reward
         
         def skip_dynamics(state, action, dice_outcome):
             # Am Ende des Unrolls keine Dynamics mehr
-            return state, 0.0
+            return state, 0.0, 0.0, 0.0
         
         # Nur Dynamics wenn nicht am Ende
-        next_latent, l_chance = jax.lax.cond(
+        next_latent, l_chance, l_discount, l_reward = jax.lax.cond(
             k < num_unroll_steps,
             do_dynamics,
             skip_dynamics,
@@ -98,31 +119,54 @@ def loss_fn_stochastic(params, batch):
         next_latent = jax.lax.stop_gradient(next_latent * 0.5) + next_latent * 0.5
         
         # Gewichte die einzelnen Loss-Komponenten
-        step_loss = (
+        step_loss = (1.0 / config["unroll_steps"]) * (
             VALUE_SCALING * l_value +      # Value Loss dominiert (wie im Paper)
             POLICY_SCALING * l_policy +           # Policy Loss
-            CHANCE_SCALING * l_chance         # Chance Loss (neue Komponente für Stochastic MuZero)
-        )
-        
-        return (next_latent, total_loss + step_loss), (l_value, l_policy, l_chance)
+            CHANCE_SCALING * l_chance +
+            DISCOUNT_SCALING * l_discount +  # Discount Loss
+            REWARD_SCALING * l_reward      # Reward Loss
+        )       
+        return (next_latent, total_loss + step_loss), (l_value, l_policy, l_chance, l_discount, l_reward)
     
     # Prepare scan inputs
     k_indices = jnp.arange(num_unroll_steps + 1)
     actions_padded = jnp.concatenate([batch['actions'], jnp.zeros((batch['actions'].shape[0], 1), dtype=jnp.int32)], axis=1)
-    dice_padded = jnp.concatenate([batch['dice_outcomes'], jnp.zeros((batch['dice_outcomes'].shape[0], 1), dtype=jnp.int32)], axis=1)
-    dice_prop_padded = jnp.concatenate([batch['dice_probs'], jnp.zeros((batch['dice_probs'].shape[0], 1, 6))], axis=1)  # NEU: Würfelverteilung für gepaddeten Schritt
-    
+    #dice[k+1] als target für chance_dynamics bei schritt k
+    dice_shifted = jnp.concatenate([
+        batch['dice_outcomes'][:, 1:],              # (B, K-2): dice[1..K-2]
+        jnp.zeros((batch['dice_outcomes'].shape[0], 2), dtype=jnp.int32)         # padding
+    ], axis=1)  # shape: (B, K)
+
+    # dice_probs: KEIN SHIFT - dice_dist[k] ist bereits das korrekte Target für Schritt k
+    dice_prop_padded = jnp.concatenate([
+        batch['dice_probs'],                                              # (B, K, 6)
+        jnp.full((batch['dice_probs'].shape[0], 1, 6), 1.0/6.0)        # (B, 1, 6) padding
+    ], axis=1)
+
+    discount_targets_padded = jnp.concatenate([
+        batch['discount_targets'],
+        jnp.ones((batch['discount_targets'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = discount=0 (neutral)
+    ], axis=1)
+
+    # ✅ NEU: Reward Targets padden
+    reward_targets_padded = jnp.concatenate([
+        batch['rewards'],
+        jnp.ones((batch['rewards'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = reward=0 (neutral)
+    ], axis=1)
+
     scan_inputs = (
         k_indices,
         actions_padded.T,
         batch['target_values'].T,
         jnp.transpose(batch['policies'], (1, 0, 2)),
-        dice_padded.T,
+        dice_shifted.T,
         batch['masks'].T,
-        jnp.transpose(dice_prop_padded, (1, 0, 2))  # Wahrscheinlichkeitsverteilungen für Würfelergebnisse
+        jnp.transpose(dice_prop_padded, (1, 0, 2)),  # Wahrscheinlichkeitsverteilungen für Würfelergebnisse
+        discount_targets_padded.T,
+        reward_targets_padded.T
     )
     
-    (final_state, total_loss), (v_losses, p_losses, c_losses) = jax.lax.scan(
+    (final_state, total_loss), (v_losses, p_losses, c_losses, d_losses, r_losses) = jax.lax.scan(
         unroll_step,
         (latent_state, 0.0),
         scan_inputs
@@ -131,14 +175,16 @@ def loss_fn_stochastic(params, batch):
     value_loss = jnp.sum(v_losses)
     policy_loss = jnp.sum(p_losses)
     chance_loss = jnp.sum(c_losses)
+    discount_loss = jnp.sum(d_losses)
+    reward_loss = jnp.sum(r_losses)
     
-    return total_loss, (value_loss, policy_loss, chance_loss)
+    return total_loss, (value_loss, policy_loss, chance_loss, discount_loss, reward_loss)
 
 @jax.jit
 def train_step(params, opt_state, batch):
     """Führt einen Trainingsschritt aus."""
     grad_fn = jax.value_and_grad(loss_fn_stochastic, has_aux=True)
-    (loss, (v_loss, p_loss, c_loss)), grads = grad_fn(params, batch)
+    (loss, (v_loss, p_loss, c_loss, d_loss, r_loss)), grads = grad_fn(params, batch)
     
     updates, new_opt_state = optimizer.update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
@@ -147,7 +193,9 @@ def train_step(params, opt_state, batch):
         'total_loss': loss, 
         'v_loss': v_loss, 
         'p_loss': p_loss, 
-        'c_loss': c_loss  # NEU: Chance Loss
+        'c_loss': c_loss,  # NEU: Chance Loss
+        'd_loss': d_loss,  # NEU: Discount Loss
+        'r_loss': r_loss   # NEU: Reward Loss
     }
 
 def test_training(config, params=None, opt_state=None):
@@ -236,7 +284,13 @@ def test_training(config, params=None, opt_state=None):
     for it in range(iterations):
         start_time = time()
         print(f"\nIteration {it+1}/{iterations}")
-        
+        # ✅ Automatically switch to bootstrap after Phase 1
+        if (it) == 80:
+            print("=" * 60)
+            print("SWITCHING TO BOOTSTRAP VALUE TARGETS")
+            print("=" * 60)
+            replay.bootstrap_value_target = True
+
         # Play games
         temp = get_temperature(it, iterations)
         buffers = play_n_games_v3(
@@ -276,7 +330,9 @@ def test_training(config, params=None, opt_state=None):
                 print(f"  total_loss: {losses['total_loss']:.2f},")
                 print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/unroll_steps:.3f} per step),")
                 print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/unroll_steps:.3f} per step),")
-                print(f"  c_loss: {losses['c_loss']:.2f} ({losses['c_loss']/unroll_steps:.3f} per step)")  
+                print(f"  c_loss: {losses['c_loss']:.2f} ({losses['c_loss']/unroll_steps:.3f} per step)") 
+                print(f"  d_loss: {losses['d_loss']:.2f} ({losses['d_loss']/unroll_steps:.3f} per step),")
+                print(f"  r_loss: {losses['r_loss']:.2f} ({losses['r_loss']/unroll_steps:.3f} per step),") 
                 print(f"}}")
         
         end_time = time()
@@ -288,12 +344,12 @@ def test_training(config, params=None, opt_state=None):
         times_per_iteration.append(end_time - start_time)
 
         # Save intermediate parameters every 50 iterations
-        if (it + 1) % 30 == 0:
+        if ((it + 1) % 100 == 0):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'models/params/stochastic_muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'models/opt_state/stochastic_muzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'MuZero_Classic_MADN/models/opt_state/TEAMstochastic_muzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
     return params, opt_state, times_per_iteration
 
@@ -313,33 +369,37 @@ RULES = {
     'must_traverse_start': False,
     'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
 }
-TEMPERATURE_SCHEDULE = [1.5, 1.0, 0.7, 0.5]
-VALUE_SCALING = 75.0  
+TEMPERATURE_SCHEDULE = [1.0, 0.9, 0.8, 0.7]#[2.0, 1.5, 1, 0.8, 0.6]#[1.0, 0.9, 0.8, 0.7]
+VALUE_SCALING = 4.0  
 POLICY_SCALING = 1.0
-CHANCE_SCALING = 1.0 # NEU: Gewicht für Chance Loss
+CHANCE_SCALING = 0.5 # NEU: Gewicht für Chance Loss
+DISCOUNT_SCALING = 1.0
+REWARD_SCALING = 1.0
 if __name__ == "__main__":
     config = {
-        "seed": 68741,
-        "learning_rate": 0.01,
-        "architecture": "Stochastic MuZero Classic MADN with larger init lr, few more MCTS simulations, env before dice as target for chance loss",
+        "seed": 4,
+        "learning_rate": 0.005,
+        "architecture": "Stochastic MuZero Classic MADN with larger init lr, few more MCTS simulations, env before dice as target for chance loss RepNet2, DynNet4, PredNet4",
         "num_games_per_iteration": 1500,
         "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
         "Buffer_Capacity": 20000,
         "Buffer_batch_Size": 128,
-        "unroll_steps": 5,
+        "unroll_steps": 10,
         "td_steps": 12,
         "max_episode_length": 800,
-        "MCTS_simulations": 50, # less actions to evaluate (4 Pins) → less simulations needed
-        "MCTS_max_depth": 25,
-        "Bootstrap_Value_Target": True,
+        "MCTS_simulations": 100, # less actions to evaluate (4 Pins) → less simulations needed
+        "MCTS_max_depth": 50,
+        "Bootstrap_Value_Target": False,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
         "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-        "train_steps_per_iteration": 1500,
+        "train_steps_per_iteration": 2500,
         "rules": RULES,
         "Loss Scaling": {
             "value_loss": VALUE_SCALING,
             "policy_loss": POLICY_SCALING,
-            "chance_loss": CHANCE_SCALING
+            "chance_loss": CHANCE_SCALING,
+            "discount_loss": DISCOUNT_SCALING,
+            "reward_loss": REWARD_SCALING
             }
     }
     
@@ -350,14 +410,13 @@ if __name__ == "__main__":
         config=config,
     )
 
-    # Optimizer Setup
+    # --- Setup Optimizer ---
     learning_rate_schedule = optax.piecewise_constant_schedule(
-        init_value=config["learning_rate"],
+        init_value=config["learning_rate"],  # 0.005
         boundaries_and_scales={
-            20 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.1
-            50 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.01
-            75 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.001
-            90 * config["train_steps_per_iteration"]: 0.1,   # Iteration: LR * 0.0001
+            25 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
+            60 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+            90 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
         }
     )
 
