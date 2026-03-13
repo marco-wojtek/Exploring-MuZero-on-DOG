@@ -292,11 +292,51 @@ class DynamicsNetwork2(nn.Module):
         max_val = jnp.max(x, axis=-1, keepdims=True)
         next_latent = (x - min_val) / (max_val - min_val + 1e-8)
         
-        # --- Unused Heads ---
-        reward = jnp.zeros_like(latent_state[:, :1])
-        discount_logits = jnp.zeros_like(latent_state[:, :1])
+        # --- Reward Head ---
+        # ✅ NEU: Gelernter Reward statt jnp.zeros!
+        # Braucht next_latent + action_embed
+        # Weil: "Gibt es einen Reward NACH diesem Zug in diesem State?"
+        # Terminal-Reward hängt davon ab OB der Zug das Spiel beendet
+        # → Braucht State-Info (wie nah am Ziel?) UND Action-Info (welcher Zug?)
+        # stop_gradient: Reward-Gradient fließt NUR durch den Reward Head
+        # NICHT zurück durch DynNet → next_latent bleibt ungestört
+        # (seed 12 variante: reward-gradient fließt durch next_latent → instabiler Training)
+        # reward_input = jnp.concatenate([
+        #     jax.lax.stop_gradient(next_latent),
+        #     jax.lax.stop_gradient(action_embed)
+        # ], axis=-1)
+        # reward_logits = nn.Dense(32)(reward_input)
+        # reward_logits = nn.relu(reward_logits)
+        # reward_logits = nn.Dense(1)(reward_logits)
+
+        # --- Reward Head ---
+        # NUR next_latent → DynNet muss Terminal-Information in Latent kodieren
+        # Kein action_embed nötig weil:
+        # DynNet(state, action) → next_latent
+        # next_latent NACH einem Sieg-Zug sollte "terminal" aussehen
+        # next_latent NACH einem normalen Zug sollte "normal" aussehen
+        # → Der Reward Head muss nur "terminal vs normal" unterscheiden
+        # Seed 14, neu:
+        # Eigenes Encoding: latent_state (VOR DynNet!) + action
+        # stop_gradient auf latent_state: Kein Gradient zurück durch RepNet
+        # ABER: latent_state enthält State-Info die next_latent auch hat
+        # UND: action_one_hot ist roh → eigenes Embedding für Reward
+        # reward_state_input = jax.lax.stop_gradient(latent_state)
+        # reward_action_embed = nn.Dense(32, name='reward_action_embed')(action_one_hot)
+        # reward_action_embed = nn.relu(reward_action_embed)
+        # reward_input = jnp.concatenate([reward_state_input, reward_action_embed], axis=-1)
+        # reward_logits = nn.Dense(64, name='reward_dense1')(reward_input)
+        # reward_logits = nn.relu(reward_logits)
+        # reward_logits = nn.Dense(1, name='reward_dense2')(reward_logits)
+        # # --- Unused Heads ---
+        reward_logits = jnp.zeros_like(latent_state[:, :1])
+        # --- Discount Head ---
+        # NUR action_embed als Input (kein latent_state!)
+        discount_logits = nn.Dense(32)(action_embed)
+        discount_logits = nn.relu(discount_logits)
+        discount_logits = nn.Dense(1)(discount_logits)
         
-        return next_latent, reward, discount_logits
+        return next_latent, reward_logits, discount_logits
     
 class DynamicsNetwork3(nn.Module):
     latent_dim: int = 256
@@ -347,7 +387,75 @@ class DynamicsNetwork3(nn.Module):
         discount_logits = jnp.zeros_like(latent_state[:, :1])
         
         return next_latent, reward, discount_logits
+
+class DynamicsNetwork4(nn.Module):
+    latent_dim: int = 256
+    num_res_blocks: int = 2  # Reduziert: weniger Gradient nötig
+    num_actions: int = 24
     
+    @nn.compact
+    def __call__(self, latent_state, action):
+        # 1. Action Encoding - Separates Embedding statt raw One-Hot
+        action_one_hot = jax.nn.one_hot(action, num_classes=self.num_actions)
+        action_embed = nn.Dense(64)(action_one_hot)   # (Batch, 64)
+        action_embed = nn.relu(action_embed)
+        
+        # 2. LayerNorm am Eingang: [0,1] → N(0,1)
+        #    Damit Dense Layers korrekt skaliert sind
+        latent_normed = nn.LayerNorm()(latent_state)  # (Batch, 256)
+        
+        # 3. Konditionierung: Action moduliert den Latent State
+        #    Statt einfacher Concat → FiLM-artige Konditionierung
+        #    (Feature-wise Linear Modulation)
+        scale = nn.Dense(self.latent_dim)(action_embed)   # (Batch, 256)
+        shift = nn.Dense(self.latent_dim)(action_embed)   # (Batch, 256)
+        x = latent_normed * (1 + scale) + shift           # (Batch, 256)
+        
+        # 4. Hauptverarbeitung
+        x = nn.Dense(self.latent_dim)(x)
+        x = nn.LayerNorm()(x)
+        x = nn.relu(x)
+        
+        x = nn.Dense(self.latent_dim)(x)
+        x = nn.LayerNorm()(x)
+        x = nn.relu(x)
+        
+        # 5. ResBlocks - weniger, weil Gradient durch stop_gradient(0.5) abnimmt
+        for _ in range(self.num_res_blocks):
+            x = ResBlock(self.latent_dim)(x)
+        
+        # 6. Residual Connection zum ORIGINAL Latent State
+        #    Kernidee: next_state = current_state + delta
+        #    Die meisten Züge ändern nur wenig am Gesamtzustand!
+        #    Das hilft dem Netzwerk weil es nur die DIFFERENZ lernen muss
+        x = nn.Dense(self.latent_dim)(x)
+        x = latent_state + x  # ← Globaler Skip zum Input!
+        
+        # 7. Min-Max Normalisierung (konsistent mit RepNet Output)
+        min_val = jnp.min(x, axis=-1, keepdims=True)
+        max_val = jnp.max(x, axis=-1, keepdims=True)
+        next_latent = (x - min_val) / (max_val - min_val + 1e-8)
+        
+        # --- Reward Head: 3 Klassen {-1, 0, +1} ---
+        reward_input = jnp.concatenate([
+            next_latent, # NEU: Sollte Leakying von reward scores in Q-Values verhindern 
+            action_one_hot
+        ], axis=-1)
+        reward_logits = nn.Dense(64)(reward_input)
+        reward_logits = nn.relu(reward_logits)
+        reward_logits = nn.Dense(3, name='reward_head')(reward_logits)  # 3 Klassen!
+        
+        # --- Discount Head: 3 Klassen {-1, 0, +1} ---
+        discount_input = jnp.concatenate([
+            next_latent, # NEU: Sollte Leakying von discount scores in Q-Values verhindern
+            action_one_hot
+        ], axis=-1)
+        discount_logits = nn.Dense(64)(discount_input)
+        discount_logits = nn.relu(discount_logits)
+        discount_logits = nn.Dense(3, name='discount_head')(discount_logits)  # 3 Klassen!
+        
+        return next_latent, reward_logits, discount_logits
+
 class PredictionNetwork(nn.Module):
     latent_dim: int = 256
     num_actions: int = 24
@@ -507,7 +615,7 @@ class PredictionNetwork4(nn.Module):
 #         return policy_logits, value
 
 repr_net = RepresentationNetwork2()
-dynamics_net = DynamicsNetwork2()
+dynamics_net = DynamicsNetwork4()
 pred_net = PredictionNetwork4()
 
 def root_inference_fn(params, observation):
@@ -524,17 +632,26 @@ def root_inference_fn(params, observation):
 def recurrent_inference_fn(params, rng_key, action, embedding):
     ## Vereinfachte Darstellung:
     # Q(s, a) = reward + discount * Value(next_state)
-    next_embedding, reward, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action)
-    discount = jax.nn.sigmoid(discount_logits)
-    # discount wird nicht gelernt also muss es auf 1 gesetzt werden
-    discount = -jnp.ones_like(discount.squeeze(-1))  # (Batch, 1) -> (Batch,) # Positive or negative 
+    next_embedding, reward_logits, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action)
+    # ✅ NEU: Discount aus Netzwerk-Output berechnen
+    # tanh → [-1, +1]
+    # -1 = Gegnerzug (Value negieren)
+    # +1 = eigener Zug / Teammate (Value beibehalten)
+    # discount = jnp.tanh(discount_logits).squeeze(-1)  # (Batch,)
     # discount = discount.squeeze(-1)
     prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
-    # reward, value: (Batch, 1) -> (Batch,)
-    # reward to 0 setzen, da wir in MADN nur sparse Rewards haben und das Dynamics-Netzwerk oft 0 vorhersagt.
-    reward = jnp.zeros_like(reward.squeeze(-1))  # (Batch, 1) -> (Batch,)
-    # reward = reward.squeeze(-1)
+    # ✅ Categorical → Scalar
+    # Klassen: [-1, 0, +1]
+    support = jnp.array([-1.0, 0.0, 1.0])
+    
+    reward_probs = jax.nn.softmax(reward_logits, axis=-1)
+    reward = jnp.sum(reward_probs * support, axis=-1)  # Erwartungswert
+    
+    discount_probs = jax.nn.softmax(discount_logits, axis=-1)
+    discount = jnp.sum(discount_probs * support, axis=-1)  # Erwartungswert
+
     value = value.squeeze(-1)
+
     recurrent_output = mctx.RecurrentFnOutput(
         reward=reward,
         discount=discount,
@@ -561,8 +678,9 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulati
         num_simulations=num_simulations,
         max_depth=max_depth,
         invalid_actions=invalid_actions,
-        qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
-        gumbel_scale=temperature
+        # qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
+        qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.5),
+        gumbel_scale=temperature,    
     )
     # policy_output = mctx.muzero_policy(
     #    params=params,               # Wird an recurrent_fn weitergereicht

@@ -250,7 +250,7 @@ def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
     progress_mean, progress_all = calculate_player_progress(envs)
     return jnp.sum(winners, axis=0), progress_mean
 
-def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
+def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20, set_seed=None):
     # use random agents if params are None
     env = env_reset_batched(0, 0)  # Dummy-Reset, um die Form der Beobachtungen zu erhalten
     enc = encode_board(env)  # z.B. (8, 56)
@@ -293,9 +293,13 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     #     )
     #     winners = winners.at[i].set(winners_batch)
     #     average_progress = average_progress.at[i].set(progress)
+    if set_seed is not None:
+        seed = jax.random.PRNGKey(set_seed)
+    else:
+        seed = jax.random.PRNGKey(np.random.randint(0, 1000000))
     winners_batch, progress = play_n_games_for_eval_jitted(
             agents, 
-            jax.random.PRNGKey(np.random.randint(0, 1000000)),
+            seed,
             num_envs=batch_size,
         )
     print(winners_batch.shape)
@@ -941,60 +945,61 @@ RULES = {
 }
 
 start_time = time()
-NUM_SIMULATIONS = 50
-MAX_DEPTH = 25
-TEMPERATURE = 0.25
-print("Games with Temperature =", TEMPERATURE)
-# # play_n_randomly(batch_size=1000)  
-params1 = 'rule_based_agent'  # Rule-Based Agent
-params2 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it30_seed68741.pkl')  # Stochastic MuZero Agent
-params3 = 'rule_based_agent'  # MCTS Agent
-params4 =  load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it30_seed68741.pkl')  # Stochastic MuZero Agent
-
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
-# # play_n_randomly(batch_size=1000)  
-params1 = 'rule_based_agent'  # Rule-Based Agent
-params2 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it60_seed68741.pkl')  # Stochastic MuZero Agent
-params3 = 'rule_based_agent'  # MCTS Agent
-params4 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it60_seed68741.pkl')  # Stochastic MuZero Agent
-
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
-# # play_n_randomly(batch_size=1000)  
-params1 = 'rule_based_agent'  # Rule-Based Agent
-params2 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it90_seed68741.pkl')  # Stochastic MuZero Agent
-params3 = 'rule_based_agent'  # MCTS Agent
-params4 =  load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it90_seed68741.pkl')  # Stochastic MuZero Agent
-
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
+NUM_SIMULATIONS = 100
+MAX_DEPTH = 50
 TEMPERATURE = 0.0
 print("Games with Temperature =", TEMPERATURE)
+print("And set seed for same dice outcomes:", 12345)
 # # play_n_randomly(batch_size=1000)  
+# print("\nVersus Random Agents:")
+# params1 = 'random_agent'  # Random Agent
+# params2 = 'rule_based_agent'  # Stochastic MuZero Agent
+# params3 = 'random_agent'  # MCTS Agent
+# params4 = 'rule_based_agent'  # Stochastic MuZero Agent
+
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+# # play_n_randomly(batch_size=1000)  
+# print("\nVersus Rule-Based Agents:")
+# params1 = 'rule_based_agent'  # Rule-Based Agent
+# params2 = 'rule_based_agent'  # Stochastic MuZero Agent
+# params3 = 'rule_based_agent'  # MCTS Agent
+# params4 = 'rule_based_agent'  # Stochastic MuZero Agent
+
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+# play_n_randomly(batch_size=1000)  
+print("\nRule based:")
 params1 = 'rule_based_agent'  # Rule-Based Agent
-params2 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it30_seed68741.pkl')  # Stochastic MuZero Agent
+params2 = 'random_agent'  # Stochastic MuZero Agent
 params3 = 'rule_based_agent'  # MCTS Agent
-params4 =  load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it30_seed68741.pkl')  # Stochastic MuZero Agent
+params4 =  'random_agent'  # Stochastic MuZero Agent
+
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150, set_seed=12345)
+
+print("\nTrained Stochastic MuZero Agents:")
+params1 = load_params_from_file("MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed4.pkl")  # Rule-Based Agent
+params2 = 'random_agent'  # Stochastic MuZero Agent
+params3 = load_params_from_file("MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed4.pkl")  # MCTS Agent
+params4 =  'random_agent'  # Stochastic MuZero Agent
+
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150, set_seed=12345)
+
+print("\nTrained Stochastic MuZero Agents:")
+params1 = load_params_from_file("MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed4.pkl")  # Rule-Based Agent
+params2 = 'rule_based_agent'  # Stochastic MuZero Agent
+params3 = load_params_from_file("MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed4.pkl")  # MCTS Agent
+params4 =  'rule_based_agent'  # Stochastic MuZero Agent
 
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-# # play_n_randomly(batch_size=1000)  
-params1 = 'rule_based_agent'  # Rule-Based Agent
-params2 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it60_seed68741.pkl')  # Stochastic MuZero Agent
-params3 = 'rule_based_agent'  # MCTS Agent
-params4 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it60_seed68741.pkl')  # Stochastic MuZero Agent
+print("\nTrained Stochastic MuZero Agents:")
+params1 = load_params_from_file("MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed4.pkl")  # Rule-Based Agent
+params2 = None # Stochastic MuZero Agent
+params3 = load_params_from_file("MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed4.pkl")  # MCTS Agent
+params4 =  None  # Stochastic MuZero Agent
 
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
-# # play_n_randomly(batch_size=1000)  
-params1 = 'rule_based_agent'  # Rule-Based Agent
-params2 = load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it90_seed68741.pkl')  # Stochastic MuZero Agent
-params3 = 'rule_based_agent'  # MCTS Agent
-params4 =  load_params_from_file('models/params/stochastic_muzero_madn_params_lr0.01_g1500_it90_seed68741.pkl')  # Stochastic MuZero Agent
-
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
 

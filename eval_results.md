@@ -1,4 +1,22 @@
+# Team MADN with reward, discount learning
+## Experiment 33 100 Iterations
+### Temp=0.0
+| Opponent | Wins (out of 600) | % | avg pin distance 1 | avg pin distance 2 |
+|------:|------------------:|-------:|-----------------:|-----------------:|
+|  random agent | 587  | 97.8%  |  1.08 |  1.01 |
+|  rule based |  598 | 99.6%  | 0.2 |  0.19  |
+|  random MuZero |  600 | 100%  | 0.0  | 0.0  |
 
+### Temp=0.2
+| Opponent | Wins (out of 1000) | % | avg pin distance 1 | avg pin distance 2 |
+|------:|------------------:|-------:|-----------------:|-----------------:|
+|  random agent | 988  | 98.8% |  0.29 | 0.42  |
+|  rule based | 997  |  99.7% | 0.09|  0.17  |
+|  random MuZero |  971 | 97.1%  |  0.6 |  1.16 |
+
+
+
+-----
 # Single Player eval Model 336525
 ## Versus random bots
 | Agent | Temperature | Wins (out of 600) | avg pin distance |

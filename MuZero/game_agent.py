@@ -67,6 +67,13 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 invalid_mask = (~valid_mask)[None, :]
                 has_valid = jnp.any(valid_mask)
                 
+                current_player_before = env.current_player
+                current_team_before = jax.lax.cond(
+                    env.rules['enable_teams'],
+                    lambda: jnp.int8(current_player_before % 2),
+                    lambda: jnp.int8(-1)
+                )
+
                 # Unterscheidung: MCTS oder no_step
                 def do_mcts(env):
                     policy_output, root_value = run_muzero_mcts(
@@ -74,16 +81,41 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                     )
                     action = policy_output.action[0]
                     next_env, reward, next_done = env_step(env, map_action(action))
-                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1
+
+                    # ✅ NEU: Spieler NACH dem Zug
+                    next_player = next_env.current_player
+                    next_team = jax.lax.cond(
+                        env.rules['enable_teams'],
+                        lambda: jnp.int8(next_player % 2),
+                        lambda: jnp.int8(-1)
+                    )
+                    
+                    # Reward Target: Klasse 0=-1, Klasse 1=0, Klasse 2=+1
+                    reward_target = jnp.where(
+                        next_done & (reward > 0), 2,
+                        jnp.where(next_done & (reward < 0), 0, 1)
+                    )
+
+                    # Discount Target: Klasse 0=-1, Klasse 1=0, Klasse 2=+1
+                    discount_target = jnp.where(
+                        next_done, 1,  # Terminal → Klasse 1 (discount=0)
+                        jax.lax.cond(
+                            env.rules['enable_teams'],
+                            lambda: jnp.where(current_team_before == next_team, 2, 0),
+                            lambda: jnp.where(current_player_before == next_player, 2, 0)
+                        )
+                    )
+
+                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, discount_target, reward_target
                 
                 def do_skip(env):
                     # Keine validen Actions → no_step
                     next_env, reward, next_done = no_step(env)
                     dummy_obs = jnp.zeros_like(obs[0])
-                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done, 0
+                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done, 0, 1, 1
                 
                 # Wähle zwischen MCTS und no_step
-                next_env, step_obs, action, reward, value, policy, next_done, mask = jax.lax.cond(
+                next_env, step_obs, action, reward, value, policy, next_done, mask, discount_target, reward_target = jax.lax.cond(
                     has_valid,
                     do_mcts,
                     do_skip,
@@ -97,12 +129,13 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 new_buffer = {
                     'obs': buffer['obs'].at[idx].set(step_obs),
                     'act': buffer['act'].at[idx].set(action),
-                    'rew': buffer['rew'].at[idx].set(reward),
+                    'rew': buffer['rew'].at[idx].set(reward_target),  # Klassen-Index statt Float!
                     'val': buffer['val'].at[idx].set(value),
                     'pol': buffer['pol'].at[idx].set(policy),
                     'mask': buffer['mask'].at[idx].set(mask),
                     'player': buffer['player'].at[idx].set(current_player),
                     'team': buffer['team'].at[idx].set(team),
+                    'discount': buffer['discount'].at[idx].set(discount_target),
                     'idx': idx + 1
                 }
                 return next_env, new_buffer, next_done
@@ -124,12 +157,13 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     init_buffers = {
         'obs': jnp.zeros((num_envs, max_steps, *input_shape)),
         'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
-        'rew': jnp.zeros((num_envs, max_steps)),
+        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # Klassen-Index statt Float
         'val': jnp.zeros((num_envs, max_steps)),
         'pol': jnp.zeros((num_envs, max_steps, 24)),
         'mask': jnp.zeros((num_envs, max_steps)),
         'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
         'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
+        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # Klassen-Index statt Float
         'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
     }
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
