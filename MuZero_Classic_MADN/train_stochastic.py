@@ -377,9 +377,9 @@ DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 if __name__ == "__main__":
     config = {
-        "seed": 4,
+        "seed": 5,
         "learning_rate": 0.005,
-        "architecture": "Stochastic MuZero Classic MADN with larger init lr, few more MCTS simulations, env before dice as target for chance loss RepNet2, DynNet4, PredNet4",
+        "architecture": "RepNet2, DynNet4, PredNet4. different qtransform for stochastic (parent+siblings)",
         "num_games_per_iteration": 1500,
         "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
@@ -392,7 +392,7 @@ if __name__ == "__main__":
         "MCTS_max_depth": 50,
         "Bootstrap_Value_Target": False,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
         "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-        "train_steps_per_iteration": 2500,
+        "train_steps_per_iteration": 2000,
         "rules": RULES,
         "Loss Scaling": {
             "value_loss": VALUE_SCALING,

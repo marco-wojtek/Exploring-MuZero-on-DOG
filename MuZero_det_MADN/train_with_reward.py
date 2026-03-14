@@ -314,7 +314,7 @@ RULES = {
     'enable_friendly_fire': False,
     'enable_start_blocking': False,
     'enable_jump_in_goal_area': True,
-    'enable_start_on_1': False,
+    'enable_start_on_1': False, # !! Start auf 1 deaktiviert !!
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
@@ -324,7 +324,7 @@ POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 config = {
-    "seed": 34,
+    "seed": 40,
     "learning_rate": 0.005,
     "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Different rules (start on 1 disabled)",
     "num_games_per_iteration": 1500,
@@ -359,9 +359,9 @@ deterministic_madn_wandb_session = wandb.init(
 learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],  # 0.005
     boundaries_and_scales={
-        40 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
-        90 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-        130 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+        30 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
+        60 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+        85 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
     }
 )
 

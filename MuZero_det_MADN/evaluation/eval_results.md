@@ -14,7 +14,30 @@
 |  rule based | 997  |  99.7% | 0.09|  0.17  |
 |  random MuZero |  971 | 97.1%  |  0.6 |  1.16 |
 
+## Experiment 40, start with 1 not allowed
+### Temp=0.0
+| Opponent | Wins (out of 600) | % | avg pin distance 1 | avg pin distance 2 |
+|------:|------------------:|-------:|-----------------:|-----------------:|
+|  random agent | 599  | 99.8%  |  0.23 |  0.22 |
+|  rule based |  600 | 100%  | 0.0 |  0.0  |
+|  random MuZero |  594 | 99%  | 0.22  | 0.31  |
 
+### Temp=0.2
+| Opponent | Wins (out of 1000) | % | avg pin distance 1 | avg pin distance 2 |
+|------:|------------------:|-------:|-----------------:|-----------------:|
+|  random agent | 598  | 98.8% |  0.018 | 0.08  |
+|  rule based | 600  |  100% | 0.0|  0.0  |
+|  random MuZero |  598 | 97.1%  |  0.0 |  0.0 |
+
+enabling the rule, even if the model did not learn it results in:
+
+### Temp=0.2
+| Opponent | Wins (out of 600) | % | 
+|------:|------------------:|-------:|
+|  random agent | 577  | 96.2%  | 
+|  rule based |  599 | 99.8%  |
+|  random MuZero |  530 | 88.3%  | 
+=> This simple rule influences game dynamics and what ist learned
 
 -----
 # Single Player eval Model 336525
