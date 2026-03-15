@@ -32,7 +32,7 @@ from MuZero_Classic_MADN.muzero_classic_madn import (
     load_params_from_file, init_muzero_params, run_stochastic_muzero_mcts,
 )
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-filename = "TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed4"
+filename = "TEAMstochastic_muzero_madn_params_lr0.01_g1500_it100_seed6"
 PARAM_FILE = f"MuZero_Classic_MADN/models/params/{filename}.pkl"
 # PARAM_FILE = None  # ← für untrainierte Params
 

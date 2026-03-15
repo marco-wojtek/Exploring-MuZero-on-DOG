@@ -16,7 +16,7 @@ RULES = {
     'enable_friendly_fire': False,
     'enable_start_blocking': False,
     'enable_jump_in_goal_area': True,
-    'enable_start_on_1': False, # !! Start auf 1 deaktiviert !!
+    'enable_start_on_1': True, 
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }

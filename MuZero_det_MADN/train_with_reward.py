@@ -177,6 +177,7 @@ def test_training(config, params=None, opt_state=None):
     max_depth = config["MCTS_max_depth"]
     schedule = config["Temperature_Schedule"]
     train_steps_per_iteration = config["train_steps_per_iteration"]
+    switch_to_bootstrap_iteration = config["Bootstrap_Switch_Iteration"]
 
 
     print(f"JAX Devices: {jax.devices()}")
@@ -244,7 +245,7 @@ def test_training(config, params=None, opt_state=None):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
         # ✅ Automatically switch to bootstrap after Phase 1
-        if (it) == 120:
+        if (it) == switch_to_bootstrap_iteration:
             print("=" * 60)
             print("SWITCHING TO BOOTSTRAP VALUE TARGETS")
             print("=" * 60)
@@ -314,7 +315,7 @@ RULES = {
     'enable_friendly_fire': False,
     'enable_start_blocking': False,
     'enable_jump_in_goal_area': True,
-    'enable_start_on_1': False, # !! Start auf 1 deaktiviert !!
+    'enable_start_on_1': True,
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
@@ -324,9 +325,9 @@ POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 config = {
-    "seed": 40,
+    "seed": 42,
     "learning_rate": 0.005,
-    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. Different rules (start on 1 disabled)",
+    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. With Bootstrap Switch at Iteration 70 to only use bootstrap value targets unless the end of the game is reached.",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
@@ -334,10 +335,11 @@ config = {
     "Buffer_batch_Size": 128,
     "unroll_steps": 10,
     "td_steps": 50, 
-    "max_episode_length": 700,
+    "max_episode_length": 550, # lower, since 700 is really rare and causes very long episodes which are hard to learn from. 550 is still above the mean episode length of random games
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": False,
+    "Bootstrap_Switch_Iteration": 70, # Nach X Iterationen wird auf bootstrap value targets umgestellt
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 2500,
     "rules": RULES,

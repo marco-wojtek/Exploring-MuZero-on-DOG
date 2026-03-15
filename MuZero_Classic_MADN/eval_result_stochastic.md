@@ -1,3 +1,11 @@
+# Seed 6
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random|0.0|347/600|57.8%|
+|rule-based|0.0|209/600|34.8%|
+|random MuZero|0.0|237/600|39.5%|
+
+
 # Seed 3
 | Opponent | Temp | Wins | % |
 |---------:|-----:|-----:|--:|
@@ -22,3 +30,4 @@ baseline (rule-based) versus other
 rule_based = 422/600
 random MuZero  = 365/600
 seed 3 MuZero = 379/600
+seed 6 MuZero = 347/600

@@ -969,30 +969,47 @@ params4 = None
 # params3 = 'rule_based_agent'
 # params4 = 'random_agent'
 # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-print("Seed Experiment_33_100 vs random agents TEMP 0.20:")
 TEMPERATURE = 0.20
-params1 = load_params_from_file('models/params/Experiment_33_100.pkl')
-params2 = 'random_agent'
-params3 = load_params_from_file('models/params/Experiment_33_100.pkl')
-params4 = 'random_agent'
+
+
+params1 = 'random_agent'
+params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params3 = 'random_agent'
+params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-print("Seed Experiment_33_100 vs rule-based agents TEMP 0.20:")
-TEMPERATURE = 0.20
-params1 = load_params_from_file('models/params/Experiment_33_100.pkl')
-params2 = 'rule_based_agent'
-params3 = load_params_from_file('models/params/Experiment_33_100.pkl')
-params4 = 'rule_based_agent'
+params1 = 'rule_based_agent'
+params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params3 = 'rule_based_agent'
+params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-print("Seed Experiment_33_100 vs None agents TEMP 0.20:")
-TEMPERATURE = 0.20
-params1 = load_params_from_file('models/params/Experiment_33_100.pkl')
-params2 = None
-params3 = load_params_from_file('models/params/Experiment_33_100.pkl')
-params4 = None
+params1 = None
+params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params3 = None
+params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
+params1 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_42_100.pkl')
+params3 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_42_100.pkl')
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# print("Seed Experiment_40_100 vs rule-based agents TEMP 0.20:")
+# TEMPERATURE = 0.20
+# params1 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_40_100.pkl')
+# params2 = 'rule_based_agent'
+# params3 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_40_100.pkl')
+# params4 = 'rule_based_agent'
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+# print("Seed Experiment_40_100 vs None agents TEMP 0.20:")
+# TEMPERATURE = 0.20
+# params1 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_40_100.pkl')
+# params2 = None
+# params3 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_40_100.pkl')
+# params4 = None
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
 
 # params2 = load_params_from_file('models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl')

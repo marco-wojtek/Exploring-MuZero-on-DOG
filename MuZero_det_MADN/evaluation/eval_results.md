@@ -39,6 +39,17 @@ enabling the rule, even if the model did not learn it results in:
 |  random MuZero |  530 | 88.3%  | 
 => This simple rule influences game dynamics and what ist learned
 
+
+## Experiment 42 with Bootstrap target after 70 Iterations
+
+### Temp=0.2
+| Opponent | Wins (out of 1000) | % | 
+|------:|------------------:|-------:|
+|  random agent | 586  | 97.6% |  
+|  rule based | 599  | 99.8%  | 
+|  random MuZero | 527  |  87.8% |  
+| Experiment 33 | 271 | 45.2%|
+
 -----
 # Single Player eval Model 336525
 ## Versus random bots
