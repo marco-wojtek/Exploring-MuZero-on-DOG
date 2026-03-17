@@ -417,7 +417,23 @@ def main():
     
     # Spielkonfiguration
     layout = jnp.array([True, True, True, True])  # Alle 4 Spieler aktiv
-    env = env_reset(0, seed=42, num_players=4, distance=10, enable_initial_free_pin=True, layout=layout, enable_teams=True)
+    env = env_reset(
+        0,
+        seed=42, 
+        num_players=4, 
+        distance=10, 
+        layout=layout, 
+        enable_teams=True,
+        enable_initial_free_pin=True, 
+        enable_circular_board=True,
+        enable_friendly_fire=True,
+        enable_start_blocking=True,
+        enable_jump_in_goal_area=False,
+        must_traverse_start=True,
+        disable_swapping=False,
+        disable_hot_seven=False,
+        disable_joker=False
+    )
     # env = env.replace(phase=jnp.int8(0))  # Setze Phase auf Play
     # env = env.replace(hands=jnp.array([[0,0,0,0,0,2,0,0,0,0,0,0,0,0],
     #                                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],

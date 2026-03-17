@@ -364,7 +364,13 @@ import pytest
         jnp.array(7),
         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': False},
         jnp.array([[4, 35, 3, 1], [6, 14, 44, 10]])),
-        
+        # Testfall 51: Am Gegner vorbei
+        (jnp.array([[0, 35, 3, 1], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(13),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': False},
+        jnp.array([[0, 35, 3, 1], [6, 14, 44, 10]])),      
     ]
 )
 def test_normal_move(pins, player, pin, move, rules, expected_valid):
@@ -378,6 +384,7 @@ def test_normal_move(pins, player, pin, move, rules, expected_valid):
     env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=player)
     board, pins, reward, done = step_normal_move(env, pin, move)
     print(pins)
+    print(env.start)
     assert jnp.array_equal(pins, expected_valid)
 
 
@@ -831,12 +838,12 @@ env = env_reset(0, num_players=4,
                     enable_start_blocking=False,
                     enable_friendly_fire=False,
                     enable_teams=True)
-pins = jnp.array([[-1, 11, 10, -1], [9, 0, 21, -1], [22, -1, -1, -1], [30, -1, -1, -1]])
-env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=1, phase=0)
-va = val_swap(env) # (4,56)
-idx = jnp.arange(va.shape[1]) # (56,)
-idx_tile = jnp.tile(idx, (va.shape[0], 1)) # (4,56)
-print(idx_tile[va])
+# pins = jnp.array([[-1, 11, 10, -1], [9, 0, 21, -1], [22, -1, -1, -1], [30, -1, -1, -1]])
+# env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=1, phase=0)
+# va = val_swap(env) # (4,56)
+# idx = jnp.arange(va.shape[1]) # (56,)
+# idx_tile = jnp.tile(idx, (va.shape[0], 1)) # (4,56)
+# print(idx_tile[va])
 # env = env.replace(pins=jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8], [-1, -1, -1, -1], [-1, -1, -1, -1]]), board=set_pins_on_board(env.board, jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8], [-1, -1, -1, -1], [-1, -1, -1, -1]])), current_player=0)
 # print(env.hands)
 # print(env.phase)
@@ -855,3 +862,10 @@ print(idx_tile[va])
 # print(env.pins)
 # print(env.current_player)
 # print(env.hands)
+
+test_normal_move(jnp.array([[1, 35, 3, 1], [6, 14, 44, 10]]),
+        jnp.array(0),
+        jnp.array(0),
+        jnp.array(13),
+        {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': False},
+        jnp.array([[1, 35, 3, 1], [6, 14, 44, 10]]))

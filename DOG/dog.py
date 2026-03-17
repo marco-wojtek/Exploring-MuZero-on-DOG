@@ -509,7 +509,7 @@ def val_action_normal_move(env:DOG, move: int):
     result = (board[fitted_positions] != current_player) | env.rules['enable_friendly_fire'] # check move to any board position
     # filter actions where a pin on a start spot would block others
     distance = env.board_size // 4
-    nearest_start_before = ((current_pins//distance)+1)%num_players_static # nearest start before is the next start field in front of a pin
+    nearest_start_before = ((current_pins//distance)+1 )%num_players_static # nearest start before is the next start field in front of a pin
     nearest_start_after = fitted_positions//distance
     traverses_start_position = start[nearest_start_before] == start[nearest_start_after] # if cond: pin traverses a start position
     result = jnp.where(
@@ -1260,3 +1260,13 @@ def map_action_to_card(action: Action) -> Card:
             )
         )
     )
+
+def encode_board(env: DOG) -> jnp.array:
+    """
+    Encodes the current state of the board into a format suitable for input into a neural network.
+    Args:
+        env: DOG environment
+    Returns:
+        A 3D array representing the encoded state of the board.
+    """
+    pass

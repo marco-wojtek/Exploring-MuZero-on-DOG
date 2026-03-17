@@ -87,7 +87,7 @@ def create_player_functions(player_types, params_path=None):
     # Lade MuZero-Parameter einmalig (nur wenn COM-Spieler vorhanden)
     if 1 in player_types:
         if params_path is None:
-            params_path = "models/params/Experiment_33_100.pkl"  # Anpassen!
+            params_path = "MuZero_det_MADN/models/params/Experiment_33_100.pkl"  # Anpassen!
         params = load_params_from_file(params_path)
         rng = jax.random.PRNGKey(np.random.randint(0, 100000))
     
