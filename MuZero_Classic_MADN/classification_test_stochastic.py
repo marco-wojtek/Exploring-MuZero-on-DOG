@@ -32,11 +32,11 @@ from MuZero_Classic_MADN.muzero_classic_madn import (
     load_params_from_file, init_muzero_params, run_stochastic_muzero_mcts,
 )
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-filename = "TEAMstochastic_muzero_madn_params_lr0.01_g1500_it100_seed6"
+filename = "stochastic_muzero_madn_params_lr0.005_g1500_it100_seed3"
 PARAM_FILE = f"MuZero_Classic_MADN/models/params/{filename}.pkl"
 # PARAM_FILE = None  # ← für untrainierte Params
 
-sys.stdout = open(f"MuZero_Classic_MADN/{filename}_stochastic_tests.txt", "w")
+sys.stdout = open(f"MuZero_Classic_MADN/evaluation/{filename}_stochastic_tests.txt", "w")
 
 # ── Hilfsfunktionen ───────────────────────────────────────────────────────────
 SUPPORT = jnp.array([-1.0, 0.0, 1.0])
@@ -435,6 +435,73 @@ for scenario_name, pins, current_player, dice_val, expected_pin in mcts_scenario
         print(f"  {pin_str(a):>4} {'O':>5} {q:>+8.4f} {v:>8d} {w:>8.3f}{mark}")
     print()
 
+# ════════════════════════════════════════════════════════════
+#  Test 5: Auswahlverfahren
+# Gegeben ein Zustand wo Pins 0-2 mit Würfel 5 bewegt werden können.
+# Pin 0 führt ins Ziel, Pin 1 schlägt einen gegnerischen Pin, Pin 2 ist neutral.
+# Analysiere welcher Pin raw bevorzugt wird und welcher nach MCTS als bester Zug herauskommt.
+# ════════════════════════════════════════════════════════════
+
+print_header("TEST 5: Auswahlverfahren – Raw vs. MCTS")
+print("Gegeben ein Zustand wo Pins 0-2 mit Würfel 5 bewegt werden können.")
+print("Pin 0 führt ins Ziel, Pin 1 schlägt einen gegnerischen Pin, Pin 2 ist neutral.")
+print()
+
+test5_state = jnp.array([
+    [35, 10, 1, 43],   # P0: Pin 0 bei 35, Pins 1-3 im Ziel
+    [ 5, 15,  7, 12],   # P1: Mittelspiel
+    [48, 49, 50, 51],   # P2: alle im Ziel (Team-Partner P0)
+    [25, 28, 33, 30],   # P3: Mittelspiel
+], dtype=jnp.int32)
+
+board = set_pins_on_board(env_base.board, test5_state)
+env = env_base.replace(board=board, pins=test5_state, current_player=0)
+env = env.replace(die=jnp.int8(5))
+valid_mask = valid_action(env).flatten()
+
+obs = encode_board(env)[None, ...]
+latent = repr_net.apply(params['representation'], obs)
+
+print("RAW Netzwerkausgaben für Pins 0-2:")
+header = f"  {'Pin':>4} {'Valid':>5} {'Reward':>7} {'Discount':>8} {'Chance':>8}"
+print(header)
+print(f"  {'-' * (len(header) - 2)}")
+for a in range(3):
+    if not valid_mask[a]:
+        continue
+    action = jnp.array([a])
+    _, reward_logits, chance_logits, discount_logits = dynamics_net.apply(
+        params['dynamics'], latent, action, method=dynamics_net.action_dynamics
+    )
+    pred_r = logits_to_scalar(reward_logits)
+    pred_d = logits_to_scalar(discount_logits)
+    pred_c = logits_to_probs(chance_logits)
+    print(f"  {pin_str(a):>4} {'O':>5} {pred_r:>+7.4f} {pred_d:>+8.4f} [{', '.join(f'{v:.3f}' for v in pred_c)}]")
+
+print("\nMCTS-Auswahl für diesen Zustand:")
+invalid_actions = (~valid_mask)[None, :]
+policy_out, mcts_value = run_stochastic_muzero_mcts(
+    params, jax.random.PRNGKey(123), obs, invalid_actions,
+    num_simulations=75, max_depth=50, temperature=0.0
+)
+q_values = policy_out.search_tree.summary().qvalues[0]
+visit_counts = policy_out.search_tree.summary().visit_counts[0]
+weights = policy_out.action_weights[0]
+chosen = int(policy_out.action[0])
+
+header = f"  {'Pin':>4} {'Valid':>5} {'Q-Value':>8} {'Besuche':>8} {'Gewicht':>8}"
+print(header)
+print(f"  {'-' * (len(header) - 2)}")
+for a in range(3):
+    if not valid_mask[a]:
+        continue
+    q = float(q_values[a])
+    v = int(visit_counts[a])
+    w = float(weights[a])
+    mark = " ← GEWÄHLT" if a == chosen else ""
+    print(f"  {pin_str(a):>4} {'O':>5} {q:>+8.4f} {v:>8d} {w:>8.3f}{mark}")
+print()
+print(f"  MCTS-Value: {float(mcts_value[0]):+.4f}  |  Gewählter Zug: {pin_str(chosen)}")
 
 # ════════════════════════════════════════════════════════════
 #  ZUSAMMENFASSUNG
