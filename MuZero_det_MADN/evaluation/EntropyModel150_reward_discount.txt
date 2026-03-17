@@ -1,0 +1,241 @@
+Params geladen: models/params/EntropyModel150.pkl
+
+======================================================================
+ TEST 1: REWARD HEAD - Terminal vs Normal
+======================================================================
+Erwartet: Winning Action -> reward ≈ +1, Normal Actions -> reward ≈ 0
+
+--- PRE-WIN (Move 5 gewinnt) ---
+   Direct Value: 0.9999
+   Valid actions: 5
+   Ground-truth winning actions: [4]
+
+   Action                 Valid  Wins   Reward  Discount  NextVal
+   --------------------------------------------------------------
+   Pin 0, Move 1              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 2              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 3              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 4              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 5              O O WIN  +0.0000   -1.0000  -1.0000 <<<
+
+--- PRE-WIN-6 (Move 6 gewinnt) ---
+   Direct Value: 0.9999
+   Valid actions: 6
+   Ground-truth winning actions: [5]
+
+   Action                 Valid  Wins   Reward  Discount  NextVal
+   --------------------------------------------------------------
+   Pin 0, Move 1              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 2              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 3              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 4              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 5              O        +0.0000   -1.0000  -1.0000
+   Pin 0, Move 6 (6er!)       O O WIN  +0.0000   +1.0000  +0.9990 <<<
+
+--- PRE-LOSE (P0 Perspektive) ---
+   Direct Value: -1.0000
+   Valid actions: 12
+   Ground-truth winning actions: []
+
+   Action                 Valid  Wins   Reward  Discount  NextVal
+   --------------------------------------------------------------
+   Pin 0, Move 1              O        +0.0000   -1.0000  +0.9999
+   Pin 0, Move 6 (6er!)       O        +0.0000   +1.0000  -0.9999
+   Pin 1, Move 1              O        +0.0000   -1.0000  +1.0000
+   Pin 1, Move 6 (6er!)       O        +0.0000   +1.0000  -0.9999
+   Pin 2, Move 1              O        +0.0000   -1.0000  +0.9999
+   Pin 2, Move 6 (6er!)       O        +0.0000   +1.0000  -0.9998
+   Pin 3, Move 1              O        +0.0000   -1.0000  +1.0000
+   Pin 3, Move 2              O        +0.0000   -1.0000  +1.0000
+   Pin 3, Move 3              O        +0.0000   -1.0000  +1.0000
+   Pin 3, Move 4              O        +0.0000   -1.0000  +1.0000
+   Pin 3, Move 5              O        +0.0000   -1.0000  +1.0000
+   Pin 3, Move 6 (6er!)       O        +0.0000   +1.0000  -0.9999
+
+--- NORMAL (Mittelspiel) ---
+   Direct Value: 0.2481
+   Valid actions: 20
+   Ground-truth winning actions: []
+
+   Action                 Valid  Wins   Reward  Discount  NextVal
+   --------------------------------------------------------------
+   Pin 0, Move 1              O        +0.0000   -1.0000  -0.2317
+   Pin 0, Move 2              O        +0.0000   -1.0000  -0.2355
+   Pin 0, Move 3              O        +0.0000   -1.0000  -0.2430
+   Pin 0, Move 4              O        +0.0000   -1.0000  -0.2407
+   Pin 0, Move 5              O        +0.0000   -1.0000  -0.2386
+   Pin 0, Move 6 (6er!)       O        +0.0000   +1.0000  +0.2640
+   Pin 1, Move 1              O        +0.0000   -1.0000  -0.2355
+   Pin 1, Move 2              O        +0.0000   -1.0000  -0.2388
+   Pin 1, Move 3              O        +0.0000   -1.0000  -0.2427
+   Pin 1, Move 4              O        +0.0000   -1.0000  -0.2392
+   Pin 1, Move 5              O        +0.0000   -1.0000  -0.2396
+   Pin 1, Move 6 (6er!)       O        +0.0000   +1.0000  +0.2801
+   Pin 2, Move 1              O        +0.0000   -1.0000  -0.2401
+   Pin 2, Move 2              O        +0.0000   -1.0000  -0.2432
+   Pin 2, Move 3              O        +0.0000   -1.0000  -0.2493
+   Pin 2, Move 4              O        +0.0000   -1.0000  -0.2434
+   Pin 2, Move 5              O        +0.0000   -1.0000  -0.2445
+   Pin 2, Move 6 (6er!)       O        +0.0000   +1.0000  +0.2842
+   Pin 3, Move 1              O        +0.0000   -1.0000  -0.2360
+   Pin 3, Move 6 (6er!)       O        +0.0000   +1.0000  +0.2729
+
+
+======================================================================
+ TEST 2: DISCOUNT HEAD - 6er-Regel
+======================================================================
+Erwartet: Move 6 (Action 5,11,17,23) -> discount ≈ +1 (eigener Zug)
+          Andere Moves              -> discount ≈ -1 (Gegnerzug)
+
+   Action                 Valid  Discount  Expected  Match
+   -------------------------------------------------------
+   Pin 0, Move 1              O   -1.0000      -1.0      O
+   Pin 0, Move 2              O   -1.0000      -1.0      O
+   Pin 0, Move 3              O   -1.0000      -1.0      O
+   Pin 0, Move 4              O   -1.0000      -1.0      O
+   Pin 0, Move 5              O   -1.0000      -1.0      O
+   Pin 0, Move 6 (6er!)       O   +1.0000      +1.0      O
+   Pin 1, Move 1              O   -1.0000      -1.0      O
+   Pin 1, Move 2              O   -1.0000      -1.0      O
+   Pin 1, Move 3              O   -1.0000      -1.0      O
+   Pin 1, Move 4              O   -1.0000      -1.0      O
+   Pin 1, Move 5              O   -1.0000      -1.0      O
+   Pin 1, Move 6 (6er!)       O   +1.0000      +1.0      O
+   Pin 2, Move 1              O   -1.0000      -1.0      O
+   Pin 2, Move 2              O   -1.0000      -1.0      O
+   Pin 2, Move 3              O   -1.0000      -1.0      O
+   Pin 2, Move 4              O   -1.0000      -1.0      O
+   Pin 2, Move 5              O   -1.0000      -1.0      O
+   Pin 2, Move 6 (6er!)       O   +1.0000      +1.0      O
+   Pin 3, Move 1              O   -1.0000      -1.0      O
+   Pin 3, Move 6 (6er!)       O   +1.0000      +1.0      O
+
+   Discount Accuracy: 20/20 (100%)
+
+======================================================================
+ TEST 3: DISCOUNT - Konsistenz über verschiedene States
+======================================================================
+Discount hängt NUR von action_embed ab -> sollte über States gleich sein
+
+   Action                   PRE-WIN  PRE-LOSE    NORMAL     Std
+   ----------------------------------------------------------
+   Pin 0, Move 1            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 0, Move 2            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 0, Move 3            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 0, Move 4            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 0, Move 5            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 0, Move 6 (6er!)     +1.0000   +1.0000   +1.0000  0.0000
+   Pin 1, Move 1            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 1, Move 2            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 1, Move 3            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 1, Move 4            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 1, Move 5            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 1, Move 6 (6er!)     +1.0000   +1.0000   +1.0000  0.0000
+   Pin 2, Move 1            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 2, Move 2            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 2, Move 3            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 2, Move 4            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 2, Move 5            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 2, Move 6 (6er!)     +1.0000   +1.0000   +1.0000  0.0000
+   Pin 3, Move 1            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 3, Move 2            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 3, Move 3            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 3, Move 4            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 3, Move 5            -1.0000   -1.0000   -1.0000  0.0000
+   Pin 3, Move 6 (6er!)     +1.0000   +1.0000   +1.0000  0.0000
+
+======================================================================
+ TEST 4: GROUND TRUTH - env_step Verifikation
+======================================================================
+Prüft ob die manuellen States wirklich 1 Aktion vor Sieg/Niederlage sind
+
+--- PRE-WIN ---
+   Current Player: 0
+   Pins P0: [35, 41, 42, 43]
+   Goal P0: [40, 41, 42, 43]
+   Target P0: 39
+   Valid: [0, 1, 2, 3, 4]
+   Winning: [4]
+   -> Action 4 (Pin 0, Move 5): reward=1, done=True
+   -> Pins P0 nach Zug: [40, 41, 42, 43]
+
+--- PRE-WIN-6 ---
+   Current Player: 0
+   Pins P0: [34, 41, 42, 43]
+   Goal P0: [40, 41, 42, 43]
+   Target P0: 39
+   Valid: [0, 1, 2, 3, 4, 5]
+   Winning: [5]
+   -> Action 5 (Pin 0, Move 6 (6er!)): reward=1, done=True
+   -> Pins P0 nach Zug: [40, 41, 42, 43]
+
+
+======================================================================
+ TEST 5: MCTS Q-VALUES - Erkennt MCTS den Winning Move?
+======================================================================
+Erwartet: Winning Action hat höchsten Q-Value / höchstes Gewicht
+
+--- PRE-WIN ---
+   MCTS Value: 0.9997
+   Winning Action 4 (Pin 0, Move 5): Q=+0.9998, Visits=13, Weight=0.030
+   Top 5 by Weight:
+     #1: Pin 0, Move 1          Q=+0.9997, Visits= 81, Weight=0.452
+     #2: Pin 0, Move 3          Q=+0.9997, Visits= 13, Weight=0.182
+     #3: Pin 0, Move 4          Q=+0.9997, Visits= 80, Weight=0.176
+     #4: Pin 0, Move 2          Q=+0.9997, Visits= 13, Weight=0.161
+     #5: Pin 0, Move 5          Q=+0.9998, Visits= 13, Weight=0.030 < WINNING
+
+--- PRE-WIN-6 ---
+   MCTS Value: 0.9997
+   Winning Action 5 (Pin 0, Move 6 (6er!)): Q=+0.9995, Visits=11, Weight=0.056
+   Top 5 by Weight:
+     #1: Pin 0, Move 1          Q=+0.9997, Visits= 67, Weight=0.589
+     #2: Pin 0, Move 3          Q=+0.9997, Visits= 11, Weight=0.120
+     #3: Pin 0, Move 4          Q=+0.9997, Visits= 67, Weight=0.115
+     #4: Pin 0, Move 2          Q=+0.9997, Visits= 33, Weight=0.097
+     #5: Pin 0, Move 6 (6er!)   Q=+0.9995, Visits= 11, Weight=0.056 < WINNING
+
+--- PRE-LOSE ---
+   MCTS Value: -1.0000
+   Top 5 by Weight:
+     #1: Pin 3, Move 1          Q=-1.0000, Visits= 56, Weight=0.167
+     #2: Pin 2, Move 1          Q=-1.0000, Visits= 28, Weight=0.165
+     #3: Pin 1, Move 1          Q=-1.0000, Visits= 56, Weight=0.161
+     #4: Pin 0, Move 1          Q=-1.0000, Visits= 12, Weight=0.122
+     #5: Pin 2, Move 6 (6er!)   Q=-0.9998, Visits= 12, Weight=0.119
+
+--- NORMAL ---
+   MCTS Value: 0.2475
+   Top 5 by Weight:
+     #1: Pin 3, Move 1          Q=+0.2340, Visits= 49, Weight=0.235
+     #2: Pin 3, Move 6 (6er!)   Q=+0.2571, Visits= 49, Weight=0.145
+     #3: Pin 2, Move 6 (6er!)   Q=+0.2714, Visits= 21, Weight=0.133
+     #4: Pin 0, Move 1          Q=+0.2302, Visits=  9, Weight=0.129
+     #5: Pin 0, Move 6 (6er!)   Q=+0.2519, Visits= 21, Weight=0.119
+
+
+======================================================================
+ ZUSAMMENFASSUNG
+======================================================================
+
+  PRE-WIN (Move 5 gewinnt):
+    Reward range:  [+0.0000, +0.0000]
+    Reward mean:   +0.0000
+    Reward std:    0.0000
+    Winning reward: +0.0000  X ZU NIEDRIG - Reward Head lernt nicht!
+
+  PRE-WIN-6 (Move 6 gewinnt):
+    Reward range:  [+0.0000, +0.0000]
+    Reward mean:   +0.0000
+    Reward std:    0.0000
+    Winning reward: +0.0000  X ZU NIEDRIG - Reward Head lernt nicht!
+
+  PRE-LOSE (P0 Perspektive):
+    Reward range:  [+0.0000, +0.0000]
+    Reward mean:   +0.0000
+    Reward std:    0.0000
+
+  NORMAL (Mittelspiel):
+    Reward range:  [+0.0000, +0.0000]
+    Reward mean:   +0.0000
+    Reward std:    0.0000

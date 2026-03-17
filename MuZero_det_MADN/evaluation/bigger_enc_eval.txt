@@ -1,0 +1,53 @@
+Evaluating trained agent vs random agent in larger encoding:
+41 Iterations - seed 9351
+(600, 4)
+Final Results:
+Total Wins per Player and different Starters:
+ [[ 25 125  25 125]
+ [ 27 123  27 123]
+ [ 24 126  24 126]
+ [ 26 124  26 124]]
+Total Wins per Player:
+ [102 498 102 498]
+Average Final Pin distance per Player and different Starters:
+ [[55.586666   5.0066667 45.260002   4.56     ]
+ [62.760002   5.2933335 48.013336   4.9266667]
+ [56.626667   5.28      51.973335   3.1866667]
+ [61.213333   3.8666668 45.         3.8533335]]
+Average Final Pin distance per Player:
+ [59.04667    4.8616667 47.56167    4.131667 ]
+81 Iterations - seed 9351
+(600, 4)
+Final Results:
+Total Wins per Player and different Starters:
+ [[ 26 124  26 124]
+ [ 19 131  19 131]
+ [ 20 130  20 130]
+ [ 27 123  27 123]]
+Total Wins per Player:
+ [ 92 508  92 508]
+Average Final Pin distance per Player and different Starters:
+ [[51.84       4.44      44.620003   4.9533334]
+ [58.960003   4.1266665 55.960003   4.3533335]
+ [57.86       2.8600001 54.153336   3.0133333]
+ [57.286667   4.4933333 54.966667   2.8400002]]
+Average Final Pin distance per Player:
+ [56.486668  3.98     52.425003  3.79    ]
+41 Iterations - seed 9351 vs 81 Iterations - seed 9351
+(600, 4)
+Final Results:
+Total Wins per Player and different Starters:
+ [[64 86 64 86]
+ [73 77 73 77]
+ [62 88 62 88]
+ [58 92 58 92]]
+Total Wins per Player:
+ [257 343 257 343]
+Average Final Pin distance per Player and different Starters:
+ [[17.166668  12.900001  17.826668  12.193334 ]
+ [15.566667  11.233334  16.233334  12.4800005]
+ [20.26      12.8       23.273335   9.24     ]
+ [16.333334  10.326667  19.613335  10.866667 ]]
+Average Final Pin distance per Player:
+ [17.331667 11.815001 19.236668 11.195001]
+Evaluation completed in 972.00 seconds.

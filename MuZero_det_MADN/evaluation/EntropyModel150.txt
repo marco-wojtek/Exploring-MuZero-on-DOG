@@ -1,0 +1,214 @@
+======================================================================
+TEST 1: DIRECT VALUES (RepNet → PredNet)
+======================================================================
+
+WINNING:
+  Direct Value:    0.9999
+  Latent mean:     0.4351
+  Latent std:      0.1541
+  Latent min:      0.0000
+  Latent max:      1.0000
+  Valid actions:   3
+  Top 5 actions:   [0, 1, 2, 3, 4]
+  Top 5 probs:     ['0.663', '0.212', '0.125', '0.000', '0.000']
+  Policy entropy:  0.8610
+
+LOSING:
+  Direct Value:    -1.0000
+  Latent mean:     0.4227
+  Latent std:      0.1472
+  Latent min:      0.0000
+  Latent max:      1.0000
+  Valid actions:   12
+  Top 5 actions:   [17, 12, 6, 18, 23]
+  Top 5 probs:     ['0.164', '0.141', '0.135', '0.134', '0.127']
+  Policy entropy:  2.0591
+
+MID:
+  Direct Value:    0.2481
+  Latent mean:     0.4221
+  Latent std:      0.1394
+  Latent min:      0.0000
+  Latent max:      1.0000
+  Valid actions:   20
+  Top 5 actions:   [18, 23, 17, 0, 5]
+  Top 5 probs:     ['0.237', '0.145', '0.132', '0.130', '0.119']
+  Policy entropy:  2.0279
+
+======================================================================
+TEST 2: DYNAMICS NETWORK CONSISTENCY
+======================================================================
+
+WINNING (RepNet Value: 0.9999):
+  RepNet Latent:  mean=0.4351, std=0.1541
+  DynNet Latent:  mean=0.4585±0.0014, std=0.1781±0.0005
+  DynNet Values:  mean=-1.0000, min=-1.0000, max=-1.0000
+  Value Shift:    0.9999 → -1.0000 (Δ=-1.9999)
+
+LOSING (RepNet Value: -1.0000):
+  RepNet Latent:  mean=0.4227, std=0.1472
+  DynNet Latent:  mean=0.5213±0.0836, std=0.1605±0.0083
+  DynNet Values:  mean=0.3334, min=-0.9999, max=1.0000
+  Value Shift:    -1.0000 → 0.3334 (Δ=1.3334)
+
+MID (RepNet Value: 0.2481):
+  RepNet Latent:  mean=0.4221, std=0.1394
+  DynNet Latent:  mean=0.5098±0.0602, std=0.1562±0.0086
+  DynNet Values:  mean=-0.1370, min=-0.2493, max=0.2842
+  Value Shift:    0.2481 → -0.1370 (Δ=-0.3852)
+
+======================================================================
+TEST 3: MULTI-STEP DYNAMICS (Latent Drift)
+======================================================================
+
+WINNING (Action=0 repeated):
+  Step 0 (RepNet): Value=0.9999, mean=0.4351, std=0.1541, min=0.0000, max=1.0000
+  Step  1 (DynNet): Value=-1.0000, mean=0.4604, std=0.1775, min=0.0000, max=1.0000
+  Step  2 (DynNet): Value=0.9995, mean=0.4622, std=0.1468, min=0.0000, max=1.0000
+  Step  3 (DynNet): Value=-0.9997, mean=0.3886, std=0.1338, min=0.0000, max=1.0000
+  Step  4 (DynNet): Value=0.9996, mean=0.4590, std=0.1675, min=0.0000, max=1.0000
+  Step  5 (DynNet): Value=-0.9995, mean=0.3948, std=0.1893, min=0.0000, max=1.0000
+  Step  6 (DynNet): Value=0.9978, mean=0.5154, std=0.1461, min=0.0000, max=1.0000
+  Step  7 (DynNet): Value=-0.9993, mean=0.3849, std=0.1316, min=0.0000, max=1.0000
+  Step  8 (DynNet): Value=0.9984, mean=0.3930, std=0.1588, min=0.0000, max=1.0000
+  Step  9 (DynNet): Value=-0.9992, mean=0.4155, std=0.1730, min=0.0000, max=1.0000
+  Step 10 (DynNet): Value=0.9947, mean=0.5143, std=0.1424, min=0.0000, max=1.0000
+
+LOSING (Action=0 repeated):
+  Step 0 (RepNet): Value=-1.0000, mean=0.4227, std=0.1472, min=0.0000, max=1.0000
+  Step  1 (DynNet): Value=1.0000, mean=0.4601, std=0.1663, min=0.0000, max=1.0000
+  Step  2 (DynNet): Value=-1.0000, mean=0.5032, std=0.1604, min=0.0000, max=1.0000
+  Step  3 (DynNet): Value=0.9999, mean=0.4095, std=0.1404, min=0.0000, max=1.0000
+  Step  4 (DynNet): Value=-1.0000, mean=0.3928, std=0.1890, min=0.0000, max=1.0000
+  Step  5 (DynNet): Value=0.9999, mean=0.4499, std=0.1899, min=0.0000, max=1.0000
+  Step  6 (DynNet): Value=-1.0000, mean=0.4952, std=0.1421, min=0.0000, max=1.0000
+  Step  7 (DynNet): Value=0.9997, mean=0.4291, std=0.1496, min=0.0000, max=1.0000
+  Step  8 (DynNet): Value=-1.0000, mean=0.3335, std=0.1737, min=0.0000, max=1.0000
+  Step  9 (DynNet): Value=0.9996, mean=0.4273, std=0.1911, min=0.0000, max=1.0000
+  Step 10 (DynNet): Value=-0.9999, mean=0.4938, std=0.1393, min=0.0000, max=1.0000
+
+MID (Action=0 repeated):
+  Step 0 (RepNet): Value=0.2481, mean=0.4221, std=0.1394, min=0.0000, max=1.0000
+  Step  1 (DynNet): Value=-0.2317, mean=0.4792, std=0.1619, min=0.0000, max=1.0000
+  Step  2 (DynNet): Value=0.2346, mean=0.4115, std=0.1503, min=0.0000, max=1.0000
+  Step  3 (DynNet): Value=-0.2345, mean=0.4099, std=0.1551, min=0.0000, max=1.0000
+  Step  4 (DynNet): Value=0.2427, mean=0.3598, std=0.1442, min=0.0000, max=1.0000
+  Step  5 (DynNet): Value=-0.2531, mean=0.3953, std=0.1369, min=0.0000, max=1.0000
+  Step  6 (DynNet): Value=0.2442, mean=0.3837, std=0.1225, min=0.0000, max=1.0000
+  Step  7 (DynNet): Value=-0.2542, mean=0.4225, std=0.1286, min=0.0000, max=1.0000
+  Step  8 (DynNet): Value=0.2402, mean=0.3810, std=0.1233, min=0.0000, max=1.0000
+  Step  9 (DynNet): Value=-0.2534, mean=0.4070, std=0.1288, min=0.0000, max=1.0000
+  Step 10 (DynNet): Value=0.2514, mean=0.3893, std=0.1190, min=0.0000, max=1.0000
+
+======================================================================
+TEST 4: MCTS VALUES
+======================================================================
+
+WINNING (Direct Value: 0.9999):
+  Sims=100: MCTS Value=0.9997, Top3=[0, 1, 2] weights=['0.663', '0.212', '0.125'], Visit Counts=[Array([[42., 42., 16.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,
+         0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.]],      dtype=float32)]
+
+LOSING (Direct Value: -1.0000):
+  Sims=100: MCTS Value=-0.9999, Top3=[17, 12, 6] weights=['0.164', '0.141', '0.135'], Visit Counts=[Array([[ 2.,  0.,  0.,  0.,  0.,  6., 28.,  0.,  0.,  0.,  0.,  2.,  6.,
+         0.,  0.,  0.,  0.,  6., 14.,  2.,  2.,  2.,  2., 28.]],      dtype=float32)]
+
+MID (Direct Value: 0.2481):
+  Sims=100: MCTS Value=0.2403, Top3=[18, 23, 17] weights=['0.235', '0.146', '0.134'], Visit Counts=[Array([[ 4.,  1.,  0.,  1.,  0., 10., 28.,  1.,  1.,  1.,  0.,  4.,  4.,
+         1.,  1.,  0.,  1.,  4., 28.,  0.,  0.,  0.,  0., 10.]],      dtype=float32)]
+
+======================================================================
+TEST 5: MCTS SEED ROBUSTNESS
+======================================================================
+
+WINNING:
+  MCTS Values: mean=0.9997, std=0.0000, min=0.9997, max=0.9997
+
+LOSING:
+  MCTS Values: mean=-0.9999, std=0.0000, min=-0.9999, max=-0.9999
+
+MID:
+  MCTS Values: mean=0.2464, std=0.0036, min=0.2385, max=0.2517
+
+======================================================================
+TEST 6: LATENT SPACE SIMILARITY (RepNet vs DynNet)
+======================================================================
+
+WINNING (Action=0):
+  Step 1: Cosine=0.9234, L2=3.0314
+  Step 2: Cosine=0.9205, L2=3.0412
+  Step 3: Cosine=0.8961, L2=3.2780
+  Step 4: Cosine=0.9093, L2=3.2649
+  Step 5: Cosine=0.8757, L2=3.6058
+
+LOSING (Action=0):
+  Step 1: Cosine=0.9303, L2=2.8738
+  Step 2: Cosine=0.9325, L2=3.1351
+  Step 3: Cosine=0.9027, L2=3.1161
+  Step 4: Cosine=0.8856, L2=3.3855
+  Step 5: Cosine=0.9000, L2=3.4077
+
+MID (Action=0):
+  Step 1: Cosine=0.9375, L2=2.8564
+  Step 2: Cosine=0.9189, L2=2.8457
+  Step 3: Cosine=0.9016, L2=3.1338
+  Step 4: Cosine=0.9070, L2=3.0055
+  Step 5: Cosine=0.9279, L2=2.6535
+
+======================================================================
+TEST 7: MCTS VALUES
+======================================================================
+
+WINNING (Direct Value: 0.9999):
+  Sims= 10: MCTS Value=0.9997, Top3=[0, 1, 2] weights=['0.663', '0.212', '0.125']
+  Sims= 50: MCTS Value=0.9997, Top3=[0, 1, 2] weights=['0.663', '0.212', '0.125']
+  Sims=100: MCTS Value=0.9997, Top3=[0, 1, 2] weights=['0.663', '0.212', '0.125']
+  Sims=200: MCTS Value=0.9996, Top3=[0, 1, 2] weights=['0.663', '0.212', '0.125']
+
+LOSING (Direct Value: -1.0000):
+  Sims= 10: MCTS Value=-0.9999, Top3=[17, 12, 6] weights=['0.164', '0.141', '0.135']
+  Sims= 50: MCTS Value=-0.9999, Top3=[17, 12, 6] weights=['0.164', '0.141', '0.135']
+  Sims=100: MCTS Value=-0.9999, Top3=[17, 12, 6] weights=['0.164', '0.141', '0.135']
+  Sims=200: MCTS Value=-0.9999, Top3=[17, 12, 6] weights=['0.164', '0.141', '0.135']
+
+MID (Direct Value: 0.2481):
+  Sims= 10: MCTS Value=0.2532, Top3=[18, 23, 17] weights=['0.235', '0.146', '0.134']
+  Sims= 50: MCTS Value=0.2427, Top3=[18, 23, 17] weights=['0.235', '0.146', '0.134']
+  Sims=100: MCTS Value=0.2403, Top3=[18, 23, 17] weights=['0.235', '0.146', '0.134']
+  Sims=200: MCTS Value=0.2422, Top3=[18, 23, 17] weights=['0.235', '0.145', '0.133']
+
+======================================================================
+TEST 8: MCTS DEPTH IMPACT
+======================================================================
+
+WINNING (Direct Value: 0.9999):
+  Depth= 1: MCTS Value=1.0000
+  Depth= 3: MCTS Value=0.9997
+  Depth= 5: MCTS Value=0.9997
+  Depth=10: MCTS Value=0.9997
+  Depth=20: MCTS Value=0.9997
+  Depth=50: MCTS Value=0.9997
+
+LOSING (Direct Value: -1.0000):
+  Depth= 1: MCTS Value=-0.9999
+  Depth= 3: MCTS Value=-0.9999
+  Depth= 5: MCTS Value=-0.9999
+  Depth=10: MCTS Value=-0.9999
+  Depth=20: MCTS Value=-0.9999
+  Depth=50: MCTS Value=-0.9999
+
+MID (Direct Value: 0.2481):
+  Depth= 1: MCTS Value=0.2465
+  Depth= 3: MCTS Value=0.2404
+  Depth= 5: MCTS Value=0.2403
+  Depth=10: MCTS Value=0.2403
+  Depth=20: MCTS Value=0.2403
+  Depth=50: MCTS Value=0.2403
+
+======================================================================
+ SUMMARY: KEY METRICS
+======================================================================
+State        Direct  MCTS(100)  Δ(MCTS-Dir)   DynNet Δ  Lat std
+------------------------------------------------------------
+WINNING      0.9999     0.9997      -0.0002    -1.9999   0.1541
+LOSING      -1.0000    -0.9999       0.0001     2.0000   0.1472
+MID          0.2481     0.2403      -0.0078    -0.4798   0.1394
