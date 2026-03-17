@@ -6,7 +6,7 @@ import sys, os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from MADN.deterministic_madn import *
-from MuZero.muzero_deterministic_madn import run_muzero_mcts, load_params_from_file
+from MuZero_det_MADN.muzero_deterministic_madn import run_muzero_mcts, load_params_from_file
 from utils.visualize import board_to_mat, matrix_to_string
 from pygames.pygame_utils import *
 ENABLE_PIN_IMAGES = True

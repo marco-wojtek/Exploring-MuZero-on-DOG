@@ -1,0 +1,266 @@
+Params geladen: MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed8.pkl
+Modus: KLASSIFIKATION (3 Klassen: {-1, 0, +1})
+
+
+======================================================================
+ TEST 1: REWARD HEAD – Terminal (+1) vs. Normal (0)
+======================================================================
+Erwartet:
+  PRE-WIN  dice=5  Pin 0 → reward ≈ +1  (P0 gewinnt)
+  PRE-WIN-6 dice=6 Pin 0 → reward ≈ +1  (P0 gewinnt via Würfel=6)
+  Alle anderen Züge      → reward ≈  0
+  Klassen: P(-1)=Verlust, P(0)=Normal, P(+1)=Sieg
+
+--- PRE-WIN   (Würfel=5, Pin 0 gewinnt) ---
+   Pin Valid   GT-R  Pred-R  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +1.0 +1.0000  0.000  0.000  1.000     O
+
+  → Accuracy: 1/1 (100%)
+
+--- PRE-WIN   (Würfel=3, kein Gewinn) ---
+   Pin Valid   GT-R  Pred-R  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +0.0 +0.0000  0.000  1.000  0.000     O
+
+  → Accuracy: 1/1 (100%)
+
+--- PRE-WIN-6 (Würfel=6, Pin 0 gewinnt) ---
+   Pin Valid   GT-R  Pred-R  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +1.0 +1.0000  0.000  0.000  1.000     O
+
+  → Accuracy: 1/1 (100%)
+
+--- NORMAL    (Würfel=3) ---
+   Pin Valid   GT-R  Pred-R  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +0.0 +0.0000  0.000  1.000  0.000     O
+  Pin 1     O   +0.0 +0.0000  0.000  1.000  0.000     O
+  Pin 2     O   +0.0 +0.0000  0.000  1.000  0.000     O
+
+  → Accuracy: 3/3 (100%)
+
+--- NORMAL    (Würfel=6) ---
+   Pin Valid   GT-R  Pred-R  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +0.0 +0.0000  0.000  1.000  0.000     O
+  Pin 1     O   +0.0 +0.0000  0.000  1.000  0.000     O
+  Pin 2     O   +0.0 +0.0000  0.000  1.000  0.000     O
+  Pin 3     O   +0.0 +0.0000  0.000  1.000  0.000     O
+
+  → Accuracy: 4/4 (100%)
+
+
+======================================================================
+ TEST 2: DISCOUNT HEAD – 6er-Bonuszug (+1) vs. Gegnerzug (-1) vs. Terminal (0)
+======================================================================
+Erwartet:
+  dice=6, kein Terminal → discount ≈ +1  (selbes Team spielt nochmal)
+  dice≠6, kein Terminal → discount ≈ -1  (gegnerisches Team)
+  Terminal (Sieg/Niederlage) → discount ≈  0
+
+--- PRE-WIN   (dice=5, Pin 0 → TERMINAL) ---
+   Pin Valid   GT-D  Pred-D  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +0.0 -0.0000  0.000  1.000  0.000     O
+
+  → Accuracy: 1/1 (100%)
+
+--- PRE-WIN-6 (dice=6, Pin 0 → TERMINAL) ---
+   Pin Valid   GT-D  Pred-D  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +0.0 -0.0000  0.000  1.000  0.000     O
+
+  → Accuracy: 1/1 (100%)
+
+--- NORMAL    (dice=6, P0 Bonuszug) ---
+   Pin Valid   GT-D  Pred-D  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   +1.0 +1.0000  0.000  0.000  1.000     O
+  Pin 1     O   +1.0 +1.0000  0.000  0.000  1.000     O
+  Pin 2     O   +1.0 +1.0000  0.000  0.000  1.000     O
+  Pin 3     O   +1.0 +1.0000  0.000  0.000  1.000     O
+
+  → Accuracy: 4/4 (100%)
+
+--- NORMAL    (dice=3, P1 nächster) ---
+   Pin Valid   GT-D  Pred-D  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   -1.0 -1.0000  1.000  0.000  0.000     O
+  Pin 1     O   -1.0 -1.0000  1.000  0.000  0.000     O
+  Pin 2     O   -1.0 -1.0000  1.000  0.000  0.000     O
+
+  → Accuracy: 3/3 (100%)
+
+--- NORMAL    (dice=1, P1 nächster) ---
+   Pin Valid   GT-D  Pred-D  P(-1)   P(0)  P(+1) Match
+  ----------------------------------------------------
+  Pin 0     O   -1.0 -1.0000  1.000  0.000  0.000     O
+  Pin 1     O   -1.0 -1.0000  1.000  0.000  0.000     O
+  Pin 2     O   -1.0 -1.0000  1.000  0.000  0.000     O
+  Pin 3     O   -1.0 -1.0000  1.000  0.000  0.000     O
+
+  → Accuracy: 4/4 (100%)
+
+
+======================================================================
+ TEST 3: CHANCE HEAD – Vorhersage der Würfelverteilung
+======================================================================
+Das Netz soll dice_probabilities(next_env) nach dem Zug vorhersagen.
+Erwartet:
+  NORMAL + dice≠6          → P1 nächster (normal)     → uniform [1/6]*6
+  P1-SOFTLOCKED + dice≠6   → P1 nächster (soft-lock)  → [76/216,...,76/216]
+  BELIEBIG + dice=6        → P0 Bonuszug (nicht lock)  → uniform [1/6]*6
+
+  NORMAL_DIST:         [0.1667, 0.1667, 0.1667, 0.1667, 0.1667, 0.1667]
+  OUT_ON_1_AND_6_DIST: [0.3519, 0.0741, 0.0741, 0.0741, 0.0741, 0.3519]
+
+--- NORMAL + dice=3  (P1 nächster, nicht locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓   GT-Dist
+  -------------------------------------------------------------------
+  Pin 0    0.194  0.153  0.153  0.153  0.153  0.194   0.0064    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 1    0.204  0.148  0.148  0.148  0.148  0.203   0.0115    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 2    0.201  0.150  0.150  0.150  0.150  0.200   0.0097    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0092  (0 = perfekt, < 0.1 = gut, > 1.0 = schlecht)
+
+--- NORMAL + dice=6  (P0 Bonuszug, nicht locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓   GT-Dist
+  -------------------------------------------------------------------
+  Pin 0    0.141  0.179  0.180  0.180  0.179  0.141   0.0063    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 1    0.129  0.185  0.186  0.186  0.186  0.129   0.0141    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 2    0.139  0.180  0.181  0.181  0.181  0.139   0.0075    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 3    0.134  0.183  0.183  0.183  0.183  0.134   0.0103    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0096  (0 = perfekt, < 0.1 = gut, > 1.0 = schlecht)
+
+--- P1-LOCKED + dice=3  (P1 nächster, locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓   GT-Dist
+  -------------------------------------------------------------------
+  Pin 0    0.341  0.079  0.080  0.079  0.080  0.341   0.0011    LOCKED
+    GT    0.352  0.074  0.074  0.074  0.074  0.352
+  Pin 1    0.337  0.082  0.082  0.082  0.082  0.337   0.0021    LOCKED
+    GT    0.352  0.074  0.074  0.074  0.074  0.352
+  Pin 2    0.344  0.078  0.078  0.078  0.078  0.343   0.0007    LOCKED
+    GT    0.352  0.074  0.074  0.074  0.074  0.352
+
+  → Mittleres KL: 0.0013  (0 = perfekt, < 0.1 = gut, > 1.0 = schlecht)
+
+--- P1-LOCKED + dice=6  (P0 Bonuszug, nicht locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓   GT-Dist
+  -------------------------------------------------------------------
+  Pin 0    0.158  0.171  0.171  0.171  0.171  0.158   0.0007    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 1    0.153  0.173  0.174  0.174  0.173  0.153   0.0018    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 2    0.150  0.175  0.175  0.175  0.175  0.150   0.0026    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin 3    0.156  0.172  0.172  0.172  0.172  0.156   0.0011    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0015  (0 = perfekt, < 0.1 = gut, > 1.0 = schlecht)
+
+--- PRE-WIN + dice=3  (P1 nächster, nicht locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓   GT-Dist
+  -------------------------------------------------------------------
+  Pin 0    0.172  0.163  0.164  0.164  0.164  0.172   0.0003    NORMAL
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0003  (0 = perfekt, < 0.1 = gut, > 1.0 = schlecht)
+
+
+======================================================================
+ TEST 4: MCTS DYNAMICS – Stochastischer MCTS
+======================================================================
+Erwartet:
+  PRE-WIN dice=5: MCTS bevorzugt Pin 0 (einziger Gewinnzug)
+  NORMAL:         MCTS verteilt Besuche/Q-Values sinnvoll
+
+--- PRE-WIN   dice=5 (Pin 0 = Gewinnzug) ---
+  MCTS-Value: +0.9721  |  Gewählter Zug: Pin 0  (Erwartet: Pin 0) → O KORREKT
+
+   Pin Valid  Q-Value  Besuche  Gewicht
+  -------------------------------------
+  Pin 0     O  +0.9716       50    1.000 ← GEWÄHLT
+
+--- PRE-WIN   dice=3 (kein Gewinn) ---
+  MCTS-Value: +0.4874  |  Gewählter Zug: Pin 0
+
+   Pin Valid  Q-Value  Besuche  Gewicht
+  -------------------------------------
+  Pin 0     O  +0.4774       50    1.000 ← GEWÄHLT
+
+--- NORMAL    dice=5 ---
+  MCTS-Value: +0.0067  |  Gewählter Zug: Pin 2
+
+   Pin Valid  Q-Value  Besuche  Gewicht
+  -------------------------------------
+  Pin 0     O  +0.0068       20    0.400
+  Pin 1     O  +0.0067       10    0.200
+  Pin 2     O  +0.0069       20    0.400 ← GEWÄHLT
+
+--- P1-LOCKED dice=3 ---
+  MCTS-Value: +0.0029  |  Gewählter Zug: Pin 1
+
+   Pin Valid  Q-Value  Besuche  Gewicht
+  -------------------------------------
+  Pin 0     O  -0.0006        8    0.160
+  Pin 1     O  +0.0040       19    0.380 ← GEWÄHLT
+  Pin 2     O  +0.0032       23    0.460
+
+
+======================================================================
+ TEST 5: Auswahlverfahren – Raw vs. MCTS
+======================================================================
+Gegeben ein Zustand wo Pins 0-2 mit Würfel 5 bewegt werden können.
+Pin 0 führt ins Ziel, Pin 1 schlägt einen gegnerischen Pin, Pin 2 ist neutral.
+
+RAW Netzwerkausgaben für Pins 0-2:
+   Pin Valid  Reward Discount   Chance
+  ------------------------------------
+  Pin 0     O +0.0000  -0.9998 [0.154, 0.173, 0.173, 0.173, 0.173, 0.154]
+  Pin 1     O +0.0000  -0.9998 [0.146, 0.177, 0.177, 0.177, 0.177, 0.146]
+  Pin 2     O +0.0000  -0.9998 [0.151, 0.174, 0.174, 0.175, 0.175, 0.151]
+
+MCTS-Auswahl für diesen Zustand:
+   Pin Valid  Q-Value  Besuche  Gewicht
+  -------------------------------------
+  Pin 0     O  +0.1465       36    0.480 ← GEWÄHLT
+  Pin 1     O  +0.1120       10    0.133
+  Pin 2     O  +0.1708       29    0.387
+
+  MCTS-Value: +0.1527  |  Gewählter Zug: Pin 0
+
+======================================================================
+ ZUSAMMENFASSUNG
+======================================================================
+
+TEST 1 – REWARD HEAD:
+  Vorhersage: +1 bei Sieg (Terminal), 0 bei normalem Zug.
+  Key: PRE-WIN dice=5 Pin 0 → reward muss ≈ +1 sein.
+
+TEST 2 – DISCOUNT HEAD:
+  Vorhersage: +1 bei Würfel=6 (Bonuszug, selbes Team),
+              -1 bei normalem Zug (gegnerisches Team),
+               0 bei Terminal (Spiel vorbei).
+
+TEST 3 – CHANCE HEAD:
+  Vorhersage der Würfelverteilung für den nächsten Spieler:
+  - Normal:     [1/6, 1/6, 1/6, 1/6, 1/6, 1/6]  (KL ≈ 0)
+  - Soft-locked: [76/216, 16/216, .., 76/216]     (KL ≈ 0)
+  Schlechte KL (> 0.5) deutet darauf hin, dass die
+  soft-locked Zustände nicht gelernt wurden.
+
+TEST 4 – MCTS DYNAMICS:
+  Der stochastische MCTS muss Reward, Discount und Chance
+  gemeinsam nutzen, um sinnvolle Q-Values zu berechnen.
+  PRE-WIN dice=5: Pin 0 sollte höchste Besuche/Q-Values haben.
+

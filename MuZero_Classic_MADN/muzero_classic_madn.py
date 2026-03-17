@@ -495,7 +495,8 @@ def run_stochastic_muzero_mcts(params, rng_key, observations, invalid_actions, n
         invalid_actions=invalid_actions,
         max_depth=max_depth,
         #qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1),
-        qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.1),
+        # qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.1),
+        qtransform=mctx.qtransform_by_parent_and_siblings,
         temperature=temperature
     )
     
