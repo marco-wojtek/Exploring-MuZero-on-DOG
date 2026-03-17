@@ -87,7 +87,7 @@ def create_player_functions(player_types, params_path=None):
     # Lade MuZero-Parameter einmalig (nur wenn COM-Spieler vorhanden)
     if 1 in player_types:
         if params_path is None:
-            params_path = "models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl"  # Anpassen!
+            params_path = "models/params/Experiment_33_100.pkl"  # Anpassen!
         params = load_params_from_file(params_path)
         rng = jax.random.PRNGKey(np.random.randint(0, 100000))
     
@@ -105,7 +105,7 @@ def create_player_functions(player_types, params_path=None):
                     invalid_actions=invalid_actions[None,:],
                     num_simulations=100,  # Anpassen nach Bedarf
                     max_depth=50,
-                    temperature=1.0
+                    temperature=0.0
                 )
                 # print(policy_output)
                 return policy_output.action[0]  # Rückgabe der Aktion als Integer
@@ -348,7 +348,7 @@ def main():
         clock.tick(60)
     
     # === SPIELER-FUNKTIONEN ERSTELLEN ===
-    player_functions = create_player_functions(player_types, params_path="models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl")
+    player_functions = create_player_functions(player_types, params_path=None)
     if jnp.any(jnp.array(player_types) == 1):
         print("MuZero-Parameter geladen. COM-Spieler werden mit MCTS agieren. Kompiliere run functions...")
         # get any idx with mcts function
@@ -471,7 +471,7 @@ def main():
                         clock.tick(60)
                     
                     # Spieler-Funktionen neu erstellen
-                    player_functions = create_player_functions(player_types, params_path="models/params/TEAMgumbelmuzero_madn_params_lr0.01_g1500_it150_seed78913.pkl")
+                    player_functions = create_player_functions(player_types, params_path=None)
                     if jnp.any(jnp.array(player_types) == 1):
                         print("MuZero-Parameter geladen. COM-Spieler werden mit MCTS agieren. Kompiliere run functions...")
                         mcts_idx = jnp.where(jnp.array(player_types) == 1)[0][0]
@@ -548,7 +548,7 @@ def main():
         
         if game_phase == 'GAME_OVER':
             # Game-Over-Bildschirm zeichnen
-            draw_game_over_screen(screen, font, winner_player, env.rules["teams_enabled"], quit_button, restart_button, menu_button)
+            draw_game_over_screen(screen, font, winner_player, env.rules["enable_teams"], quit_button, restart_button, menu_button)
         else:
             # Normales UI zeichnen
             draw_ui(screen, font, int(env.current_player), env.action_set)
