@@ -59,9 +59,10 @@ def env_reset_batched(seed, starting_player):
         enable_start_blocking=RULES['enable_start_blocking'],
         enable_jump_in_goal_area=RULES['enable_jump_in_goal_area'],
         enable_friendly_fire=RULES['enable_friendly_fire'],
-        enable_start_on_1=RULES['enable_start_on_1'],
-        enable_bonus_turn_on_6=RULES['enable_bonus_turn_on_6'],
         must_traverse_start=RULES['must_traverse_start'],
+        disable_swapping=RULES['disable_swapping'],
+        disable_hot_seven=RULES['disable_hot_seven'],
+        disable_joker=RULES['disable_joker']
     )
 
 # 2. Vektorisierte Funktionen vorbereiten
@@ -552,28 +553,11 @@ TEMPERATURE = 0.20
 
 
 params1 = 'random_agent'
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params2 = 'random_agent'
 params3 = 'random_agent'
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+params4 = 'random_agent'
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=2)
 
-params1 = 'rule_based_agent'
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-params3 = 'rule_based_agent'
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
-params1 = None
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-params3 = None
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
-params1 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_42_100.pkl')
-params3 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_42_100.pkl')
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
 
