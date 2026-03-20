@@ -1,8 +1,56 @@
+# seed 10
+## Temp = 0.0
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random|0.0|412/600|%|
+|rule-based|0.0|288/600|48.0%|
+|random MuZero|0.0|324/600|54.0%|
+|random|0.0|412/600|68.7%|
+
+vs rule based 1200 games = 583/1200 = 48.6%
+
+## Temp = 0.10
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random|0.0|411/600|%|
+|rule-based|0.0|300/600|50.0%|
+|random MuZero|0.0|294/600|49.0%|
+|random|0.0|411/600|68.5%|
+
+
+# seed 9
+## Iteration 100
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random|0.0|391/600|%|
+|rule-based|0.0|256/600|42.7%|
+|random MuZero|0.0|315/600|52.5%|
+|random|0.0|391/600|65.2%|
+
+## Iteration 200
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random|0.0|415/600|%|
+|rule-based|0.0|245/600|40.8%|
+|random MuZero|0.0|322/600|53.7%|
+|random|0.0|415/600|69.2%|
+
+## Iteration 250
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random|0.0|391/600|%|
+|rule-based|0.0|262/600|43.7%|
+|random MuZero|0.0|291/600|48.5%|
+|random|0.0|391/600|65.2%|
+
+
+
 # seed 8
 | Opponent | Temp | Wins | % |
 |---------:|-----:|-----:|--:|
 |random|0.0|357/600|%|
-|rule-based|0.0|218/600|%|
+|rule-based|0.0|218/600|36.3%|
+|random|0.0|357/600|59.5%|
 |random MuZero|0.0|244/600|%|
 
 # seed 7
@@ -56,3 +104,8 @@ seed 6 MuZero = 347/600
 seed 7 (100) MuZero = 377/600
 seed 7 (200) MuZero = 397/600
 seed 8 MuZero = 338/600
+seed 9 (100) MuZero = 389/600
+seed 9 (200) MuZero = 393/600
+seed 9 (250) MuZero = 384/600
+seed 10 (temp 0.0) MuZero = 399/600
+seed 10 (temp 0.1) MuZero = 400/600

@@ -345,7 +345,7 @@ def test_training(config, params=None, opt_state=None):
         times_per_iteration.append(end_time - start_time)
 
         # Save intermediate parameters every 50 iterations
-        if ((it + 1) % 100 == 0):
+        if ((it + 1) % 100 == 0) or (it == (iterations - 1)):
             print(f"Saving checkpoint at iteration {it+1}...")
             with open(f'MuZero_Classic_MADN/models/params/TEAMstochastic_muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(params, f)
@@ -370,7 +370,7 @@ RULES = {
     'must_traverse_start': False,
     'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
 }
-TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.7]#[1.0, 0.9, 0.8, 0.7]
+TEMPERATURE_SCHEDULE = [2.0, 1.5, 1.0, 0.9, 0.8]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 4.0  
 POLICY_SCALING = 2.0
 CHANCE_SCALING = 0.5 # NEU: Gewicht für Chance Loss
@@ -378,21 +378,21 @@ DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 if __name__ == "__main__":
     config = {
-        "seed": 8,
+        "seed": 10,
         "learning_rate": 0.005,  # Startet etwas höher, da wir weniger unrollen und damit weniger stabile Targets haben
-        "architecture": "RepNet2, DynNet4, PredNet4. Less unroll to not train far planning in highly stochastic environment. With Bootstrapping",
+        "architecture": "RepNet2, DynNet4, PredNet4. Less unroll to not train far planning in highly stochastic environment.",
         "num_games_per_iteration": 1500,
-        "iterations": 120,
+        "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
         "Buffer_Capacity": 20000,
         "Buffer_batch_Size": 128,
-        "unroll_steps": 10,
-        "td_steps": 25,
+        "unroll_steps": 5,
+        "td_steps": 7,
         "max_episode_length": 800,
-        "MCTS_simulations": 75, # less actions to evaluate (4 Pins) → less simulations needed
-        "MCTS_max_depth": 50,
-        "Bootstrap_Value_Target": True,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
-        "Bootstrap_Switch_Iteration": 150,  # Wechselt zu Bootstrap-Targets nach 150 Iterationen
+        "MCTS_simulations": 150, # less actions to evaluate (4 Pins) → less simulations needed
+        "MCTS_max_depth": 100,
+        "Bootstrap_Value_Target": False,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
+        "Bootstrap_Switch_Iteration": 80,  # Wechselt zu Bootstrap-Targets nach 80 Iterationen
         "Temperature_Schedule": TEMPERATURE_SCHEDULE,
         "train_steps_per_iteration": 2500,
         "rules": RULES,
@@ -416,9 +416,9 @@ if __name__ == "__main__":
     learning_rate_schedule = optax.piecewise_constant_schedule(
         init_value=config["learning_rate"],  # 0.005
         boundaries_and_scales={
-            40 * config["train_steps_per_iteration"]: 0.1,    # It 50:  0.005 → 0.001
-            85 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-            105 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+            30 * config["train_steps_per_iteration"]: 0.1,    # It 50:  0.005 → 0.001
+            70 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+            90 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
         }
     )
 
