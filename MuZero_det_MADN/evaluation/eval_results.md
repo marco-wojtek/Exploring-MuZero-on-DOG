@@ -1,3 +1,23 @@
+# FFA MADN
+## Seed 50 
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.2|372/600|62%|
+|random|0.0|370/600|61.6%|
+|rule-based|0.2|428/600|71.3%|
+|rule-based|0.0|409/600|68.1%|
+|init MuZero|0.2|209/600|34.8%|
+|init MuZero|0.0|183/600|30.5%|
+## Seed 51
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.2|338/600|56.3%|
+|random|0.0|338/600|56.3%|
+|rule-based|0.2|421/600|70.2%|
+|rule-based|0.0|429/600|71.5%|
+|init MuZero|0.2|279/600|46.5%|
+|init MuZero|0.0|286/600|47.7%|
+
 # Team MADN with reward, discount learning
 ## Experiment 33 100 Iterations
 ### Temp=0.0
