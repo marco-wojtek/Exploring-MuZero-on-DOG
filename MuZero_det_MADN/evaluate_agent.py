@@ -928,7 +928,7 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
 
 # Rules for evaluation games - can be adjusted to test specific rule variations
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -942,59 +942,60 @@ RULES = {
 start_time = time()
 NUM_SIMULATIONS = 100
 MAX_DEPTH = 50
-TEMPERATURE = 0.0
+TEMPERATURE = 0.2
 # # play_n_randomly(batch_size=1000)  
 params1 = None
 params2 = None
 params3 = None
 params4 = None
+TEMPERATURE = 0.10
+FILENAME = "Experiment_53_100"
 
-# print("Begin longer evaluation session...")
-
-# print("\nEvaluating 2 random agents vs 2 rule based agents:")
-
-# print("First in Teams (0&2 vs 1&3), then all separate:")
-# params1 = 'random_agent'
-# params2 = 'rule_based_agent'
-# params3 = 'random_agent'
-# params4 = 'rule_based_agent'
-# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=200)
-
-# RULES['enable_teams'] = False
-# print("\nEvaluating 2 random agents vs 2 rule based agents without teams:")
-# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=200)
-# print("\nEvaluating rule-based agent vs random agent:")
-# params1 = 'rule_based_agent'
-# params2 = 
-# params3 = 'rule_based_agent'
-# params4 = 'random_agent'
-# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-TEMPERATURE = 0.20
-
-
+print(f"Evaluating {FILENAME} vs random agents TEMP {TEMPERATURE:.2f}:")
 params1 = 'random_agent'
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
 params3 = 'random_agent'
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params4 = 'random_agent'
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
+print(f"\nEvaluating {FILENAME} vs rule-based agents TEMP {TEMPERATURE:.2f}:")
 params1 = 'rule_based_agent'
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
 params3 = 'rule_based_agent'
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params4 = 'rule_based_agent'
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
+print(f"\nEvaluating {FILENAME} vs None agents TEMP {TEMPERATURE:.2f}:")
 params1 = None
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
 params3 = None
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
+params4 = None
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
 
-params1 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-params2 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_42_100.pkl')
-params3 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_33_100.pkl')
-params4 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_42_100.pkl')
+TEMPERATURE = 0.0
+FILENAME = "Experiment_53_100"
+
+print(f"Evaluating {FILENAME} vs random agents TEMP {TEMPERATURE:.2f}:")
+params1 = 'random_agent'
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params3 = 'random_agent'
+params4 = 'random_agent'
 evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+print(f"\nEvaluating {FILENAME} vs rule-based agents TEMP {TEMPERATURE:.2f}:")
+params1 = 'rule_based_agent'
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params3 = 'rule_based_agent'
+params4 = 'rule_based_agent'
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
+print(f"\nEvaluating {FILENAME} vs None agents TEMP {TEMPERATURE:.2f}:")
+params1 = None
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params3 = None
+params4 = None
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+
 # print("Seed Experiment_40_100 vs rule-based agents TEMP 0.20:")
 # TEMPERATURE = 0.20
 # params1 = load_params_from_file('MuZero_det_MADN/models/params/Experiment_40_100.pkl')

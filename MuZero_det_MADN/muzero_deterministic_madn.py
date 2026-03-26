@@ -445,16 +445,21 @@ class DynamicsNetwork4(nn.Module):
         reward_logits = nn.relu(reward_logits)
         reward_logits = nn.Dense(3, name='reward_head')(reward_logits)  # 3 Klassen!
         
-        # --- Discount Head: 3 Klassen {-1, 0, +1} ---
+        # --- Discount Head: 2 Klassen {0=Terminal, 1=Non-Terminal} ---
         discount_input = jnp.concatenate([
-            next_latent, # NEU: Sollte Leakying von discount scores in Q-Values verhindern
+            next_latent,
             action_one_hot
         ], axis=-1)
         discount_logits = nn.Dense(64)(discount_input)
         discount_logits = nn.relu(discount_logits)
-        discount_logits = nn.Dense(3, name='discount_head')(discount_logits)  # 3 Klassen!
-        
-        return next_latent, reward_logits, discount_logits
+        discount_logits = nn.Dense(2, name='discount_head')(discount_logits)
+
+        # --- Depth Delta Head: {0=gleicher Spieler (6er), 1=Spielerwechsel} ---
+        # Nur von action_one_hot abhängig: Das Netz lernt welche Aktionen Bonus-Züge erzeugen.
+        # Eine simple lineare Schicht reicht, da die Regel deterministisch ist.
+        depth_delta_logit = nn.Dense(1, name='depth_delta_head')(action_one_hot)  # (B, 1)
+
+        return next_latent, reward_logits, discount_logits, depth_delta_logit
 
 class PredictionNetwork(nn.Module):
     latent_dim: int = 256
@@ -577,7 +582,9 @@ class PredictionNetwork4(nn.Module):
         value = nn.relu(value)
         value = nn.Dense(self.latent_dim // 4)(value)
         value = nn.relu(value)
-        value = nn.Dense(1)(value)
+        value = nn.Dense(4)(value) # Multi-Value Head
+        # values[:, 0] = Wert für aktuellen Spieler
+        # values[:, 1] = Wert für nächsten Spieler relativ
         value = nn.tanh(value)
         
         return policy_logits, value
@@ -619,38 +626,60 @@ dynamics_net = DynamicsNetwork4()
 pred_net = PredictionNetwork4()
 
 def root_inference_fn(params, observation):
-    embedding = repr_net.apply(params['representation'], observation)
-    prior_logits, value = pred_net.apply(params['prediction'], embedding)
-    # value: (Batch, 1) -> (Batch,)
-    value = value.squeeze(-1)
+    embedding = repr_net.apply(params['representation'], observation)  # (B, 256)
+    prior_logits, values = pred_net.apply(params['prediction'], embedding)  # values: (B, 4)
+    # Depth=0 am Root: aktueller Spieler ist der Root-Spieler
+    # values[:, 0] = Value für den Root-Spieler (dessen MCTS-Perspektive)
+    value = values[:, 0]  # (B,)
+    # Depth-Scalar an Embedding anhängen (0 = Root-Spieler ist am Zug)
+    depth_init = jnp.zeros((embedding.shape[0], 1))
+    embedding_with_depth = jnp.concatenate([embedding, depth_init], axis=-1)  # (B, 257)
     return mctx.RootFnOutput(
-        embedding=embedding,
+        embedding=embedding_with_depth,
         prior_logits=prior_logits,
         value=value
     )
 
 def recurrent_inference_fn(params, rng_key, action, embedding):
-    ## Vereinfachte Darstellung:
-    # Q(s, a) = reward + discount * Value(next_state)
-    next_embedding, reward_logits, discount_logits = dynamics_net.apply(params['dynamics'], embedding, action)
-    # ✅ NEU: Discount aus Netzwerk-Output berechnen
-    # tanh → [-1, +1]
-    # -1 = Gegnerzug (Value negieren)
-    # +1 = eigener Zug / Teammate (Value beibehalten)
-    # discount = jnp.tanh(discount_logits).squeeze(-1)  # (Batch,)
-    # discount = discount.squeeze(-1)
-    prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
-    # ✅ Categorical → Scalar
-    # Klassen: [-1, 0, +1]
-    support = jnp.array([-1.0, 0.0, 1.0])
-    
-    reward_probs = jax.nn.softmax(reward_logits, axis=-1)
-    reward = jnp.sum(reward_probs * support, axis=-1)  # Erwartungswert
-    
-    discount_probs = jax.nn.softmax(discount_logits, axis=-1)
-    discount = jnp.sum(discount_probs * support, axis=-1)  # Erwartungswert
+    # Embedding = [latent (256), depth_counter (1)]
+    # depth_counter: 0=Root-Spieler am Zug, 1=Spieler+1, 2=Spieler+2, 3=Spieler+3
+    latent = embedding[:, :256]   # (B, 256)
+    depth = embedding[:, 256:]    # (B, 1), Werte 0.0/1.0/2.0/3.0
 
-    value = value.squeeze(-1)
+    next_latent, reward_logits, discount_logits, depth_delta_logit = dynamics_net.apply(params['dynamics'], latent, action)
+
+    # Depth Delta: Netz lernt ob Spieler wechselt (1) oder gleich bleibt (0 = 6er Bonus-Zug)
+    # sigmoid → soft [0, 1], rundet effektiv zu 0 oder 1 sobald trainiert
+    depth_delta = jax.nn.sigmoid(depth_delta_logit)  # (B, 1)
+    next_depth = (depth + depth_delta) % 4.0         # (B, 1)
+    next_embedding = jnp.concatenate([next_latent, next_depth], axis=-1)  # (B, 257)
+
+    prior_logits, values = pred_net.apply(params['prediction'], next_latent)
+    # values: (B, 4) = [v_aktueller_Spieler, v_nächster, v_übernächster, v_+3]
+    # Root-Spieler-Index: Root ist (4 - next_depth) Schritte VOR dem aktuellen Spieler
+    # Bei next_depth=1: Root ist 3 Schritte weg → values[:, 3]
+    # Bei next_depth=2: Root ist 2 Schritte weg → values[:, 2]
+    # Bei next_depth=0: Root ist aktueller Spieler → values[:, 0]
+    next_depth_int = jnp.round(next_depth).astype(jnp.int32).squeeze(-1) % 4  # (B,)
+    old_depth_int = jnp.round(depth).astype(jnp.int32).squeeze(-1) % 4  # (B,) 
+    root_idx = (4 - next_depth_int) % 4  # (B,)
+    value = values[jnp.arange(values.shape[0]), root_idx]  # (B,) - Root-Spieler-Value
+
+    # Reward: Categorical {-1, 0, +1} aus Sicht des AKTUELLEN Spielers
+    # → Transform zur Root-Spieler-Perspektive:
+    #   FFA (Free-for-All): wenn Gegner gewinnt, verliert Root → Vorzeichen flip
+    #   Bei next_depth==0 (Root am Zug): kein Flip nötig
+    support_reward = jnp.array([-1.0, 0.0, 1.0])
+    reward_probs = jax.nn.softmax(reward_logits, axis=-1)
+    reward_current = jnp.sum(reward_probs * support_reward, axis=-1)  # (B,)
+    is_root_turn = (old_depth_int == 0)  # Root-Spieler ist am Zug
+    reward = jnp.where(is_root_turn, reward_current, -reward_current)  # (B,)
+
+    # Discount: Binary {0.0=Terminal, 1.0=Non-Terminal}
+    # KEIN Vorzeichenflip mehr! Discount dient nur zur Terminal-Erkennung.
+    support_disc = jnp.array([0.0, 1.0])
+    discount_probs = jax.nn.softmax(discount_logits, axis=-1)
+    discount = jnp.sum(discount_probs * support_disc, axis=-1)  # (B,)
 
     recurrent_output = mctx.RecurrentFnOutput(
         reward=reward,

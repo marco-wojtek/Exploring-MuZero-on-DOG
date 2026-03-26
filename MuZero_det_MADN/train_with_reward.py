@@ -32,21 +32,21 @@ def loss_fn(params, batch):
     def unroll_step(carry, inputs):
         latent_state, total_loss = carry
         # k, action, target_value, target_policy, target_reward, mask = inputs
-        k, action, target_value, target_policy, mask, target_discount, target_reward = inputs
+        k, action, target_value, target_policy, mask, target_discount, target_reward, target_depth_delta = inputs
         
         # Prediction
         pred_policy_logits, pred_value = pred_net.apply(params['prediction'], latent_state)
-        pred_value = pred_value.squeeze(-1)
+        # pred_value: (B, 4) - Multi-Value Head, target_value: (B, 4)
         
-        # Losses
-        l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
+        # Value Loss: MSE über alle 4 Spieler-Perspektiven
+        l_value = jnp.mean(mask[:, None] * (target_value - pred_value) ** 2)
         l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
         
         step_loss = (1.0 / config["unroll_steps"]) * (VALUE_SCALING * l_value + POLICY_SCALING * l_policy) #* (1.0 / num_unroll_steps)
         
         # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
         def do_dynamics(state):
-            new_state, pred_reward_logits, pred_discount_logits = dynamics_net.apply(
+            new_state, pred_reward_logits, pred_discount_logits, pred_depth_delta_logit = dynamics_net.apply(
                 params['dynamics'], state, action
             )
             
@@ -67,31 +67,40 @@ def loss_fn(params, batch):
             # 50/50 Gewichtung: Neutral lernt "default 0", Non-Neutral lernt Win/Lose
             l_reward = 0.1 * loss_neutral + 1.0 * loss_non_neutral
             
-            # ✅ DISCOUNT: Balanced per-class loss (analog zu Reward)
-            # Klasse 0=-1 (Gegner), Klasse 1=0 (Terminal), Klasse 2=+1 (eigener Zug)
-            # Terminal (Klasse 1) ist extrem selten → separate Normierung
+            # DISCOUNT: Binary CE Loss
+            # Klasse 0=Terminal (discount=0), Klasse 1=Non-Terminal (discount=1)
+            # Terminal (Klasse 0) ist extrem selten → separate Normierung
             target_discount_class = target_discount.astype(jnp.int32)
             discount_ce = optax.softmax_cross_entropy_with_integer_labels(
                 pred_discount_logits, target_discount_class
             )
             
-            is_terminal = (target_discount_class == 1)
+            is_terminal = (target_discount_class == 0)  # Klasse 0 = Terminal
             n_non_terminal = jnp.maximum(jnp.sum(mask * (~is_terminal)), 1.0)
             n_terminal = jnp.maximum(jnp.sum(mask * is_terminal), 1.0)
             
             loss_non_terminal = jnp.sum(mask * jnp.where(~is_terminal, discount_ce, 0.0)) / n_non_terminal
             loss_terminal = jnp.sum(mask * jnp.where(is_terminal, discount_ce, 0.0)) / n_terminal
             
-            # Non-Terminal (6er-Regel) funktioniert schon gut → niedrige Gewichtung
-            # Terminal muss stärker lernen
+            # Terminal selten aber wichtig → höhere Gewichtung
             l_discount = 0.1 * loss_non_terminal + 1.0 * loss_terminal
             
-            return new_state, l_discount, l_reward
+            # DEPTH DELTA: Binary BCE Loss
+            # Target: 0=gleicher Spieler (6er Bonus), 1=Spielerwechsel
+            # Einfacher BCE auf Sigmoid-Output der linearen Schicht
+            target_depth_delta_f = target_depth_delta.astype(jnp.float32)
+            l_depth_delta = jnp.mean(
+                mask * optax.sigmoid_binary_cross_entropy(
+                    pred_depth_delta_logit.squeeze(-1), target_depth_delta_f
+                )
+            )
+
+            return new_state, l_discount, l_reward, l_depth_delta
         
         def skip_dynamics(state):
-            return state, 0.0, 0.0
+            return state, 0.0, 0.0, 0.0
         
-        next_latent, l_discount, l_reward = jax.lax.cond(
+        next_latent, l_discount, l_reward, l_depth_delta = jax.lax.cond(
             k < num_unroll_steps,
             do_dynamics,
             skip_dynamics,
@@ -100,12 +109,12 @@ def loss_fn(params, batch):
 
         discount_loss = (1.0 / config["unroll_steps"]) * DISCOUNT_SCALING * l_discount
         reward_loss = (1.0 / config["unroll_steps"]) * REWARD_SCALING * l_reward
+        depth_delta_loss = (1.0 / config["unroll_steps"]) * DEPTH_DELTA_SCALING * l_depth_delta
 
         # Gradient scaling
         next_latent = jax.lax.stop_gradient(next_latent * 0.5) + next_latent * 0.5
         
-        # return (next_latent, total_loss + step_loss + reward_loss), (l_value, l_policy, reward_loss)
-        return (next_latent, total_loss + step_loss + discount_loss + reward_loss), (l_value, l_policy, l_discount, l_reward)
+        return (next_latent, total_loss + step_loss + discount_loss + reward_loss + depth_delta_loss), (l_value, l_policy, l_discount, l_reward, l_depth_delta)
     
     # Prepare scan inputs
     k_indices = jnp.arange(num_unroll_steps + 1)
@@ -122,17 +131,23 @@ def loss_fn(params, batch):
         jnp.ones((batch['rewards'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = reward=0 (neutral)
     ], axis=1)
     
+    depth_delta_targets_padded = jnp.concatenate([
+        batch['depth_delta_targets'],
+        jnp.ones((batch['depth_delta_targets'].shape[0], 1), dtype=jnp.int32)  # Default: Spielerwechsel
+    ], axis=1)
+
     scan_inputs = (
         k_indices,
         actions_padded.T,
-        batch['target_values'].T,
+        jnp.transpose(batch['target_values_4'], (1, 0, 2)),
         jnp.transpose(batch['policies'], (1, 0, 2)),
         batch['masks'].T,
         discount_targets_padded.T,
-        reward_targets_padded.T
+        reward_targets_padded.T,
+        depth_delta_targets_padded.T
     )
 
-    (final_state, total_loss), (v_losses, p_losses, d_losses, r_losses) = jax.lax.scan(
+    (final_state, total_loss), (v_losses, p_losses, d_losses, r_losses, dd_losses) = jax.lax.scan(
         unroll_step,
         (latent_state, 0.0),
         scan_inputs
@@ -142,15 +157,15 @@ def loss_fn(params, batch):
     policy_loss = jnp.sum(p_losses)
     discount_loss = jnp.sum(d_losses)
     reward_loss = jnp.sum(r_losses)
+    depth_delta_loss = jnp.sum(dd_losses)
     
-    return total_loss, (value_loss, policy_loss, discount_loss, reward_loss)
+    return total_loss, (value_loss, policy_loss, discount_loss, reward_loss, depth_delta_loss)
 
 @jax.jit
 def train_step(params, opt_state, batch):
     """Führt einen Trainingsschritt aus."""
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    # (loss, (v_loss, p_loss, r_loss)), grads = grad_fn(params, batch)
-    (loss, (v_loss, p_loss, d_loss, r_loss)), grads = grad_fn(params, batch)
+    (loss, (v_loss, p_loss, d_loss, r_loss, dd_loss)), grads = grad_fn(params, batch)
     
     updates, new_opt_state = optimizer.update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
@@ -160,7 +175,8 @@ def train_step(params, opt_state, batch):
         'v_loss': v_loss, 
         'p_loss': p_loss, 
         'd_loss': d_loss, 
-        'r_loss': r_loss
+        'r_loss': r_loss,
+        'dd_loss': dd_loss
     }
 
 # --- Initialisierung (Beispiel) ---
@@ -282,6 +298,7 @@ def test_training(config, params=None, opt_state=None):
                 print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/unroll_steps:.3f} per step)")
                 print(f"  d_loss: {losses['d_loss']:.2f} ({losses['d_loss']/unroll_steps:.3f} per step)")
                 print(f"  r_loss: {losses['r_loss']:.2f} ({losses['r_loss']/unroll_steps:.3f} per step)")
+                print(f"  dd_loss: {losses['dd_loss']:.2f} ({losses['dd_loss']/unroll_steps:.3f} per step)")
                 print(f"}}")
         end_time = time()
         print(f"""
@@ -309,7 +326,7 @@ def test_training(config, params=None, opt_state=None):
     return params, opt_state, times_per_iteration
 
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -324,10 +341,11 @@ VALUE_SCALING = 4.0
 POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
+DEPTH_DELTA_SCALING = 1.0
 config = {
-    "seed": 42,
+    "seed": 53,
     "learning_rate": 0.005,
-    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. With Bootstrap Switch at Iteration 70 to only use bootstrap value targets unless the end of the game is reached.",
+    "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. New FFA setup: Multi-Heads for Value, discount auf 2 Klassen (Terminal/Non-Terminal) und neues Depth-tracking für Spielerwechsel",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
@@ -339,7 +357,7 @@ config = {
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": False,
-    "Bootstrap_Switch_Iteration": 70, # Nach X Iterationen wird auf bootstrap value targets umgestellt
+    "Bootstrap_Switch_Iteration": 101, # Nach X Iterationen wird auf bootstrap value targets umgestellt
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 2500,
     "rules": RULES,

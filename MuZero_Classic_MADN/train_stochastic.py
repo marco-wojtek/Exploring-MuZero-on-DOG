@@ -370,29 +370,29 @@ RULES = {
     'must_traverse_start': False,
     'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
 }
-TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.7]#[1.0, 0.9, 0.8, 0.7]
-VALUE_SCALING = 4.0  
-POLICY_SCALING = 2.0
+TEMPERATURE_SCHEDULE = [2.0, 1.75, 1.5, 1.0, 0.75]#[1.0, 0.9, 0.8, 0.7]
+VALUE_SCALING = 3.0  
+POLICY_SCALING = 1.0
 CHANCE_SCALING = 0.5 # NEU: Gewicht für Chance Loss
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 if __name__ == "__main__":
     config = {
-        "seed": 8,
+        "seed": 16,
         "learning_rate": 0.005,  # Startet etwas höher, da wir weniger unrollen und damit weniger stabile Targets haben
-        "architecture": "RepNet2, DynNet4, PredNet4. Less unroll to not train far planning in highly stochastic environment. With Bootstrapping",
+        "architecture": "RepNet2, DynNet4, PredNet4. Less unroll to not train far planning in highly stochastic environment.",
         "num_games_per_iteration": 1500,
-        "iterations": 120,
+        "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
         "Buffer_Capacity": 20000,
         "Buffer_batch_Size": 128,
-        "unroll_steps": 10,
+        "unroll_steps": 5,
         "td_steps": 25,
-        "max_episode_length": 800,
+        "max_episode_length": 700,
         "MCTS_simulations": 75, # less actions to evaluate (4 Pins) → less simulations needed
         "MCTS_max_depth": 50,
-        "Bootstrap_Value_Target": True,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
-        "Bootstrap_Switch_Iteration": 150,  # Wechselt zu Bootstrap-Targets nach 150 Iterationen
+        "Bootstrap_Value_Target": False,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
+        "Bootstrap_Switch_Iteration": 60,  # Wechselt zu Bootstrap-Targets nach 150 Iterationen
         "Temperature_Schedule": TEMPERATURE_SCHEDULE,
         "train_steps_per_iteration": 2500,
         "rules": RULES,
@@ -416,9 +416,9 @@ if __name__ == "__main__":
     learning_rate_schedule = optax.piecewise_constant_schedule(
         init_value=config["learning_rate"],  # 0.005
         boundaries_and_scales={
-            40 * config["train_steps_per_iteration"]: 0.1,    # It 50:  0.005 → 0.001
-            85 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-            105 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+            30 * config["train_steps_per_iteration"]: 0.1,    # It 50:  0.005 → 0.001
+            65 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+            85 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
         }
     )
 

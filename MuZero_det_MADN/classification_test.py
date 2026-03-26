@@ -25,7 +25,8 @@ from MuZero_det_MADN.muzero_deterministic_madn import (
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG — hier anpassen!
 # ═══════════════════════════════════════════════════════════════
-filename = "Experiment_42_100"
+TEAM_MODE = 1 # 0=Free-for-All, 1=Teams
+filename = "gumbelmuzero_madn_params_lr0.005_g1500_it100_seed52"
 PARAM_FILE = f"MuZero_det_MADN/models/params/{filename}.pkl"  # ← Anpassen!
 # PARAM_FILE = None  # ← Uncomment für frische (untrainierte) Params
 
@@ -90,27 +91,50 @@ def print_header(title):
 # ════════════════════════════════════════════════════════════
 #  TEST-ZUSTÄNDE: 1 Aktion vor Sieg / Niederlage
 # ════════════════════════════════════════════════════════════
+if TEAM_MODE:
+    pins_pre_win = jnp.array([
+        [35, 41, 42, 43],
+        [ 5, 15,  7, 12],
+        [48, 49, 50, 51],
+        [25, 28, 33, 30],
+    ], dtype=jnp.int32)
+else:
+    pins_pre_win = jnp.array([
+        [35, 41, 42, 43],
+        [ 5, 15,  7, 12],
+        [48, 49, 3, -1],
+        [25, 28, 33, 30],
+    ], dtype=jnp.int32)
 
-pins_pre_win = jnp.array([
-    [35, 41, 42, 43],
-    [ 5, 15,  7, 12],
-    [48, 49, 50, 51],
-    [25, 28, 33, 30],
-], dtype=jnp.int32)
+if TEAM_MODE:
+    pins_pre_win_6 = jnp.array([
+        [34, 41, 42, 43],
+        [ 5, 15,  7, 12],
+        [48, 49, 50, 51],
+        [25, 28, 33, 30],
+    ], dtype=jnp.int32)
+else:
+    pins_pre_win_6 = jnp.array([
+        [34, 41, 42, 43],
+        [ 5, 15,  7, 12],
+        [48, 49, 3, -1],
+        [25, 28, 33, 30],
+    ], dtype=jnp.int32)
 
-pins_pre_win_6 = jnp.array([
-    [34, 41, 42, 43],
-    [ 5, 15,  7, 12],
-    [48, 49, 50, 51],
-    [25, 28, 33, 30],
-], dtype=jnp.int32)
-
-pins_pre_lose = jnp.array([
-    [-1, -1, -1,  2],
-    [ 5, 44, 45, 46],
-    [ 1,  3, 20, 21],
-    [52, 53, 54, 55],
-], dtype=jnp.int32)
+if TEAM_MODE:
+    pins_pre_lose = jnp.array([
+        [-1, -1, -1,  2],
+        [ 5, 44, 45, 46],
+        [ 1,  3, 20, 21],
+        [52, 53, 54, 55],
+    ], dtype=jnp.int32)
+else:
+    pins_pre_lose = jnp.array([
+        [-1, -1, -1,  2],
+        [ 5, 44, 45, 46],
+        [ 1,  3, 20, 21],
+        [-1, 53, 0, 55],
+    ], dtype=jnp.int32)
 
 pins_normal = jnp.array([
     [10, 20, 30, -1],

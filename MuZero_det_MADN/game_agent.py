@@ -10,7 +10,7 @@ from MADN.deterministic_madn import *
 from MuZero_det_MADN.muzero_deterministic_madn import *
 
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -97,26 +97,29 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                         jnp.where(next_done & (reward < 0), 0, 1)
                     )
 
-                    # Discount Target: Klasse 0=-1, Klasse 1=0, Klasse 2=+1
+                    # Discount Target: Binär {0=Terminal, 1=Non-Terminal}
                     discount_target = jnp.where(
-                        next_done, 1,  # Terminal → Klasse 1 (discount=0)
-                        jax.lax.cond(
-                            env.rules['enable_teams'],
-                            lambda: jnp.where(current_team_before == next_team, 2, 0),
-                            lambda: jnp.where(current_player_before == next_player, 2, 0)
-                        )
+                        next_done, 0,
+                        1
                     )
 
-                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, discount_target, reward_target
+                    # Depth Delta Target: {0=gleicher Spieler (6er Bonus-Zug), 1=Spielerwechsel}
+                    depth_delta_target = jnp.where(
+                        current_player_before == next_player,
+                        jnp.int8(0),  # Gleicher Spieler: kein Schritt in der Tiefe
+                        jnp.int8(1)   # Spielerwechsel
+                    )
+
+                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, discount_target, reward_target, depth_delta_target
                 
                 def do_skip(env):
-                    # Keine validen Actions → no_step
+                    # Keine validen Actions → no_step (gleicher Spieler, kein Zug)
                     next_env, reward, next_done = no_step(env)
                     dummy_obs = jnp.zeros_like(obs[0])
-                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done, 0, 1, 1
+                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(24), next_done, 0, 1, 1, jnp.int8(0)
                 
                 # Wähle zwischen MCTS und no_step
-                next_env, step_obs, action, reward, value, policy, next_done, mask, discount_target, reward_target = jax.lax.cond(
+                next_env, step_obs, action, reward, value, policy, next_done, mask, discount_target, reward_target, depth_delta_target = jax.lax.cond(
                     has_valid,
                     do_mcts,
                     do_skip,
@@ -130,13 +133,14 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 new_buffer = {
                     'obs': buffer['obs'].at[idx].set(step_obs),
                     'act': buffer['act'].at[idx].set(action),
-                    'rew': buffer['rew'].at[idx].set(reward_target),  # Klassen-Index statt Float!
+                    'rew': buffer['rew'].at[idx].set(reward_target),
                     'val': buffer['val'].at[idx].set(value),
                     'pol': buffer['pol'].at[idx].set(policy),
                     'mask': buffer['mask'].at[idx].set(mask),
                     'player': buffer['player'].at[idx].set(current_player),
                     'team': buffer['team'].at[idx].set(team),
                     'discount': buffer['discount'].at[idx].set(discount_target),
+                    'depth_delta': buffer['depth_delta'].at[idx].set(depth_delta_target),
                     'idx': idx + 1
                 }
                 return next_env, new_buffer, next_done
@@ -158,14 +162,15 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     init_buffers = {
         'obs': jnp.zeros((num_envs, max_steps, *input_shape)),
         'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
-        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # Klassen-Index statt Float
+        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
         'val': jnp.zeros((num_envs, max_steps)),
         'pol': jnp.zeros((num_envs, max_steps, 24)),
         'mask': jnp.zeros((num_envs, max_steps)),
         'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
         'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
-        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # Klassen-Index statt Float
-        'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
+        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
+        'depth_delta': jnp.ones((num_envs, max_steps), dtype=jnp.int8),  # Default: Spielerwechsel (1)
+        'idx': jnp.zeros(num_envs, dtype=jnp.int32)
     }
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
     

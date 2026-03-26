@@ -1,4 +1,32 @@
+empty template:
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.2|/600|%|
+|random|0.0|/600|%|
+|rule-based|0.2|/600|%|
+|rule-based|0.0|/600|%|
+|init MuZero|0.2|/600|%|
+|init MuZero|0.0|/600|%|
+---
+
 # FFA MADN
+## New Format
+Multi-Value Head + depth tracking + new discount calculation
+## Seed 53
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.2|480/600|80%|
+|random|0.1|469/600|%|
+|random|0.0|485/600|80.8%|
+|rule-based|0.2|495/600|82.5%|
+|rule-based|0.1|500/600|%|
+|rule-based|0.0|519/600|86.5%|
+|init MuZero|0.2|481/600|80.2%|
+|init MuZero|0.1|467/600|%|
+|init MuZero|0.0|452/600|54.6%|
+
+---
+## Old Format
 ## Seed 50 
 | Opponent | Temp | Wins (out of 600) | % |
 |------:|----:|------------------:|-------:|
@@ -17,6 +45,25 @@
 |rule-based|0.0|429/600|71.5%|
 |init MuZero|0.2|279/600|46.5%|
 |init MuZero|0.0|286/600|47.7%|
+## Seed 52 (100 it)
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.2|398/600|66.3%|
+|random|0.0|391/600|65.2%|
+|rule-based|0.2|448/600|74.6%|
+|rule-based|0.0|444/600|74%|
+|init MuZero|0.2|299/600|49.8%|
+|init MuZero|0.0|277/600|46.2%|
+
+## Seed 52 (150 it)
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.2|266/600|44.3%|
+|random|0.0|275/600|45.8%|
+|rule-based|0.2|373/600|62.1%|
+|rule-based|0.0|389/600|64.8%|
+|init MuZero|0.2|157/600|26.1%|
+|init MuZero|0.0|170/600|28.3%|
 
 # Team MADN with reward, discount learning
 ## Experiment 33 100 Iterations
