@@ -317,10 +317,10 @@ def test_training(config, params=None, opt_state=None):
         #         pickle.dump(opt_state, f)
         if ((it+1) % 100 == 0):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'MuZero_det_MADN/models/params/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/params/gumbelmuzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'MuZero_det_MADN/models/opt_state/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/opt_state/gumbelmuzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
 
     return params, opt_state, times_per_iteration
@@ -336,14 +336,14 @@ RULES = {
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
-TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.6]#[1.0, 0.9, 0.8, 0.7]
+TEMPERATURE_SCHEDULE = [1.5, 1.0, 0.9, 0.8, 0.6]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 4.0  
 POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 DEPTH_DELTA_SCALING = 1.0
 config = {
-    "seed": 53,
+    "seed": 54,
     "learning_rate": 0.005,
     "architecture": "Real Training with new RepNet2, DynNet4 and PredNet4. New FFA setup: Multi-Heads for Value, discount auf 2 Klassen (Terminal/Non-Terminal) und neues Depth-tracking für Spielerwechsel",
     "num_games_per_iteration": 1500,
@@ -357,7 +357,7 @@ config = {
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": False,
-    "Bootstrap_Switch_Iteration": 101, # Nach X Iterationen wird auf bootstrap value targets umgestellt
+    "Bootstrap_Switch_Iteration": 80, # Nach X Iterationen wird auf bootstrap value targets umgestellt
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 2500,
     "rules": RULES,
@@ -365,7 +365,8 @@ config = {
         "value": VALUE_SCALING, 
         "policy": POLICY_SCALING, 
         "discount": DISCOUNT_SCALING, 
-        "reward": REWARD_SCALING
+        "reward": REWARD_SCALING,
+        "depth_delta": DEPTH_DELTA_SCALING
     }
 }
 # prep weights and biases

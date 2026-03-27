@@ -25,6 +25,15 @@ Multi-Value Head + depth tracking + new discount calculation
 |init MuZero|0.1|467/600|%|
 |init MuZero|0.0|452/600|54.6%|
 
+## Seed 54
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.2|491/600|%|
+|random|0.0|502/600|%|
+|rule-based|0.2|516/600|%|
+|rule-based|0.0|510/600|%|
+|init MuZero|0.2|517/600|%|
+|init MuZero|0.1|475/600|%|
 ---
 ## Old Format
 ## Seed 50 
