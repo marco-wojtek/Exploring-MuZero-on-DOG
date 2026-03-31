@@ -1,0 +1,290 @@
+Params geladen: MuZero_Classic_MADN/models/params/stochastic_muzero_madn_params_lr0.005_g1500_it65_seed21.pkl
+Architektur: FFA Multi-Value Head (4 Werte) + Binary Discount + Depth-Delta (aus chance_dynamics)
+
+
+========================================================================
+  TEST 1: MULTI-VALUE HEAD  —  pred_net → values (B, 4)
+========================================================================
+  Erwartet für PRE-WIN:
+    values[0] ≈ +1.0  (Root-Spieler P0 gewinnt)
+    values[1..3] ≈ -1.0  (Gegner verlieren — FFA, kein Team-Bonus)
+
+  PRE-WIN  (dice=5, Pin0 gewinnt)
+    V[0]=+0.9996  V[1]=-0.9995  V[2]=-0.9993  V[3]=-0.9993
+    Root-Value V[0]: ROOT gewinnt ✓
+
+  PRE-WIN6 (dice=6, Pin0 gewinnt)
+    V[0]=+0.9976  V[1]=-0.9975  V[2]=-0.9976  V[3]=-0.9975
+    Root-Value V[0]: ROOT gewinnt ✓
+
+  NORMAL   (dice=3)
+    V[0]=-0.1510  V[1]=-0.3391  V[2]=-0.1980  V[3]=-0.2336
+    Root-Value V[0]: neutral
+
+  NORMAL   (dice=6, Bonuszug)
+    V[0]=-0.1162  V[1]=-0.3405  V[2]=-0.2302  V[3]=-0.2476
+    Root-Value V[0]: neutral
+
+
+========================================================================
+  TEST 2: DEPTH-DELTA HEAD  —  Kausalität: die[k] → afterstate → depth_delta
+========================================================================
+  Ablauf: Spieler würfelt die[k], führt Aktion aus → afterstate enkodiert die[k]
+  depth_delta = Dense(afterstate_normed) liest die[k] aus afterstate
+  die[k+1] (chance_outcome) ist irrelevant für depth_delta!
+
+  Erwartet:  die[k]=6  → depth_delta ≈ 0.0  (Bonus-Zug, gleicher Spieler)
+             die[k]≠6  → depth_delta ≈ 1.0  (Spielerwechsel)
+
+  --- Teil A: depth_delta in Abhängigkeit von die[k] (die[k+1]=3 fix) ---
+    die[k]   dep_del  Expected    Logit  Match
+  ------------------------------------------------
+  die[k]=1     1.0000       1.0   12.730      ✓
+  die[k]=2     1.0000       1.0   12.419      ✓
+  die[k]=3     1.0000       1.0   12.107      ✓
+  die[k]=4     1.0000       1.0   12.148      ✓
+  die[k]=5     1.0000       1.0   12.111      ✓
+  die[k]=6     0.0000       0.0  -16.906      ✓  ← 6ER BONUS
+
+  Depth-Delta Accuracy: 6/6 (100%)
+
+  --- Teil B: Invarianz gegenüber die[k+1] (depth_delta darf sich nicht ändern) ---
+    die[k]  die[k+1]   dep_del   Std_über_k+1 Status
+  --------------------------------------------------------
+  die[k]=3   die[k+1]=1     1.0000         0.0000  ✓ invariant
+             die[k+1]=2     1.0000
+             die[k+1]=3     1.0000
+             die[k+1]=4     1.0000
+             die[k+1]=5     1.0000
+             die[k+1]=6     1.0000
+
+  die[k]=6   die[k+1]=1     0.0000         0.0000  ✓ invariant
+             die[k+1]=2     0.0000
+             die[k+1]=3     0.0000
+             die[k+1]=4     0.0000
+             die[k+1]=5     0.0000
+             die[k+1]=6     0.0000
+
+
+========================================================================
+  TEST 3: DEPTH-DELTA KONSISTENZ  —  gleiches die[k], verschiedene States/Actions
+========================================================================
+  Für festes die[k] sollte depth_delta über Boards und Aktionen konsistent sein.
+  Std > 0.1 deutet darauf hin dass das Netz noch nicht gut die[k] aus afterstate liest.
+
+    die[k]  Expected    Mean     Std     Min     Max Status
+  ------------------------------------------------------------
+  die[k]=1        1.0  0.9999  0.0001  0.9997  1.0000  ✓ OK
+  die[k]=2        1.0  0.9999  0.0001  0.9998  1.0000  ✓ OK
+  die[k]=3        1.0  0.9999  0.0000  0.9999  1.0000  ✓ OK
+  die[k]=4        1.0  0.9990  0.0016  0.9953  1.0000  ✓ OK
+  die[k]=5        1.0  0.6666  0.4714  0.0000  1.0000  ✓ OK  ⚠ inkonsistent
+  die[k]=6        0.0  0.0000  0.0000  0.0000  0.0000  ✓ OK
+
+========================================================================
+  TEST 4: BINARY DISCOUNT  —  action_dynamics → {0=Terminal, 1=Non-Terminal}
+========================================================================
+  Erwartet: Winning Action (Pin 0, dice=5) → disc ≈ 0.0  (Terminal)
+            Normale Actions                → disc ≈ 1.0  (Non-Terminal)
+
+  --- PRE-WIN  (dice=5, Pin0 → TERMINAL) ---
+   Pin Valid  disc_val  P(Term)  P(NonT)      GT   Match
+  ----------------------------------------------------------
+  Pin0     O    0.0000   1.0000   0.0000     0.0       ✓
+
+  --- PRE-WIN6 (dice=6, Pin0 → TERMINAL) ---
+   Pin Valid  disc_val  P(Term)  P(NonT)      GT   Match
+  ----------------------------------------------------------
+  Pin0     O    0.0000   1.0000   0.0000     0.0       ✓
+
+  --- NORMAL   (dice=6, Bonuszug) ---
+   Pin Valid  disc_val  P(Term)  P(NonT)      GT   Match
+  ----------------------------------------------------------
+  Pin0     O    1.0000   0.0000   1.0000     1.0       ✓
+  Pin1     O    1.0000   0.0000   1.0000     1.0       ✓
+  Pin2     O    1.0000   0.0000   1.0000     1.0       ✓
+  Pin3     O    1.0000   0.0000   1.0000     1.0       ✓
+
+  --- NORMAL   (dice=3) ---
+   Pin Valid  disc_val  P(Term)  P(NonT)      GT   Match
+  ----------------------------------------------------------
+  Pin0     O    1.0000   0.0000   1.0000     1.0       ✓
+  Pin1     O    1.0000   0.0000   1.0000     1.0       ✓
+  Pin2     O    1.0000   0.0000   1.0000     1.0       ✓
+
+
+========================================================================
+  TEST 5: REWARD HEAD  —  3 Klassen {-1, 0, +1}
+========================================================================
+  Erwartet: PRE-WIN Pin0 → E[R] ≈ +1.0,  normale Züge → E[R] ≈ 0.0
+
+  --- PRE-WIN  (dice=5, Pin0 gewinnt) ---
+   Pin Valid    E[R]   P(-1)    P(0)   P(+1)      GT   Match
+  --------------------------------------------------------------
+  Pin0     O +1.0000  0.0000  0.0000  1.0000    +1.0       ✓  ← WIN
+
+  --- PRE-WIN6 (dice=6, Pin0 gewinnt) ---
+   Pin Valid    E[R]   P(-1)    P(0)   P(+1)      GT   Match
+  --------------------------------------------------------------
+  Pin0     O +0.9999  0.0000  0.0001  0.9999    +1.0       ✓  ← WIN
+
+  --- NORMAL   (dice=3) ---
+   Pin Valid    E[R]   P(-1)    P(0)   P(+1)      GT   Match
+  --------------------------------------------------------------
+  Pin0     O +0.0000  0.0000  1.0000  0.0000    +0.0       ✓
+  Pin1     O +0.0000  0.0000  1.0000  0.0000    +0.0       ✓
+  Pin2     O +0.0000  0.0000  1.0000  0.0000    +0.0       ✓
+
+  --- NORMAL   (dice=6, Bonuszug) ---
+   Pin Valid    E[R]   P(-1)    P(0)   P(+1)      GT   Match
+  --------------------------------------------------------------
+  Pin0     O +0.0000  0.0000  1.0000  0.0000    +0.0       ✓
+  Pin1     O +0.0000  0.0000  1.0000  0.0000    +0.0       ✓
+  Pin2     O +0.0000  0.0000  1.0000  0.0000    +0.0       ✓
+  Pin3     O +0.0000  0.0000  1.0000  0.0000    +0.0       ✓
+
+
+========================================================================
+  TEST 6: CHANCE HEAD  —  Vorhersage der Würfelverteilung
+========================================================================
+  Erwartet: NORMAL+dice≠6   → P1 nächster (uniform)    KL ≈ 0
+            P1-LOCKED+dice≠6 → P1 nächster (soft-lock)  KL ≈ 0
+            BELIEBIG+dice=6  → P0 Bonuszug (uniform)    KL ≈ 0
+
+  NORMAL:       [0.1667, 0.1667, 0.1667, 0.1667, 0.1667, 0.1667]
+  OUT_1_AND_6:  [0.3519, 0.0741, 0.0741, 0.0741, 0.0741, 0.3519]
+
+  --- NORMAL    + dice=3  (P1, nicht locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓  GT
+  -------------------------------------------------------------
+  Pin0    0.176  0.162  0.162  0.162  0.162  0.177   0.0008  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin1    0.177  0.161  0.161  0.161  0.161  0.177   0.0010  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin2    0.177  0.161  0.162  0.162  0.161  0.177   0.0009  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0009  (0=perfekt, <0.1=gut, >1.0=schlecht)
+
+  --- NORMAL    + dice=6  (P0 Bonuszug) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓  GT
+  -------------------------------------------------------------
+  Pin0    0.188  0.156  0.156  0.156  0.156  0.188   0.0040  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin1    0.187  0.157  0.157  0.157  0.157  0.187   0.0035  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin2    0.186  0.157  0.157  0.157  0.157  0.186   0.0034  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin3    0.185  0.157  0.158  0.157  0.157  0.185   0.0030  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0035  (0=perfekt, <0.1=gut, >1.0=schlecht)
+
+  --- P1-LOCKED + dice=3  (P1, locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓  GT
+  -------------------------------------------------------------
+  Pin0    0.350  0.075  0.075  0.075  0.075  0.350   0.0001  LOCKED
+    GT    0.352  0.074  0.074  0.074  0.074  0.352
+  Pin1    0.349  0.075  0.075  0.075  0.075  0.349   0.0001  LOCKED
+    GT    0.352  0.074  0.074  0.074  0.074  0.352
+  Pin2    0.349  0.075  0.075  0.075  0.075  0.349   0.0001  LOCKED
+    GT    0.352  0.074  0.074  0.074  0.074  0.352
+
+  → Mittleres KL: 0.0001  (0=perfekt, <0.1=gut, >1.0=schlecht)
+
+  --- P1-LOCKED + dice=6  (P0 Bonuszug) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓  GT
+  -------------------------------------------------------------
+  Pin0    0.191  0.154  0.154  0.154  0.154  0.192   0.0054  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin1    0.189  0.156  0.156  0.156  0.155  0.189   0.0043  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin2    0.189  0.155  0.156  0.155  0.155  0.190   0.0044  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+  Pin3    0.186  0.157  0.157  0.157  0.157  0.186   0.0032  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0043  (0=perfekt, <0.1=gut, >1.0=schlecht)
+
+  --- PRE-WIN   + dice=3  (P1, nicht locked) ---
+   Pin     P(1)   P(2)   P(3)   P(4)   P(5)   P(6)      KL↓  GT
+  -------------------------------------------------------------
+  Pin0    0.200  0.150  0.150  0.150  0.150  0.200   0.0094  normal
+    GT    0.167  0.167  0.167  0.167  0.167  0.167
+
+  → Mittleres KL: 0.0094  (0=perfekt, <0.1=gut, >1.0=schlecht)
+
+
+========================================================================
+  TEST 7: ROOT_IDX LOGIK  —  Depth → Root-Spieler-Index
+========================================================================
+  Formel: root_idx = (4 - round(depth)) % 4
+  Depth aktualisiert nach JEDEM Chance-Node (Würfelergebnis)
+
+     depth  root_idx Bedeutung
+  -------------------------------------------------------
+         0  →      0        Root-Spieler ist am Zug       → values[:,0]
+         1  →      3        root ist 3 Chance-Nodes zurück → values[:,3]
+         2  →      2        root ist 2 Chance-Nodes zurück → values[:,2]
+         3  →      1        root ist 1 Chance-Node zurück  → values[:,1]
+
+  Simuliere Schritt-für-Schritt (Action → Chance) Depth-Tracking:
+  Step Action  Dice   dd_sig  depth_before  depth_after  root_idx
+  ----------------------------------------------------------------------
+     0 Pin 0  dice=3   1.0000        0.0000       1.0000          3
+     1 Pin 0  dice=6   1.0000        1.0000       2.0000          2
+     2 Pin 1  dice=2   0.0000        2.0000       2.0000          2
+
+========================================================================
+  TEST 8: MCTS END-TO-END  —  findet MCTS die Winning Action?
+========================================================================
+  Erwartet: PRE-WIN dice=5 → Pin 0 hat höchsten Q-Value / Action-Weight
+
+  --- PRE-WIN  (dice=5, Pin0 gewinnt) ---
+    MCTS Root-Value (Root-Spieler P0): +0.9859
+    Winning Pin 0: Q=+0.9857, Visits=100, Weight=1.0000
+       Pin Valid   Q-Value  Visits   Weight
+    ----------------------------------------
+    Pin 0     O   +0.9857     100   1.0000  ← WINNING
+
+  --- PRE-WIN6 (dice=6, Pin0 gewinnt) ---
+    MCTS Root-Value (Root-Spieler P0): +0.9846
+    Winning Pin 0: Q=+0.9845, Visits=100, Weight=1.0000
+       Pin Valid   Q-Value  Visits   Weight
+    ----------------------------------------
+    Pin 0     O   +0.9845     100   1.0000  ← WINNING
+
+  --- NORMAL   (dice=3) ---
+    MCTS Root-Value (Root-Spieler P0): -0.4442
+       Pin Valid   Q-Value  Visits   Weight
+    ----------------------------------------
+    Pin 0     O   -0.5249      24   0.2400
+    Pin 1     O   -0.5186      23   0.2300
+    Pin 2     O   -0.3810      53   0.5300
+
+  --- NORMAL   (dice=6, Bonuszug) ---
+    MCTS Root-Value (Root-Spieler P0): -0.3034
+       Pin Valid   Q-Value  Visits   Weight
+    ----------------------------------------
+    Pin 0     O   -0.3182      45   0.4500
+    Pin 1     O   -0.1993       9   0.0900
+    Pin 2     O   -0.3122      45   0.4500
+    Pin 3     O   -0.3646       1   0.0100
+
+
+========================================================================
+  ZUSAMMENFASSUNG: FFA-Architektur Check (Stochastic)
+========================================================================
+
+  Komponente                             Status
+  ------------------------------------------------------------
+  pred_net values shape (1,4)            ✓ OK ((1, 4))
+  action_dynamics outputs (erwartet 4)   ✓ OK (4)
+  discount_logits shape (2 Klassen)      ✓ OK ((1, 2))
+  reward_logits shape (3 Klassen)        ✓ OK ((1, 3))
+  chance_logits shape (6 Klassen)        ✓ OK ((1, 6))
+  chance_dynamics outputs (erwartet 2)   ✓ OK (2)
+  depth_delta_logit shape (1,1)          ✓ OK ((1, 1))
+  Depth-Delta Accuracy (dice 1-6)        6/6 (100%)
+
+  Architektur-Outputs korrekt: JA ✓

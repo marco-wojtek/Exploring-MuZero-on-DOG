@@ -38,6 +38,7 @@ class VectorizedReplayBufferStochastic:
         self.teams = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.episode_lengths = np.zeros(capacity, dtype=np.int32)
         self.discounts = np.zeros((capacity, max_episode_length), dtype=np.int32)  # Klassen-Index statt Float
+        self.depth_deltas = np.ones((capacity, max_episode_length), dtype=np.int8)  # Default: Spielerwechsel (1)
         
         self.position = 0
         self.size = 0
@@ -62,17 +63,18 @@ class VectorizedReplayBufferStochastic:
             self.root_values[pos, :length] = np.array(all_buffers['val'][i, :length])
             self.child_visits[pos, :length] = np.array(all_buffers['pol'][i, :length])
             self.masks[pos, :length] = np.array(all_buffers['mask'][i, :length])
-            self.dice_outcomes[pos, :length] = np.array(all_buffers['dice'][i, :length])  # NEU!
-            self.dice_distributions[pos, :length] = np.array(all_buffers['dice_dist'][i, :length])  # NEU!
+            self.dice_outcomes[pos, :length] = np.array(all_buffers['dice'][i, :length])
+            self.dice_distributions[pos, :length] = np.array(all_buffers['dice_dist'][i, :length])  
             self.players[pos, :length] = np.array(all_buffers['player'][i, :length])
             self.teams[pos, :length] = np.array(all_buffers['team'][i, :length])
             self.discounts[pos, :length] = np.array(all_buffers['discount'][i, :length])
+            self.depth_deltas[pos, :length] = np.array(all_buffers['depth_delta'][i, :length])
             self.episode_lengths[pos] = length
             
             self.position = (pos + 1) % self.capacity
             self.size = min(self.size + 1, self.capacity)
     
-    def sample_batch(self):
+    def sample_batch(self, terminal_ratio = 0.25):
         """
         Vollständig vektorisierte Sampling-Funktion für Stochastic MuZero.
         KEIN Python-Loop über batch_size!
@@ -82,7 +84,7 @@ class VectorizedReplayBufferStochastic:
         K = self.unroll_steps + 1
         TD = self.td_steps
         GAMMA = 0.997
-        TERMINAL_RATIO = 0.25  # 25% des Batches enthält Terminal-Steps
+        TERMINAL_RATIO = terminal_ratio  # 25% des Batches enthält Terminal-Steps
 
         n_terminal = int(self.batch_size * TERMINAL_RATIO)
         n_normal = self.batch_size - n_terminal
@@ -177,6 +179,10 @@ class VectorizedReplayBufferStochastic:
         # Shape: (batch_size, K)
         
         discount_targets = self.discounts[ep_for_actions, action_indices]
+        # depth_delta_targets: KEIN Shift nötig!
+        # depth_delta_head liest von afterstate_normed, welcher die[k] enkodiert.
+        # Target: depth_deltas[k] = 0 if die[k]==6 else 1 → direkt aligned mit afterstate_k.
+        depth_delta_targets = self.depth_deltas[ep_for_actions, action_indices]
         # ========================================
         # SCHRITT 7: Berechne Target Values (Bootstrap) - KORRIGIERT!
         # ========================================
@@ -259,6 +265,43 @@ class VectorizedReplayBufferStochastic:
         # Shape: (batch_size, K)
         
         # ========================================
+        # 4-VALUE TARGETS für Multi-Value Head
+        # ========================================
+        # z_seq_4[i, k, j] = Terminal-Outcome für relativen Spieler j bei Schritt k
+        # j=0: aktueller Spieler, j=1: nächster, j=2: übernächster, j=3: +3
+        z_seq_4 = np.zeros((self.batch_size, K, 4), dtype=np.float32)
+        bootstrap_values_4 = np.zeros((self.batch_size, K, 4), dtype=np.float32)
+        for j in range(4):
+            player_j_abs = (seq_players + j) % 4   # (B, K) absoluter Spieler-Index
+            team_j_abs = player_j_abs % 2           # (B, K) Team-Index
+            player_j_won = (final_players[:, None] == player_j_abs)   # (B, K)
+            team_j_won = (final_teams[:, None] == team_j_abs)         # (B, K)
+            z_j = np.where(
+                game_won_seq,
+                np.where(
+                    is_single_player_seq,
+                    np.where(player_j_won, 1.0, -1.0),
+                    np.where(team_j_won, 1.0, -1.0)
+                ),
+                0.0
+            )
+            z_seq_4[:, :, j] = z_j * temporal_discount
+            # Bootstrap-Value aus der Perspektive von relativem Spieler j
+            same_player_j = (bootstrap_players == player_j_abs)
+            same_team_j = (bootstrap_teams % 2 == team_j_abs)
+            same_perspective_j = np.where(is_team_mode, same_team_j, same_player_j)
+            bootstrap_values_4[:, :, j] = np.where(
+                same_perspective_j, bootstrap_values_raw, -bootstrap_values_raw
+            )
+
+        target_values_4 = np.where(
+            (z_seq_4 == 0) | (bootstrap_from_value[:, :, None] & self.bootstrap_value_target),
+            bootstrap_values_4 * (GAMMA ** np.minimum(TD, steps_until_end))[:, :, None],
+            z_seq_4
+        )
+        target_values_4 = np.clip(target_values_4, -1.0, 1.0)
+
+        # ========================================
         # SCHRITT 8: Padding für ungültige Positionen
         # ========================================
         actions = np.where(valid_mask[:, :-1], actions, 0)
@@ -271,7 +314,9 @@ class VectorizedReplayBufferStochastic:
         values = np.where(valid_mask, values, 0.0)
         masks = np.where(valid_mask, masks, 0.0)
         target_values = np.where(valid_mask, target_values, 0.0)
-        discount_targets = np.where(valid_mask[:, :-1], discount_targets, 1)  # Klasse 1 = discount=0 (neutral)
+        target_values_4 = np.where(valid_mask[:, :, None], target_values_4, 0.0)
+        discount_targets = np.where(valid_mask[:, :-1], discount_targets, 1)  # Klasse 1 = Non-Terminal (masked, irrelevant)
+        depth_delta_targets = np.where(valid_mask[:, :-1], depth_delta_targets, 1)  # Default Spielerwechsel (irrelevant wenn masked)
         
         # ========================================
         # SCHRITT 9: Konvertiere Dice Values (1-6) zu Indizes (0-5)
@@ -293,5 +338,7 @@ class VectorizedReplayBufferStochastic:
             'values': jnp.array(values),                   # (batch_size, K)
             'masks': jnp.array(masks),                     # (batch_size, K)
             'target_values': jnp.array(target_values),    # (batch_size, K)
-            'discount_targets': jnp.array(discount_targets)  # (batch_size, K-1)
+            'target_values_4': jnp.array(target_values_4),  # (batch_size, K, 4)
+            'discount_targets': jnp.array(discount_targets),  # (batch_size, K-1)
+            'depth_delta_targets': jnp.array(depth_delta_targets)  # (batch_size, K-1)
         }

@@ -16,24 +16,36 @@ Multi-Value Head + depth tracking + new discount calculation
 | Opponent | Temp | Wins (out of 600) | % |
 |------:|----:|------------------:|-------:|
 |random|0.2|480/600|80%|
-|random|0.1|469/600|%|
+|random|0.1|469/600|78.2%|
 |random|0.0|485/600|80.8%|
 |rule-based|0.2|495/600|82.5%|
-|rule-based|0.1|500/600|%|
+|rule-based|0.1|500/600|83.3%|
 |rule-based|0.0|519/600|86.5%|
 |init MuZero|0.2|481/600|80.2%|
-|init MuZero|0.1|467/600|%|
+|init MuZero|0.1|467/600|77.8%|
 |init MuZero|0.0|452/600|54.6%|
-
 ## Seed 54
 | Opponent | Temp | Wins (out of 600) | % |
 |------:|----:|------------------:|-------:|
-|random|0.2|491/600|%|
-|random|0.0|502/600|%|
-|rule-based|0.2|516/600|%|
-|rule-based|0.0|510/600|%|
-|init MuZero|0.2|517/600|%|
-|init MuZero|0.1|475/600|%|
+|random|0.2|491/600|81.8%|
+|random|0.0|502/600|83.7%|
+|rule-based|0.2|516/600|86.0%|
+|rule-based|0.0|510/600|85.0%|
+|init MuZero|0.2|517/600|86.2%|
+|init MuZero|0.1|475/600|79.2%|
+## Seed 55
+### 100 Iterations
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.1|499/600|83.16%|
+|rule-based|0.1|535/600|89.1%|
+|init MuZero|0.1|324/600|54%|
+### 150 Iterations
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.1|475/600|79.2%|
+|rule-based|0.1|495/600|82.5%|
+|init MuZero|0.1|439/600|73.2%|
 ---
 ## Old Format
 ## Seed 50 

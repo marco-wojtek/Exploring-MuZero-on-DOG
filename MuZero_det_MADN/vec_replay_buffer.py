@@ -35,30 +35,32 @@ class VectorizedReplayBuffer:
         self.bootstrap_value_target = bootstrap_value_target
     
     def save_games_from_buffers(self, all_buffers):
-        """Speichert Batch von Spielen direkt."""
-        num_games = all_buffers['idx'].shape[0]
-        episode_lengths = np.array(all_buffers['idx'])
-        
-        for i in range(num_games):
-            pos = self.position
+        """Speichert Batch von Spielen direkt.
+        Einmaliger GPU->CPU Sync via device_get, dann schnelles NumPy-Slicing.
+        Vermeidet große temporäre Allokationen durch :length-Slicing pro Spiel.
+        """
+        # Einmaliger Sync-Punkt: alle Arrays gleichzeitig und blockierend von der GPU holen
+        host = jax.device_get(all_buffers)
+        episode_lengths = host['idx']
+
+        for i in range(len(episode_lengths)):
             length = int(episode_lengths[i])
-            
             if length == 0:
                 continue
-            
-            # Kopiere Daten (NumPy ist hier schnell)
-            self.observations[pos, :length] = np.array(all_buffers['obs'][i, :length])
-            self.actions[pos, :length] = np.array(all_buffers['act'][i, :length])
-            self.rewards[pos, :length] = np.array(all_buffers['rew'][i, :length])
-            self.root_values[pos, :length] = np.array(all_buffers['val'][i, :length])
-            self.child_visits[pos, :length] = np.array(all_buffers['pol'][i, :length])
-            self.masks[pos, :length] = np.array(all_buffers['mask'][i, :length])
-            self.players[pos, :length] = np.array(all_buffers['player'][i, :length])
-            self.teams[pos, :length] = np.array(all_buffers['team'][i, :length])
-            self.discounts[pos, :length] = np.array(all_buffers['discount'][i, :length])
-            self.depth_deltas[pos, :length] = np.array(all_buffers['depth_delta'][i, :length])
-            self.episode_lengths[pos] = length
-            
+
+            pos = self.position
+            self.observations[pos, :length]  = host['obs'][i, :length]
+            self.actions[pos, :length]       = host['act'][i, :length]
+            self.rewards[pos, :length]       = host['rew'][i, :length]
+            self.root_values[pos, :length]   = host['val'][i, :length]
+            self.child_visits[pos, :length]  = host['pol'][i, :length]
+            self.masks[pos, :length]         = host['mask'][i, :length]
+            self.players[pos, :length]       = host['player'][i, :length]
+            self.teams[pos, :length]         = host['team'][i, :length]
+            self.discounts[pos, :length]     = host['discount'][i, :length]
+            self.depth_deltas[pos, :length]  = host['depth_delta'][i, :length]
+            self.episode_lengths[pos]        = length
+
             self.position = (pos + 1) % self.capacity
             self.size = min(self.size + 1, self.capacity)
     

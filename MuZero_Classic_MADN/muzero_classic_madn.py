@@ -220,7 +220,9 @@ class PredictionNetwork4(nn.Module):
         value = nn.relu(value)
         value = nn.Dense(self.latent_dim // 4)(value)
         value = nn.relu(value)
-        value = nn.Dense(1)(value)
+        value = nn.Dense(4)(value) # Multi-Value Head
+        # values[:, 0] = Wert für aktuellen Spieler
+        # values[:, 1] = Wert für nächsten Spieler relativ
         value = nn.tanh(value)
         
         return policy_logits, value
@@ -406,43 +408,180 @@ class StochasticDynamicsNetwork4(nn.Module):
         next_state = (x - min_val) / (max_val - min_val + 1e-8)
 
         return next_state
+
+class StochasticDynamicsNetwork5(nn.Module):
+    latent_dim: int = 256
+    num_res_blocks: int = 2
+    num_actions: int = 4       # Classic MADN: 4 Pins
+    num_chance_outcomes: int = 6  # Würfel 1-6
+
+    @nn.compact
+    def __call__(self, latent_state, action, chance_outcome=None):
+        """Init-Call: durchläuft beide Pfade um alle Parameter zu erstellen."""
+        afterstate, reward_logits, chance_logits, discount_logits = self.action_dynamics(latent_state, action)
+        if chance_outcome is not None:
+            next_state = self.chance_dynamics(afterstate, chance_outcome)
+            return afterstate, reward_logits, chance_logits, discount_logits, next_state
+        return afterstate, reward_logits, chance_logits, discount_logits
+
+    @nn.compact
+    def action_dynamics(self, latent_state, action):
+        """State + Action → Afterstate + Reward/Discount/Chance-Logits"""
+        # 1. Action Embedding
+        action_one_hot = jax.nn.one_hot(action, num_classes=self.num_actions)
+        action_embed = nn.Dense(64, name='act_embed')(action_one_hot)
+        action_embed = nn.relu(action_embed)
+
+        # 2. FiLM Conditioning
+        latent_normed = nn.LayerNorm(name='act_input_ln')(latent_state)
+        scale = nn.Dense(self.latent_dim, name='act_film_scale')(action_embed)
+        shift = nn.Dense(self.latent_dim, name='act_film_shift')(action_embed)
+        x = latent_normed * (1 + scale) + shift
+
+        # 3. Hauptverarbeitung
+        x = nn.Dense(self.latent_dim, name='act_dense1')(x)
+        x = nn.LayerNorm(name='act_ln1')(x)
+        x = nn.relu(x)
+        x = nn.Dense(self.latent_dim, name='act_dense2')(x)
+        x = nn.LayerNorm(name='act_ln2')(x)
+        x = nn.relu(x)
+        for i in range(self.num_res_blocks):
+            x = ResBlock(self.latent_dim)(x)
+
+        # 4. Residual + Min-Max
+        x = nn.Dense(self.latent_dim, name='act_proj')(x)
+        x = latent_state + x
+        min_val = jnp.min(x, axis=-1, keepdims=True)
+        max_val = jnp.max(x, axis=-1, keepdims=True)
+        afterstate = (x - min_val) / (max_val - min_val + 1e-8)
+
+        # 5. Reward Head: 3 Klassen {-1, 0, +1}
+        reward_input = jnp.concatenate([afterstate, action_one_hot], axis=-1)
+        reward_logits = nn.Dense(64, name='reward_dense')(reward_input)
+        reward_logits = nn.relu(reward_logits)
+        reward_logits = nn.Dense(3, name='reward_head')(reward_logits)
+
+        # --- Discount Head: 2 Klassen {0=Terminal, 1=Non-Terminal} ---
+        discount_logits = nn.Dense(32, name='discount_dense')(latent_state)
+        discount_logits = nn.LayerNorm(name='discount_ln')(discount_logits)
+        discount_logits = nn.relu(discount_logits)
+        discount_logits = nn.Dense(2, name='discount_head')(discount_logits)
+
+        # 7. Chance Logits: Vorhersage der Würfelverteilung
+        chance_logits = nn.Dense(self.num_chance_outcomes, name='chance_head')(afterstate)
+
+        return afterstate, reward_logits, chance_logits, discount_logits
+
+    @nn.compact
+    def chance_dynamics(self, afterstate, chance_outcome):
+        """Afterstate + Würfel → Next State"""
+        # 1. Chance Embedding
+        chance_one_hot = jax.nn.one_hot(chance_outcome, num_classes=self.num_chance_outcomes)
+        chance_embed = nn.Dense(64, name='chance_embed')(chance_one_hot)
+        chance_embed = nn.relu(chance_embed)
+
+        # 2. FiLM Conditioning (gleiche Struktur wie action_dynamics)
+        afterstate_normed = nn.LayerNorm(name='chance_input_ln')(afterstate)
+        scale = nn.Dense(self.latent_dim, name='chance_film_scale')(chance_embed)
+        shift = nn.Dense(self.latent_dim, name='chance_film_shift')(chance_embed)
+        x = afterstate_normed * (1 + scale) + shift
+
+        # 3. Hauptverarbeitung
+        x = nn.Dense(self.latent_dim, name='chance_dense1')(x)
+        x = nn.LayerNorm(name='chance_ln1')(x)
+        x = nn.relu(x)
+        x = nn.Dense(self.latent_dim, name='chance_dense2')(x)
+        x = nn.LayerNorm(name='chance_ln2')(x)
+        x = nn.relu(x)
+        for i in range(self.num_res_blocks):
+            x = ResBlock(self.latent_dim)(x)
+
+        # 4. Residual + Min-Max
+        x = nn.Dense(self.latent_dim, name='chance_proj')(x)
+        x = afterstate + x  # Skip zum Afterstate
+        min_val = jnp.min(x, axis=-1, keepdims=True)
+        max_val = jnp.max(x, axis=-1, keepdims=True)
+        next_state = (x - min_val) / (max_val - min_val + 1e-8)
+
+        # --- Depth Delta Head: {0=gleicher Spieler (6er Bonus), 1=Spielerwechsel} ---
+        # depth_delta hängt von die[k] ab — ob der AKTUELLE Spieler eine 6 hatte:
+        #   die[k] == 6  → Bonus-Zug → gleicher Spieler → depth_delta = 0
+        #   die[k] != 6  → Spielerwechsel             → depth_delta = 1
+        #
+        # die[k] ist in afterstate enkodiert (via latent_k = repr_net(obs_k) wo obs_k die[k] enthält).
+        # chance_outcome = die[k+1] ist IRRELEVANT für depth_delta (unabhängiger neuer Würfelwurf).
+        # → afterstate_normed (bereits oben berechnet) ist das sauberste Signal.
+        # x würde durch FiLM(chance_embed(die[k+1])) mit irrelevantem Rauschen kontaminiert.
+        depth_delta_logit = nn.Dense(1, name='depth_delta_head')(afterstate_normed)  # (B, 1)
+
+        return next_state, depth_delta_logit
     
 repr_net = RepresentationNetwork2()
-dynamics_net = StochasticDynamicsNetwork4()
+dynamics_net = StochasticDynamicsNetwork5()
 pred_net = PredictionNetwork4()
 
 def decision_recurrent_fn(params, rng_key, action, embedding):
+    # Embedding = [latent(256), depth(1)] = 257-dim
+    latent = embedding[:, :256]   # (B, 256)
+    depth  = embedding[:, 256:]   # (B, 1) — Werte 0.0/1.0/2.0/3.0
+
     afterstate, reward_logits, chance_logits, discount_logits = dynamics_net.apply(
-        params['dynamics'], embedding, action, method=dynamics_net.action_dynamics
+        params['dynamics'], latent, action, method=dynamics_net.action_dynamics
     )
-    # Reward/Discount → Scalar
-    support = jnp.array([-1.0, 0.0, 1.0])
-    reward = jnp.sum(jax.nn.softmax(reward_logits) * support, axis=-1)
-    discount = jnp.sum(jax.nn.softmax(discount_logits) * support, axis=-1)
-    
-    # Reward + Discount an Afterstate anhängen (werden in chance_recurrent_fn extrahiert)
-    afterstate_with_info = jnp.concatenate([afterstate, reward[:, None], discount[:, None]], axis=-1)
-    
-    _, afterstate_value = pred_net.apply(params['prediction'], afterstate)
-    afterstate_value = afterstate_value.squeeze(-1)
-    
+
+    # Reward: 3 Klassen {-1, 0, +1} → Root-Perspektive
+    # Bei altem depth=0 (Root am Zug): Reward as-is; sonst Vorzeichen flippen
+    support_reward = jnp.array([-1.0, 0.0, 1.0])
+    reward_current = jnp.sum(jax.nn.softmax(reward_logits) * support_reward, axis=-1)  # (B,)
+    old_depth_int  = jnp.round(depth).astype(jnp.int32).squeeze(-1) % 4              # (B,)
+    is_root_turn   = (old_depth_int == 0)
+    reward = jnp.where(is_root_turn, reward_current, -reward_current)  # (B,)
+
+    # Discount: Binary {0=Terminal, 1=Non-Terminal}
+    support_disc = jnp.array([0.0, 1.0])
+    discount = jnp.sum(jax.nn.softmax(discount_logits) * support_disc, axis=-1)  # (B,)
+
+    # Afterstate Value aus Root-Spieler-Perspektive
+    # Spieler hat beim Decision-Node noch NICHT gewechselt → gleiche depth wie Eingang
+    _, afterstate_values = pred_net.apply(params['prediction'], afterstate)
+    root_idx = (4 - old_depth_int) % 4                                              # (B,)
+    afterstate_value = afterstate_values[jnp.arange(afterstate_values.shape[0]), root_idx]  # (B,)
+
+    # Übergabe: [afterstate(256), depth(1), reward(1), discount(1)] = 259-dim
+    afterstate_with_info = jnp.concatenate(
+        [afterstate, depth, reward[:, None], discount[:, None]], axis=-1
+    )
+
     return mctx.DecisionRecurrentFnOutput(
         chance_logits=chance_logits,
         afterstate_value=afterstate_value,
-    ), afterstate_with_info  # ← 258-dim statt 256
+    ), afterstate_with_info  # ← 259-dim
 
 def chance_recurrent_fn(params, rng_key, chance_outcome, afterstate_with_info):
-    # Extrahiere Reward/Discount
-    afterstate = afterstate_with_info[:, :-2]  # (Batch, 256)
-    reward = afterstate_with_info[:, -2]       # (Batch,)
-    discount = afterstate_with_info[:, -1]     # (Batch,)
-    
-    next_embedding = dynamics_net.apply(
+    # afterstate_with_info = [afterstate(256), depth(1), reward(1), discount(1)] = 259-dim
+    afterstate = afterstate_with_info[:, :256]    # (B, 256)
+    depth      = afterstate_with_info[:, 256:257] # (B, 1)
+    reward     = afterstate_with_info[:, -2]      # (B,)
+    discount   = afterstate_with_info[:, -1]      # (B,)
+
+    # chance_dynamics gibt jetzt (next_state, depth_delta_logit) zurück
+    next_state, depth_delta_logit = dynamics_net.apply(
         params['dynamics'], afterstate, chance_outcome, method=dynamics_net.chance_dynamics
     )
-    prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
-    value = value.squeeze(-1)
-    
+
+    # Depth-Delta: 6er → gleicher Spieler (sigmoid≈0), sonst Spielerwechsel (sigmoid≈1)
+    depth_delta = jax.nn.sigmoid(depth_delta_logit)  # (B, 1)
+    next_depth  = (depth + depth_delta) % 4.0         # (B, 1)
+
+    # next_embedding: [next_state(256), next_depth(1)] = 257-dim
+    next_embedding = jnp.concatenate([next_state, next_depth], axis=-1)
+
+    # Value aus Root-Spieler-Perspektive
+    next_depth_int = jnp.round(next_depth).astype(jnp.int32).squeeze(-1) % 4  # (B,)
+    root_idx = (4 - next_depth_int) % 4                                        # (B,)
+    prior_logits, values = pred_net.apply(params['prediction'], next_state)
+    value = values[jnp.arange(values.shape[0]), root_idx]  # (B,)
+
     return mctx.ChanceRecurrentFnOutput(
         action_logits=prior_logits,
         value=value,
@@ -452,11 +591,17 @@ def chance_recurrent_fn(params, rng_key, chance_outcome, afterstate_with_info):
 
 def root_inference_fn(params, observation):
     embedding = repr_net.apply(params['representation'], observation)
-    prior_logits, value = pred_net.apply(params['prediction'], embedding)
-    # value: (Batch, 1) -> (Batch,)
-    value = value.squeeze(-1)
+    prior_logits, values = pred_net.apply(params['prediction'], embedding)
+    # values: (B, 4) - Multi-Value Head
+    # depth=0 am Root → Root-Spieler ist aktueller Spieler → values[:,0]
+    value = values[:, 0]  # (B,)
+
+    # Depth-Scalar an Embedding anhängen (0 = Root-Spieler ist am Zug)
+    depth_init = jnp.zeros((embedding.shape[0], 1))
+    embedding_with_depth = jnp.concatenate([embedding, depth_init], axis=-1)  # (B, 257)
+
     return mctx.RootFnOutput(
-        embedding=embedding,
+        embedding=embedding_with_depth,
         prior_logits=prior_logits,
         value=value
     )
