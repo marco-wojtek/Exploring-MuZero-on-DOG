@@ -69,62 +69,6 @@ batch_valid_action = jax.vmap(valid_action)
 batch_encode = jax.vmap(encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_map_action = jax.vmap(map_action)
-jnp.repeat
-@jax.jit
-def multiactor_step(envs, params_list, rng_key):
-    """
-    Führt einen Schritt für N parallele Spiele aus.
-    params_list: Eine Liste der 4 Parameter-Sets für die Spieler.
-    """
-    # A. Observations
-    obs = batch_encode(envs)
-    val_actions = batch_valid_action(envs).reshape(envs.board.shape[0], -1)
-    dones = envs.done
-    current_players = envs.current_player
-    branches = [lambda p=p: p for p in params_list]
-    def perform_action(env, obs, val_act, done, player_idx, rng_key):
-        # Wähle die richtigen Parameter basierend auf dem Index des aktuellen Spielers.
-        # jax.lax.switch wird für JIT-kompatibles bedingtes Indexieren verwendet.
-        
-        params = jax.lax.switch(player_idx, branches)
-
-        def mcts_step():
-            obs_batched = obs[None, ...] 
-            invalid_actions_batched = (~val_act)[None, ...]
-            
-            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, num_simulations=NUM_SIMULATIONS, max_depth=MAX_DEPTH, temperature=0.25)
-            
-            act = policy_output.action[0]
-            action_weights = policy_output.action_weights[0]
-            root_value = root_values[0]
-            
-            mapped_act = map_action(act)
-            next_env, reward, next_done = env_step(env, mapped_act)
-            return next_env, obs, act, reward, root_value, action_weights, next_done
-        
-        def no_action_step():
-            next_env, reward, next_done = no_step(env)
-            dummy_action = jnp.int32(-1)
-            dummy_policy = jnp.zeros_like(val_act, dtype=jnp.float32)
-            dummy_root_value = 0.0
-            return next_env, obs, dummy_action, reward, dummy_root_value, dummy_policy, next_done
-
-        return jax.lax.cond(
-            jnp.any(val_act) & (~done),
-            mcts_step,
-            no_action_step
-        )
-
-    # Führe vmap aus. Beachte, dass `params_list` nicht mehr Teil des vmap-Aufrufs ist.
-    # Stattdessen übergeben wir `current_players`, um die Auswahl innerhalb von `perform_action` zu treffen.
-    next_envs, obs, actions, rewards, root_values, policy_output_action_weights, next_dones = jax.vmap(
-        perform_action, in_axes=(0, 0, 0, 0, 0, 0)
-    )(envs, obs, val_actions, dones, current_players, jax.random.split(rng_key, envs.board.shape[0]))
-    
-    rewards = jnp.where(dones, 0.0, rewards)
-    final_dones = jnp.logical_or(dones, next_dones)
-    
-    return next_envs, (obs, actions, rewards, root_values, policy_output_action_weights, final_dones)
 
 def calculate_progress(env: deterministic_MADN, player_idx: int) -> int:
     '''
@@ -208,47 +152,6 @@ def calculate_player_progress(envs):
     
     x = jax.vmap(player_progress_single)(envs)
     return jnp.mean(x, axis=0), x
-
-def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
-    """
-    Spielt num_envs Spiele parallel und gibt eine Liste von Episoden zurück.
-    """
-    # 1. Initialisierung der Environments
-    rng_key, subkey = jax.random.split(rng_key)
-    seeds = jax.random.randint(subkey, (num_envs,), 0, 1000000)
-    envs = batch_reset(seeds, jnp.full((num_envs,), starting_player))
-    
-    # Buffer für jedes Environment (Liste von Listen)
-    winners = jnp.zeros((num_envs,4), dtype=jnp.int32)
-    
-    active_mask = np.ones(num_envs, dtype=bool)
-    
-    step_counter = 0
-    MAX_STEPS = 2000 # Sicherheitsabbruch, falls Spiele hängen
-    
-    # Loop solange noch mindestens ein Spiel läuft
-    while np.any(active_mask) and step_counter < MAX_STEPS:
-        step_counter += 1
-        rng_key, subkey = jax.random.split(rng_key)
-        
-        # JIT-Step ausführen (läuft auf GPU/TPU für alle Envs gleichzeitig)
-        current_players = envs.current_player
-        params_for_envs = [params_list[int(player)] for player in current_players]
-        envs, data = multiactor_step(envs, tuple(params_for_envs), subkey)
-        
-        # Daten auf CPU holen für Listen-Operationen
-        obs, acts, rews, vals, pols, dones = jax.device_get(data)
-        
-        # fetch winners if done
-        for i in range(num_envs):
-            if active_mask[i] and dones[i]:
-                active_mask[i] = False
-                winner = manual_get_winner(envs.board[i], envs.num_players, envs.goal[i], envs.rules)
-                winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
-    
-    # Get Progress Stats
-    progress_mean, progress_all = calculate_player_progress(envs)
-    return jnp.sum(winners, axis=0), progress_mean
 
 def evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, setting2=100, setting3=100, setting4=100, batch_size=20):
     # use random agents if params are None
@@ -564,16 +467,11 @@ params1 = None
 params2 = None
 params3 = None
 params4 = None
-FILENAME = "gumbelmuzero_madn_params_low_search_lr0.005_g1500_it100_seed58"
+FILENAME = "Experiment_53_100"
 print(f"Evaluating {FILENAME} vs random agents TEMP {TEMPERATURE:.2f}:")
-params1 = load_params_from_file(f'MuZero_det_MADN/models/params/Experiment_53_100.pkl')
-params2 = 'random_agent'
-params3 = 'random_agent'
-params4 = 'random_agent'
-evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, setting2=50, setting3=100, setting4=100, batch_size=250)
 
 params1 = 'random_agent'
-params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params2 = 'random_agent'
 params3 = 'random_agent'
 params4 = 'random_agent'
 evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, setting2=50, setting3=100, setting4=50, batch_size=250)
@@ -583,14 +481,37 @@ evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, settin
 # params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
 # params3 = 'rule_based_agent'
 # params4 = 'rule_based_agent'
-# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=150)
+# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
 
 # print(f"\nEvaluating {FILENAME} vs None agents TEMP {TEMPERATURE:.2f}:")
 # params1 = None
 # params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
 # params3 = None
 # params4 = None
-# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=150)
+# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
+
+# FILENAME = "gumbelmuzero_madn_params_lr0.005_g1500_it100_seed54"
+# print(f"Evaluating {FILENAME} vs random agents TEMP {TEMPERATURE:.2f}:")
+
+# params1 = 'random_agent'
+# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+# params3 = 'random_agent'
+# params4 = 'random_agent'
+# evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, setting2=50, setting3=100, setting4=50, batch_size=250)
+
+# print(f"\nEvaluating {FILENAME} vs rule-based agents TEMP {TEMPERATURE:.2f}:")
+# params1 = 'rule_based_agent'
+# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+# params3 = 'rule_based_agent'
+# params4 = 'rule_based_agent'
+# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
+
+# print(f"\nEvaluating {FILENAME} vs None agents TEMP {TEMPERATURE:.2f}:")
+# params1 = None
+# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+# params3 = None
+# params4 = None
+# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

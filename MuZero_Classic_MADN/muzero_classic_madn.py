@@ -606,7 +606,7 @@ def root_inference_fn(params, observation):
         value=value
     )
 
-@functools.partial(jax.jit, static_argnames=['num_simulations', 'max_depth', 'temperature'])
+@functools.partial(jax.jit, static_argnames=['num_simulations', 'max_depth'])
 def run_stochastic_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulations, max_depth, temperature):
     """
     Führt Stochastic MuZero MCTS auf einem Environment aus.

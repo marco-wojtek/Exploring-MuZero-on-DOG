@@ -48,6 +48,26 @@ class VectorizedReplayBufferStochastic:
         """Speichert Batch von Spielen direkt."""
         num_games = all_buffers['idx'].shape[0]
         episode_lengths = np.array(all_buffers['idx'])
+
+        # Nur bis zur tatsächlichen maximalen Episodenlänge transferieren.
+        # Die while_loop allokiert immer max_steps Schritte, aber gültige Daten
+        # existieren nur bis max(episode_lengths). Das reduziert den GPU→CPU
+        # Transfer von ~3 GB auf typisch <1 GB und erklärt die gelegentlichen Spikes
+        # (wenn ein Spiel nahe max_steps läuft, explodiert die Transfergröße).
+        max_len = int(np.max(episode_lengths)) if np.any(episode_lengths > 0) else 1
+
+        np_obs        = np.array(all_buffers['obs'][:, :max_len])
+        np_act        = np.array(all_buffers['act'][:, :max_len])
+        np_rew        = np.array(all_buffers['rew'][:, :max_len])
+        np_val        = np.array(all_buffers['val'][:, :max_len])
+        np_pol        = np.array(all_buffers['pol'][:, :max_len])
+        np_mask       = np.array(all_buffers['mask'][:, :max_len])
+        np_dice       = np.array(all_buffers['dice'][:, :max_len])
+        np_dice_dist  = np.array(all_buffers['dice_dist'][:, :max_len])
+        np_player     = np.array(all_buffers['player'][:, :max_len])
+        np_team       = np.array(all_buffers['team'][:, :max_len])
+        np_discount   = np.array(all_buffers['discount'][:, :max_len])
+        np_depth      = np.array(all_buffers['depth_delta'][:, :max_len])
         
         for i in range(num_games):
             pos = self.position
@@ -56,19 +76,18 @@ class VectorizedReplayBufferStochastic:
             if length == 0:
                 continue
             
-            # Kopiere Daten (NumPy ist hier schnell)
-            self.observations[pos, :length] = np.array(all_buffers['obs'][i, :length])
-            self.actions[pos, :length] = np.array(all_buffers['act'][i, :length])
-            self.rewards[pos, :length] = np.array(all_buffers['rew'][i, :length])
-            self.root_values[pos, :length] = np.array(all_buffers['val'][i, :length])
-            self.child_visits[pos, :length] = np.array(all_buffers['pol'][i, :length])
-            self.masks[pos, :length] = np.array(all_buffers['mask'][i, :length])
-            self.dice_outcomes[pos, :length] = np.array(all_buffers['dice'][i, :length])
-            self.dice_distributions[pos, :length] = np.array(all_buffers['dice_dist'][i, :length])  
-            self.players[pos, :length] = np.array(all_buffers['player'][i, :length])
-            self.teams[pos, :length] = np.array(all_buffers['team'][i, :length])
-            self.discounts[pos, :length] = np.array(all_buffers['discount'][i, :length])
-            self.depth_deltas[pos, :length] = np.array(all_buffers['depth_delta'][i, :length])
+            self.observations[pos, :length]      = np_obs[i, :length]
+            self.actions[pos, :length]            = np_act[i, :length]
+            self.rewards[pos, :length]            = np_rew[i, :length]
+            self.root_values[pos, :length]        = np_val[i, :length]
+            self.child_visits[pos, :length]       = np_pol[i, :length]
+            self.masks[pos, :length]              = np_mask[i, :length]
+            self.dice_outcomes[pos, :length]      = np_dice[i, :length]
+            self.dice_distributions[pos, :length] = np_dice_dist[i, :length]
+            self.players[pos, :length]            = np_player[i, :length]
+            self.teams[pos, :length]              = np_team[i, :length]
+            self.discounts[pos, :length]          = np_discount[i, :length]
+            self.depth_deltas[pos, :length]       = np_depth[i, :length]
             self.episode_lengths[pos] = length
             
             self.position = (pos + 1) % self.capacity

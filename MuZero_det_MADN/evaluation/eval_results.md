@@ -10,6 +10,32 @@ empty template:
 ---
 
 # FFA MADN
+---
+---
+**Direct Comparison of Classic and Gumbel** 
+**Seed 63 (Classic MuZero)**
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.1|887/1000|88.7%|
+|rule-based|0.1|903/1000|90.3%|
+|init MuZero|0.1|840/1000|84.0%|
+
+**Seed 53 (Gumbel MuZero)**
+| Opponent | Gumbel scale | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|1.0|823/1000|82.3%|
+|rule-based|1.0|834/1000|83.4%|
+|init MuZero|1.0|746/1000|74.6%|
+
+**Seed 54 (Gumbel MuZero)**
+| Opponent | Gumbel scale | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|1.0|819/1000|81.9%|
+|rule-based|1.0|864/1000|86.4%|
+|init MuZero|1.0|549/1000|54.9%|
+
+---
+---
 ## New Format
 Multi-Value Head + depth tracking + new discount calculation
 ## Seed 53

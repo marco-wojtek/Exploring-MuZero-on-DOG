@@ -1,0 +1,301 @@
+Params geladen: MuZero_det_MADN/models/params/gumbelmuzero_madn_params_lr0.005_g1500_it100_seed61.pkl
+Architektur: FFA Multi-Value Head (4 Werte) + Binary Discount + Depth-Delta
+
+
+========================================================================
+  TEST 1: MULTI-VALUE HEAD  —  pred_net → values (B, 4)
+========================================================================
+  Erwartet für PRE-WIN:
+    values[0] ≈ +1.0  (Root-Spieler P0 gewinnt)
+    values[1..3] ≈ -1.0  (Gegner verlieren)
+
+  PRE-WIN  (Move 5 gewinnt)
+    V[0]=+1.0000  V[1]=-1.0000  V[2]=-1.0000  V[3]=-0.9994
+    Root-Value V[0]: ROOT gewinnt  ✓
+
+  PRE-WIN6 (Move 6 gewinnt)
+    V[0]=+0.9900  V[1]=-0.9970  V[2]=-0.9952  V[3]=-0.9949
+    Root-Value V[0]: ROOT gewinnt  ✓
+
+  PRE-LOSE (P0 verliert)
+    V[0]=-0.9969  V[1]=+0.9933  V[2]=-0.9980  V[3]=-0.9976
+    Root-Value V[0]: ROOT verliert ✓
+
+  NORMAL   (Mittelspiel)
+    V[0]=+0.1124  V[1]=-0.5110  V[2]=-0.4232  V[3]=-0.4752
+    Root-Value V[0]: neutral
+
+
+========================================================================
+  TEST 2: DEPTH-DELTA HEAD  —  dynamics_net → depth_delta_logit
+========================================================================
+  Target: depth_delta_sigmoid ≈ 0.0  für Action 6 (6er Bonus-Zug)
+          depth_delta_sigmoid ≈ 1.0  für alle anderen Actions
+
+  Action                   Valid  DepthDelta  Expected    Logit  Match
+  ---------------------------------------------------------------
+  Pin 0, Move 1                O      1.0000       1.0   15.848      ✓
+  Pin 0, Move 2                O      1.0000       1.0   13.177      ✓
+  Pin 0, Move 3                O      1.0000       1.0   15.153      ✓
+  Pin 0, Move 4                O      1.0000       1.0   15.412      ✓
+  Pin 0, Move 5                O      1.0000       1.0   14.784      ✓
+  Pin 0, Move 6 (6er!)         O      0.0000       0.0  -20.391      ✓  ← 6ER
+  Pin 1, Move 1                O      0.9998       1.0    8.339      ✓
+  Pin 1, Move 2                O      0.9990       1.0    6.869      ✓
+  Pin 1, Move 3                O      0.9987       1.0    6.642      ✓
+  Pin 1, Move 4                O      0.9986       1.0    6.606      ✓
+  Pin 1, Move 5                O      0.9991       1.0    6.970      ✓
+  Pin 1, Move 6 (6er!)         O      0.0000       0.0  -20.346      ✓  ← 6ER
+  Pin 2, Move 1                O      0.8355       1.0    1.625      ✓
+  Pin 2, Move 2                O      0.7087       1.0    0.889      ✓
+  Pin 2, Move 3                O      0.7592       1.0    1.148      ✓
+  Pin 2, Move 4                O      0.8583       1.0    1.801      ✓
+  Pin 2, Move 5                O      0.9696       1.0    3.464      ✓
+  Pin 2, Move 6 (6er!)         O      0.0000       0.0  -20.483      ✓  ← 6ER
+  Pin 3, Move 1                O      1.0000       1.0   15.295      ✓
+  Pin 3, Move 6 (6er!)         O      0.0000       0.0  -20.054      ✓  ← 6ER
+
+  Depth-Delta Accuracy: 20/20 (100%)
+
+========================================================================
+  TEST 3: BINARY DISCOUNT HEAD  —  {0=Terminal, 1=Non-Terminal}
+========================================================================
+  Erwartet: Winning Action  → discount_val ≈ 0.0  (Terminal)
+            Normale Actions → discount_val ≈ 1.0  (Non-Terminal)
+
+  --- PRE-WIN  (Move 5 gewinnt) ---
+  Action                       Val  P(Term)  P(NonT) Interpret
+  ----------------------------------------------------------
+  Pin 0, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 2             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 3             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 4             0.0079   0.9921   0.0079  TERMINAL ✓
+  Pin 0, Move 5             0.0000   1.0000   0.0000  TERMINAL ✓  ← WINNING
+
+  --- PRE-WIN6 (Move 6 gewinnt) ---
+  Action                       Val  P(Term)  P(NonT) Interpret
+  ----------------------------------------------------------
+  Pin 0, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 2             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 3             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 4             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 5             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 6 (6er!)      0.0000   1.0000   0.0000  TERMINAL ✓  ← WINNING
+
+  --- PRE-LOSE (P0 verliert) ---
+  Action                       Val  P(Term)  P(NonT) Interpret
+  ----------------------------------------------------------
+  Pin 0, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 2             1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 3             1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 4             1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 5             1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+
+  --- NORMAL   (Mittelspiel) ---
+  Action                       Val  P(Term)  P(NonT) Interpret
+  ----------------------------------------------------------
+  Pin 0, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 2             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 3             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 4             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 5             1.0000   0.0000   1.0000  non-term
+  Pin 0, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 2             1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 3             1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 4             1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 5             1.0000   0.0000   1.0000  non-term
+  Pin 1, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 2             1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 3             1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 4             1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 5             1.0000   0.0000   1.0000  non-term
+  Pin 2, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 1             1.0000   0.0000   1.0000  non-term
+  Pin 3, Move 6 (6er!)      1.0000   0.0000   1.0000  non-term
+
+
+========================================================================
+  TEST 4: REWARD HEAD  —  3 Klassen {-1, 0, +1} — FFA Root-Perspektive
+========================================================================
+  Erwartet bei PRE-WIN: Winning Action → P(+1) hoch, E[R] ≈ +1.0
+  (Reward wird intern geflipt wenn Gegner am Zug; hier testet pred_net direkt)
+
+  --- PRE-WIN  (Move 5 gewinnt) ---
+  Action                      E[R]   P(-1)    P(0)   P(+1)    Disc
+  ----------------------------------------------------------
+  Pin 0, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 2            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 3            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 4            +0.9842  0.0000  0.0158  0.9842  0.0079  
+  Pin 0, Move 5            +1.0000  0.0000  0.0000  1.0000  0.0000  WIN  <<<
+
+  --- PRE-WIN6 (Move 6 gewinnt) ---
+  Action                      E[R]   P(-1)    P(0)   P(+1)    Disc
+  ----------------------------------------------------------
+  Pin 0, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 2            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 3            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 4            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 5            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 6 (6er!)     +1.0000  0.0000  0.0000  1.0000  0.0000  WIN  <<<
+
+  --- PRE-LOSE (P0 verliert) ---
+  Action                      E[R]   P(-1)    P(0)   P(+1)    Disc
+  ----------------------------------------------------------
+  Pin 0, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 2            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 3            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 4            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 5            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+
+  --- NORMAL   (Mittelspiel) ---
+  Action                      E[R]   P(-1)    P(0)   P(+1)    Disc
+  ----------------------------------------------------------
+  Pin 0, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 2            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 3            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 4            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 5            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 0, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 2            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 3            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 4            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 5            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 1, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 2            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 3            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 4            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 5            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 2, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 1            +0.0000  0.0000  1.0000  0.0000  1.0000  
+  Pin 3, Move 6 (6er!)     +0.0000  0.0000  1.0000  0.0000  1.0000  
+
+
+========================================================================
+  TEST 5: DEPTH-DELTA KONSISTENZ über verschiedene States
+========================================================================
+  depth_delta_logit kommt aus Dense(action_one_hot) → state-unabhängig
+  Std > 0.05 deutet auf Fehler hin
+
+  Action                     PRE-WIN  PRE-LOSE    NORMAL     Std Status
+  ----------------------------------------------------------------------
+  Pin 0, Move 1               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 0, Move 2               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 0, Move 3               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 0, Move 4               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 0, Move 5               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 0, Move 6 (6er!)        0.0000    0.0000    0.0000  0.0000  ✓ OK
+  Pin 1, Move 1               0.9998    0.9998    0.9998  0.0000  ✓ OK
+  Pin 1, Move 2               0.9990    0.9990    0.9990  0.0000  ✓ OK
+  Pin 1, Move 3               0.9987    0.9987    0.9987  0.0000  ✓ OK
+  Pin 1, Move 4               0.9986    0.9986    0.9986  0.0000  ✓ OK
+  Pin 1, Move 5               0.9991    0.9991    0.9991  0.0000  ✓ OK
+  Pin 1, Move 6 (6er!)        0.0000    0.0000    0.0000  0.0000  ✓ OK
+  Pin 2, Move 1               0.8355    0.8355    0.8355  0.0000  ✓ OK
+  Pin 2, Move 2               0.7087    0.7087    0.7087  0.0000  ✓ OK
+  Pin 2, Move 3               0.7592    0.7592    0.7592  0.0000  ✓ OK
+  Pin 2, Move 4               0.8583    0.8583    0.8583  0.0000  ✓ OK
+  Pin 2, Move 5               0.9696    0.9696    0.9696  0.0000  ✓ OK
+  Pin 2, Move 6 (6er!)        0.0000    0.0000    0.0000  0.0000  ✓ OK
+  Pin 3, Move 1               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 3, Move 2               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 3, Move 3               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 3, Move 4               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 3, Move 5               1.0000    1.0000    1.0000  0.0000  ✓ OK
+  Pin 3, Move 6 (6er!)        0.0000    0.0000    0.0000  0.0000  ✓ OK
+
+========================================================================
+  TEST 6: ROOT_IDX LOGIK  —  Depth → Root-Spieler-Index
+========================================================================
+  Formel: root_idx = (4 - next_depth_int) % 4
+
+    next_depth  root_idx Bedeutung
+  --------------------------------------------------
+             0   →      0        Root-Spieler ist am Zug → values[:,0]
+             1   →      3        root ist 3 Züge zurück → values[:,3]
+             2   →      2        root ist 2 Züge zurück → values[:,2]
+             3   →      1        root ist 1 Zug zurück  → values[:,1]
+
+  Simuliere Schritt-für-Schritt Depth-Tracking (depth_delta über 3 Schritte):
+  Step                   Action   dd_sig  depth_before  depth_after  root_idx
+  ---------------------------------------------------------------------------
+     0            Pin 0, Move 1   1.0000        0.0000       1.0000          3
+     1     Pin 0, Move 6 (6er!)   0.0000        1.0000       1.0000          3
+     2            Pin 1, Move 1   0.9998        1.0000       1.9998          2
+
+========================================================================
+  TEST 7: MCTS END-TO-END  —  findet MCTS die Winning Action?
+========================================================================
+  Erwartet: Winning Action hat höchsten Q-Value / Action-Weight
+
+  --- PRE-WIN  (Move 5 gewinnt) ---
+    MCTS Root-Value (Root-Spieler P0): +0.9756
+    Winning Action 4 (Pin 0, Move 5): Q=+1.0000, Visits=41, Weight=1.0000
+    Top 5 nach Weight:
+      #1: Pin 0, Move 5            Q=+1.0000  Visits=  41  Weight=1.0000  ← WINNING
+      #2: Pin 0, Move 4            Q=+0.9918  Visits=  41  Weight=0.0000
+      #3: Pin 0, Move 1            Q=+0.8919  Visits=   6  Weight=0.0000
+      #4: Pin 0, Move 2            Q=+0.8950  Visits=   6  Weight=0.0000
+      #5: Pin 0, Move 3            Q=+0.8579  Visits=   6  Weight=0.0000
+
+  --- PRE-WIN6 (Move 6 gewinnt) ---
+    MCTS Root-Value (Root-Spieler P0): +0.9666
+    Winning Action 5 (Pin 0, Move 6 (6er!)): Q=+1.0000, Visits=35, Weight=1.0000
+    Top 5 nach Weight:
+      #1: Pin 0, Move 6 (6er!)     Q=+1.0000  Visits=  35  Weight=1.0000  ← WINNING
+      #2: Pin 0, Move 4            Q=+0.9849  Visits=  34  Weight=0.0000
+      #3: Pin 0, Move 2            Q=+0.9448  Visits=  16  Weight=0.0000
+      #4: Pin 0, Move 1            Q=+0.8672  Visits=   5  Weight=0.0000
+      #5: Pin 0, Move 5            Q=+0.8694  Visits=   5  Weight=0.0000
+
+  --- PRE-LOSE (P0 verliert) ---
+    MCTS Root-Value (Root-Spieler P0): -0.9632
+    Top 5 nach Weight:
+      #1: Pin 2, Move 1            Q=-0.9320  Visits=  28  Weight=0.9977
+      #2: Pin 3, Move 1            Q=-0.9395  Visits=  28  Weight=0.0023
+      #3: Pin 2, Move 6 (6er!)     Q=-0.9964  Visits=  14  Weight=0.0000
+      #4: Pin 1, Move 6 (6er!)     Q=-0.9966  Visits=   6  Weight=0.0000
+      #5: Pin 3, Move 6 (6er!)     Q=-0.9971  Visits=   6  Weight=0.0000
+
+  --- NORMAL   (Mittelspiel) ---
+    MCTS Root-Value (Root-Spieler P0): +0.0561
+    Top 5 nach Weight:
+      #1: Pin 0, Move 6 (6er!)     Q=+0.2293  Visits=  28  Weight=1.0000
+      #2: Pin 2, Move 2            Q=+0.0000  Visits=   0  Weight=0.0000
+      #3: Pin 2, Move 5            Q=+0.0000  Visits=   0  Weight=0.0000
+      #4: Pin 2, Move 4            Q=+0.0000  Visits=   0  Weight=0.0000
+      #5: Pin 1, Move 2            Q=+0.0000  Visits=   0  Weight=0.0000
+
+
+========================================================================
+  ZUSAMMENFASSUNG: FFA-Architektur Check
+========================================================================
+
+  Komponente                     Status
+  --------------------------------------------------
+  Multi-Value Head shape (1,4)   ✓ OK ((1, 4))
+  DynamicsNet Outputs (erwartet 4) ✓ OK (4)
+  depth_delta_logit shape (1,1)  ✓ OK ((1, 1))
+  Discount Logits (2 Klassen)    ✓ OK ((1, 2))
+  Reward Logits (3 Klassen)      ✓ OK ((1, 3))
+  Depth-Delta Accuracy           20/20 (100%)
+
+  Architektur-Outputs korrekt: JA ✓

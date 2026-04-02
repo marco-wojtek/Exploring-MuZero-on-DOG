@@ -49,7 +49,7 @@ batch_encode = jax.vmap(encode_board)  # Verwende board_to_matrix für classic M
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_throw_die = jax.vmap(throw_die)
 
-@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth', 'temp'])
+@functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'max_steps', 'num_simulations', 'max_depth'])
 def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps, temp):
     """
     Spielt einen Batch von Spielen parallel mit Stochastic MuZero.
