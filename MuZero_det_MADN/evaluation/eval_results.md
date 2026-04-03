@@ -1,4 +1,19 @@
 # Team MADN with reward, discount learning
+
+## Seed 65 (Gumble MuZero with constant gumbel scale in Training)
+| Opponent | Wins  | % | 
+|------:|------------------:|-------:|
+|  random agent |  983/1000 | 98.3%  |
+|  rule based |  996/1000 | 99.6%  |
+|  random MuZero |  983/1000 | 98.3%  |
+
+## Seed 66 (classic MuZero) 
+| Opponent | Wins  | % | 
+|------:|------------------:|-------:|
+|  random agent |  988/1000 | 98.8%  |
+|  rule based |  1000/1000 | 100%  |
+|  random MuZero |  983/1000 | 98.3%  |
+
 ## Experiment 33 100 Iterations
 ### Temp=0.0
 | Opponent | Wins (out of 600) | % | avg pin distance 1 | avg pin distance 2 |
