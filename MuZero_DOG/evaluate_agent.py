@@ -50,7 +50,7 @@ def env_reset_batched(seed, starting_player):
         seed,  # <- Das wird an '_' übergeben
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=10,
+        distance=16,
         starting_player=starting_player,
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
         enable_teams=RULES['enable_teams'],
@@ -366,16 +366,18 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                         temperature=TEMPERATURE
                     )
                     action = policy_output.action[0]
-                    next_env, reward, next_done = env_step(env, map_action_to_move(action))
+                    next_env, reward, next_done = env_step(env, action)
                     return next_env, next_done
                 
                 def do_random():
                     logits = jnp.where(valid_mask, 0.0, -1e9)
                     action = jax.random.categorical(key, logits)
-                    next_env, reward, next_done = env_step(env, map_action_to_move(action))
+                    next_env, reward, next_done = env_step(env, action)
                     return next_env, next_done
                 
                 def do_rule_based():
+                    next_env, reward, next_done = env_step(env, 0)
+                    return next_env, next_done
                     current_player = env.current_player
                     current_goal = env.goal[current_player] # (num_pins,)
                     current_positions = env.pins[current_player][:,None] # (num_pins, 1)
@@ -458,7 +460,7 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                     policy_logits = policy_scores / temperature
                     
                     action = jax.random.categorical(key, policy_logits)
-                    mapped_act = map_action_to_move(action)
+                    mapped_act = action
                     next_env, reward, next_done = env_step(env, mapped_act)
                     return next_env, next_done
 
@@ -556,7 +558,7 @@ params1 = 'random_agent'
 params2 = 'random_agent'
 params3 = 'random_agent'
 params4 = 'random_agent'
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=2)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=1)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

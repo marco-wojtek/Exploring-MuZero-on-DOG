@@ -55,6 +55,7 @@ class DOG:
     total_board_size: Size = struct.field(pytree_node=False)
     rules : dict  = struct.field(pytree_node=False)
 
+# @jax.jit
 def get_play_action_size(env: DOG):
     return int(2 * (4 * (12 + 1 + env.total_board_size) + 120))
 
@@ -84,7 +85,7 @@ def env_reset(
         _,
         num_players=jnp.int8(4),
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=jnp.int32(10),
+        distance=jnp.int32(16),
         starting_player = jnp.int8(0), # -1, 0, 1, 2, 3
         seed = 42,
         enable_teams = False,
@@ -632,7 +633,7 @@ def valid_step_actions(env: DOG) -> chex.Array:
     valid_action = jnp.where(hand > 0, True, False)
     
     num_total_actions = get_play_action_size(env)  # actions without joker copy :==>  num_pins * (num_normal_moves + -4 move + swap moves) + move 7 distributions
-    all_actions = jnp.full((int(num_total_actions/2),), False)
+    all_actions = jnp.full((num_total_actions//2,), False)
     joker_actions = jnp.copy(all_actions)
 
     # filter actions based on effect (handle special cards seperatly if necessary)
@@ -1261,12 +1262,151 @@ def map_action_to_card(action: Action) -> Card:
         )
     )
 
-def encode_board(env: DOG) -> jnp.array:
-    """
-    Encodes the current state of the board into a format suitable for input into a neural network.
+def encode_board(env: DOG) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in eine Form, die von neuronalen Netzwerken verarbeitet werden kann.
+    Gleicher Aufbau wie bei MADN Spiele
     Args:
-        env: DOG environment
+        env: Aktuelle DOG-Umgebung 
+
     Returns:
-        A 3D array representing the encoded state of the board.
-    """
-    pass
+        Ein Array, das die kodierte Spielfelddarstellung enthält.
+    '''
+    num_players = env.num_players
+    board = env.board
+    distance = env.board_size // 4
+    current_player = env.current_player
+    
+    #rolled idx
+    rolled_idx = (jnp.arange(num_players) + current_player) % num_players
+    # Spielerpositionen (One-hot)
+    # with roll over for current player
+    new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
+    goal_pos = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
+    board = jnp.concatenate([new_board, goal_pos], axis=0)
+    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
+    team_channel = jnp.sum(player_channels[::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[0:1], axis=0, keepdims=True) # (1, board_size)
+    opponent_channel = jnp.sum(player_channels[1::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[1:], axis=0, keepdims=True) # (1, board_size)
+    # Spielerposition im Haus
+    home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
+    home_positions = home_positions[rolled_idx]  # (4, board_size)
+
+    # game phase channel
+    phase_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.phase  # (1, board_size)
+    
+    # Aktueller Spieler (optional)
+    # current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * current_player  # (1, board_size)
+    current_cards = env.hands[current_player]  # (13,)
+    card_channels = jnp.tile(current_cards[:, None], (1, board.shape[0]))  # (13, board_size)
+    # opponent cards (needed so that the model learns discount -> when the next player is team or not)
+    # If the current player has 3 cards left, P1 has 0 P2 has 3 and P4 has 3, then the model should learn 
+    # that the next player is a teammate, thus predicting dicount +1 for correct value estimation
+    opponent_cards = jnp.sum(env.hands[rolled_idx[1:]], axis=0)  # (3)
+    opponent_card_channels = jnp.tile(opponent_cards[:, None], (1, board.shape[0]))  # (3, board_size)
+
+    hand_size_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.hand_size  # (1, board_size)
+
+    # Alles zusammenfügen
+    board_encoding = jnp.concatenate([player_channels, team_channel, opponent_channel, home_positions, phase_channel, card_channels, opponent_card_channels, hand_size_channel], axis=0)  # (features, board_size)
+    return board_encoding
+
+
+def encode_boardV2(env: DOG) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in eine Form, die von neuronalen Netzwerken verarbeitet werden kann.
+    Extra Channel für overshooting vom Zielbereich, damit das Modell lernen kann, dass das Ziel verpasst werden kann.
+    Args:
+        env: Aktuelle DOG-Umgebung 
+
+    Returns:
+        Ein Array, das die kodierte Spielfelddarstellung enthält.
+    '''
+    num_players = env.num_players
+    board = env.board
+    distance = env.board_size // 4
+    current_player = env.current_player
+    
+    #rolled idx
+    rolled_idx = (jnp.arange(num_players) + current_player) % num_players
+    # Spielerpositionen (One-hot)
+    # with roll over for current player
+    new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
+    goal_pos = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
+    board = jnp.concatenate([new_board, goal_pos], axis=0)
+    overshoot_board = jnp.concatenate([new_board, new_board[:(goal_pos.shape[0])]], axis=0)  # board mit angehängten Feldern für Overshooting   
+    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
+    overshoot_channels = (overshoot_board == rolled_idx[0, None]).astype(jnp.int8)  # (1, board_size + goal_size)
+    team_channel = jnp.sum(player_channels[::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[0:1], axis=0, keepdims=True) # (1, board_size)
+    opponent_channel = jnp.sum(player_channels[1::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[1:], axis=0, keepdims=True) # (1, board_size)
+    # Spielerposition im Haus
+    home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
+    home_positions = home_positions[rolled_idx]  # (4, board_size)
+
+    # game phase channel
+    phase_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.phase  # (1, board_size)
+
+    # Aktueller Spieler (optional)
+    # current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * current_player  # (1, board_size)
+    current_cards = env.hands[current_player]  # (13,)
+    card_channels = jnp.tile(current_cards[:, None], (1, board.shape[0]))  # (13, board_size)
+    # opponent cards (needed so that the model learns discount -> when the next player is team or not)
+    # If the current player has 3 cards left, P1 has 0 P2 has 3 and P4 has 3, then the model should learn 
+    # that the next player is a teammate, thus predicting dicount +1 for correct value estimation
+    opponent_cards = jnp.sum(env.hands[rolled_idx[1:]], axis=0)  # (3)
+    opponent_card_channels = jnp.tile(opponent_cards[:, None], (1, board.shape[0]))  # (3, board_size)
+
+    hand_size_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.hand_size  # (1, board_size)
+
+    # Alles zusammenfügen
+    board_encoding = jnp.concatenate([player_channels, overshoot_channels, team_channel, opponent_channel, home_positions, phase_channel, card_channels, opponent_card_channels, hand_size_channel], axis=0)  # (features, board_size)
+    return board_encoding
+
+def encode_boardV3(env: DOG) -> chex.Array:
+    '''
+    Kodiert das Spielfeld in eine Form, die von neuronalen Netzwerken verarbeitet werden kann.
+    Hänge das startfeld ans ende an a es überlaufen werden muss, wenn die Regel "must_traverse_start" aktiv ist. 
+    Args:
+        env: Aktuelle DOG-Umgebung 
+
+    Returns:
+        Ein Array, das die kodierte Spielfelddarstellung enthält.
+    '''
+    num_players = env.num_players
+    board = env.board
+    distance = env.board_size // 4
+    current_player = env.current_player
+    
+    #rolled idx
+    rolled_idx = (jnp.arange(num_players) + current_player) % num_players
+    # Spielerpositionen (One-hot)
+    # with roll over for current player
+    new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
+    if env.rules['must_traverse_start']:
+        new_board = jnp.concatenate([new_board, new_board[0]], axis=0)  # Startfeld ans Ende anhängen
+    goal_pos = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
+    board = jnp.concatenate([new_board, goal_pos], axis=0)
+    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)  # (4, board_size)
+    team_channel = jnp.sum(player_channels[::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[0:1], axis=0, keepdims=True) # (1, board_size)
+    opponent_channel = jnp.sum(player_channels[1::2], axis=0, keepdims=True) if env.rules['enable_teams'] else jnp.sum(player_channels[1:], axis=0, keepdims=True) # (1, board_size)
+    # Spielerposition im Haus
+    home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * jnp.count_nonzero(env.pins == -1, axis=1)[:, None]  # (4, board_size)
+    home_positions = home_positions[rolled_idx]  # (4, board_size)
+
+    # game phase channel
+    phase_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.phase  # (1, board_size)
+
+    # Aktueller Spieler (optional)
+    # current_player_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * current_player  # (1, board_size)
+    current_cards = env.hands[current_player]  # (13,)
+    card_channels = jnp.tile(current_cards[:, None], (1, board.shape[0]))  # (13, board_size)
+    # opponent cards (needed so that the model learns discount -> when the next player is team or not)
+    # If the current player has 3 cards left, P1 has 0 P2 has 3 and P4 has 3, then the model should learn 
+    # that the next player is a teammate, thus predicting dicount +1 for correct value estimation
+    opponent_cards = jnp.sum(env.hands[rolled_idx], axis=0)  # (3)
+    opponent_card_channels = jnp.tile(opponent_cards[:, None], (1, board.shape[0]))  # (3, board_size)
+
+    hand_size_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.hand_size  # (1, board_size)
+
+    # Alles zusammenfügen
+    board_encoding = jnp.concatenate([player_channels, team_channel, opponent_channel, home_positions, phase_channel, card_channels, opponent_card_channels, hand_size_channel], axis=0)  # (features, board_size)
+    return board_encoding

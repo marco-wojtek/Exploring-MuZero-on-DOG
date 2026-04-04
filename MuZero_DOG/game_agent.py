@@ -8,6 +8,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from DOG.dog import *
 from MuZero_DOG.muzero_dog import *
+from card_dist import *
 
 RULES = {
     'enable_teams': True,
@@ -27,7 +28,7 @@ def env_reset_batched(seed):
         0,  # <- Das wird an '_' übergeben
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=10,
+        distance=16,
         starting_player=0,
         seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
         enable_teams=RULES['enable_teams'],
@@ -47,14 +48,157 @@ batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_actions)
 batch_encode = jax.vmap(encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
-batch_map_action = jax.vmap(map_action_to_move)
 
 @functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'num_simulations', 'max_depth', 'max_steps', 'temp'])
 def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps, temp):
     """MCTS parallel + Early Exit + XLA optimiert
     Verwende play_batch_of_games_jitted, wenn du viele Spiele parallel simulieren möchtest, insbesondere für Training oder Datengewinnung.
     """
-    pass
+    def body_fn(carry):
+        envs_state, buffers, dones, step_count, rng_key = carry
+        
+        # Neue Keys für diesen Step generieren
+        rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
+        step_keys = jnp.array(step_keys)
+
+        # ✅ PARALLEL: vmap über alle aktiven Envs
+        def step_single_env(env, buffer, done, key):
+            def do_active_step(env, buffer):
+                # 1. WÜRFELN (automatisch in der Environment)
+                key1, key2 = jax.random.split(key)
+                
+                obs = encode_board(env)[None, ...]
+                valid_mask = valid_actions(env).flatten()
+                invalid_mask = (~valid_mask)[None, :]
+                has_valid = jnp.any(valid_mask)
+
+                current_player_before = env.current_player
+                current_team_before = jax.lax.cond(
+                    env.rules['enable_teams'],
+                    lambda: jnp.int8(current_player_before % 2),
+                    lambda: jnp.int8(-1)
+                )
+                
+                # 3. Unterscheidung: MCTS oder no_step
+                def do_mcts(env):
+                    # Stochastic MuZero MCTS
+                    policy_output, root_value = run_muzero_mcts(
+                        params, key2, obs, invalid_actions=invalid_mask, num_simulations=num_simulations, max_depth=max_depth, temperature=temp
+                    )
+                    # Action ist ein Index (0-998)
+                    action = policy_output.action[0]
+                    next_env, reward, next_done = env_step(env, action)
+
+                    # Spieler NACH dem Zug (wichtig für Reward- und Discount-Targets!)
+                    next_player = next_env.current_player
+                    next_team = jax.lax.cond(
+                        env.rules['enable_teams'],
+                        lambda: jnp.int8(next_player % 2),
+                        lambda: jnp.int8(-1)
+                    )
+
+                    # Reward Target: Klasse 0=-1, Klasse 1=0, Klasse 2=+1
+                    reward_target = jnp.where(
+                        next_done & (reward > 0), 2,
+                        jnp.where(next_done & (reward < 0), 0, 1)
+                    )
+
+                    # Discount Target: Klasse 0=-1, Klasse 1=0, Klasse 2=+1
+                    discount_target = jnp.where(
+                        next_done, 1,  # Terminal → Klasse 1 (discount=0)
+                        jax.lax.cond(
+                            env.rules['enable_teams'],
+                            lambda: jnp.where(current_team_before == next_team, 2, 0),
+                            lambda: jnp.where(current_player_before == next_player, 2, 0)
+                        )
+                    )
+
+                    # Detect if a deal happened
+                    deal_happened = jnp.sum(next_env.hands) > jnp.sum(env.hands)
+                    card_outcome = jnp.where(deal_happened, compute_card_outcome_jax(next_env, current_player_before), 0)
+
+                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, card_outcome, discount_target, reward_target
+                
+                def do_skip(env):
+                    # Keine validen Actions → no_step
+                    next_env, reward, next_done = no_step(env)
+                    dummy_obs = jnp.zeros_like(obs[0])
+                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(get_play_action_size(env)), next_done, 0, 0, 1, 1
+                
+                # Wähle zwischen MCTS und no_step
+                next_env, step_obs, action, reward, value, policy, next_done, mask, card_outcome, discount_target, reward_target = jax.lax.cond(
+                    has_valid,
+                    do_mcts,
+                    do_skip,
+                    env
+                )
+                
+                # Buffer Update
+                idx = buffer['idx']
+                current_player = env.current_player
+                team = jax.lax.cond(env.rules['enable_teams'], lambda: jnp.int8(current_player%2), lambda: jnp.int8(-1))
+                # One-hot of the concrete outcome is the training target for chance_logits.
+                # presence_prob_array() uses Python comb() and cannot run inside JAX JIT.
+                # Using one-hot is equivalent to integer-label cross-entropy and is JIT-safe.
+                c_dist = jax.nn.one_hot(card_outcome, num_classes=128)
+                new_buffer = {
+                    'obs': buffer['obs'].at[idx].set(step_obs),
+                    'act': buffer['act'].at[idx].set(action),
+                    'rew': buffer['rew'].at[idx].set(reward_target),  # NEU: Reward Target speichern
+                    'val': buffer['val'].at[idx].set(value),
+                    'pol': buffer['pol'].at[idx].set(policy),
+                    'mask': buffer['mask'].at[idx].set(mask),
+                    'card_outcome': buffer['card_outcome'].at[idx].set(card_outcome),  # NEU: Card Outcome speichern
+                    'card_dist': buffer['card_dist'].at[idx].set(c_dist),  # Würfelverteilung speichern
+                    'player': buffer['player'].at[idx].set(current_player),
+                    'team': buffer['team'].at[idx].set(team),
+                    'discount': buffer['discount'].at[idx].set(discount_target),  # NEU: Discount Target speichern
+                    'idx': idx + 1
+                }
+                return next_env, new_buffer, next_done
+            
+            def do_skip_step(env, buffer):
+                # Game ist fertig, nichts tun
+                return env, buffer, done
+            
+            return jax.lax.cond(~done, do_active_step, do_skip_step, env, buffer)
+        
+        # ✅ HIER: vmap über alle Envs gleichzeitig!
+        new_envs, new_buffers, new_dones = jax.vmap(step_single_env)(
+            envs_state, buffers, dones, step_keys
+        )
+        
+        return (new_envs, new_buffers, new_dones, step_count + 1, rng_key)
+    
+    # Initialisierung
+    init_buffers = {
+        'obs': jnp.zeros((num_envs, max_steps, *input_shape)),
+        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
+        'rew': jnp.zeros((num_envs, max_steps)),
+        'val': jnp.zeros((num_envs, max_steps)),
+        'pol': jnp.zeros((num_envs, max_steps, 998)),
+        'mask': jnp.zeros((num_envs, max_steps)),
+        'card_outcome': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # NEU: Card Outcome speichern
+        'card_dist': jnp.zeros((num_envs, max_steps, 128)),  # 7-bit: 128 possible category masks
+        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
+        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
+        'discount': jnp.zeros((num_envs, max_steps)),  # NEU: Discount Target speichern
+        'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
+    }
+    init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
+    
+    def cond_fn(carry):
+        _, _, dones, step_count, _ = carry
+        # Stoppe wenn ALLE done ODER max_steps erreicht
+        return jnp.any(~dones) & (step_count < max_steps)
+    
+    final_envs, final_buffers, final_dones, _, _ = jax.lax.while_loop(
+        cond_fn,
+        body_fn,
+        (envs, init_buffers, init_dones, 0, rng_key)
+    )
+    
+    return final_buffers
 
 def play_n_games_v3(params, rng_key, input_shape, num_envs, num_simulation, max_depth, max_steps, temp):
     """Bester Ansatz: Alles in JAX, aber mit bedingter Ausführung"""

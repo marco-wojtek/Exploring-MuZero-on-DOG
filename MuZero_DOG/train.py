@@ -20,97 +20,127 @@ def get_temperature(iteration, total_iterations):
     phase = int(iteration / total_iterations * len(TEMPERATURE_SCHEDULE))
     phase = min(phase, len(TEMPERATURE_SCHEDULE) - 1)
     return TEMPERATURE_SCHEDULE[phase]
+
+def balanced_loss(ce, is_rare, mask, n_valid, w_rare=1.0, w_common=0.1):
+    masked_rare = mask * is_rare
+    n_rare    = jnp.maximum(jnp.sum(masked_rare), 1.0)
+    n_common  = jnp.maximum(n_valid - n_rare, 1.0)
+    loss_rare   = jnp.sum(masked_rare * ce) / n_rare
+    loss_common = jnp.sum((mask - masked_rare) * ce) / n_common
+    return w_rare * loss_rare + w_common * loss_common
+
 # @jax.jit
 def loss_fn(params, batch):
-    """Vektorisierte Version mit scan statt Loop"""
+    """
+    Loss Function für Stochastic MuZero.
     
-    root_obs = batch['observations']
+    WICHTIGE ÄNDERUNGEN gegenüber deterministischem MuZero:
+    1. Dynamics Network hat 2 Teile: action_dynamics und chance_dynamics
+    2. Zusätzlicher Loss für chance_logits (Würfelverteilung vorhersagen)
+    3. Unroll-Schritt ist: action → afterstate → chance → next_state
+    4. KEIN Reward Loss (Brettspiele haben nur End-Rewards)
+    
+    Args:
+        params: Dictionary mit 'representation', 'dynamics', 'prediction'
+        batch: Dictionary mit:
+            - observations: (B, T, H, W) oder (B, T, Features)
+            - actions: (B, T)
+            - target_values: (B, T)
+            - policies: (B, T, 998) 
+            - card_outcomes: (B, T)  # NEU: Tatsächliche Kartenereignisse
+            - masks: (B, T)
+            
+    Returns:
+        total_loss: Scalar
+        (value_loss, policy_loss, chance_loss): Tuple of scalars
+    """
+    
+    # 1. Root Encoding
+    root_obs = batch['observations']  # (B, Features) - nur der erste Timestep
     latent_state = repr_net.apply(params['representation'], root_obs)
     
     num_unroll_steps = batch['actions'].shape[1]
     
     def unroll_step(carry, inputs):
         latent_state, total_loss = carry
-        # k, action, target_value, target_policy, target_reward, mask = inputs
-        k, action, target_value, target_policy, mask, target_discount, target_reward = inputs
+        k, action, target_value, target_policy, card_outcome, mask, true_card_probs, target_discount, target_reward = inputs
         
-        # Prediction
+        # ===== PREDICTION LOSS (am aktuellen State) =====
         pred_policy_logits, pred_value = pred_net.apply(params['prediction'], latent_state)
         pred_value = pred_value.squeeze(-1)
         
-        # Losses
-        l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
+        # Policy Loss (Cross-Entropy über 4 Actions)
         l_policy = jnp.mean(mask * optax.softmax_cross_entropy(pred_policy_logits, target_policy))
         
-        step_loss = (1.0 / config["unroll_steps"]) * (VALUE_SCALING * l_value + POLICY_SCALING * l_policy) #* (1.0 / num_unroll_steps)
+        # Value Loss (MSE)
+        l_value = jnp.mean(mask * (target_value - pred_value) ** 2)
         
-        # Dynamics (nur wenn nicht am Ende) Keine reward Vorhersage am Root
-        def do_dynamics(state):
-            new_state, pred_reward_logits, pred_discount_logits = dynamics_net.apply(
-                params['dynamics'], state, action
+        # prep targets for classification
+        n_valid = jnp.sum(mask)
+        target_reward_class = target_reward.astype(jnp.int32)
+        target_discount_class = target_discount.astype(jnp.int32)
+        # Erkennung: L2-Abstand von uniform > threshold → non-uniform
+        is_deal = (true_card_probs[:, 0] < 0.99)    
+
+        # ===== DYNAMICS LOSS (State Transition) =====
+        # Schritt 1: Action Dynamics (Spieler wählt Aktion)
+        def do_dynamics(state, action, card_outcome):
+            afterstate, pred_reward_logits, pred_chance_logits, pred_discount_logits = dynamics_net.apply(
+                params['dynamics'], state, action, method=dynamics_net.action_dynamics
             )
-            
-            # ✅ REWARD: Balanced per-class loss
-            target_reward_class = target_reward.astype(jnp.int32)
-            reward_ce = optax.softmax_cross_entropy_with_integer_labels(
-                pred_reward_logits, target_reward_class
+
+            reward_ce   = optax.softmax_cross_entropy_with_integer_labels(pred_reward_logits,   target_reward_class)
+            discount_ce = optax.softmax_cross_entropy_with_integer_labels(pred_discount_logits, target_discount_class)
+            chance_ce   = optax.softmax_cross_entropy(pred_chance_logits, true_card_probs)
+
+            l_reward   = balanced_loss(reward_ce,   target_reward_class != 1,   mask, n_valid) # != 1 → seltene Klassen (reward≠0)
+            l_discount = balanced_loss(discount_ce, target_discount_class == 1, mask, n_valid) # == 1 → seltene Klasse (terminal)
+            l_chance   = balanced_loss(chance_ce,   is_deal,             mask, n_valid)
+
+            next_latent = dynamics_net.apply(
+                params['dynamics'], afterstate, card_outcome, method=dynamics_net.chance_dynamics
             )
-            
-            # Separate Mittelwerte pro Klasse → gleiche Gradient-Stärke
-            is_neutral = (target_reward_class == 1)
-            n_neutral = jnp.maximum(jnp.sum(mask * is_neutral), 1.0)
-            n_non_neutral = jnp.maximum(jnp.sum(mask * (~is_neutral)), 1.0)
-            
-            loss_neutral = jnp.sum(mask * jnp.where(is_neutral, reward_ce, 0.0)) / n_neutral
-            loss_non_neutral = jnp.sum(mask * jnp.where(~is_neutral, reward_ce, 0.0)) / n_non_neutral
-            
-            # 50/50 Gewichtung: Neutral lernt "default 0", Non-Neutral lernt Win/Lose
-            l_reward = 0.1 * loss_neutral + 1.0 * loss_non_neutral
-            
-            # ✅ DISCOUNT: Balanced per-class loss (analog zu Reward)
-            # Klasse 0=-1 (Gegner), Klasse 1=0 (Terminal), Klasse 2=+1 (eigener Zug)
-            # Terminal (Klasse 1) ist extrem selten → separate Normierung
-            target_discount_class = target_discount.astype(jnp.int32)
-            discount_ce = optax.softmax_cross_entropy_with_integer_labels(
-                pred_discount_logits, target_discount_class
-            )
-            
-            is_terminal = (target_discount_class == 1)
-            n_non_terminal = jnp.maximum(jnp.sum(mask * (~is_terminal)), 1.0)
-            n_terminal = jnp.maximum(jnp.sum(mask * is_terminal), 1.0)
-            
-            loss_non_terminal = jnp.sum(mask * jnp.where(~is_terminal, discount_ce, 0.0)) / n_non_terminal
-            loss_terminal = jnp.sum(mask * jnp.where(is_terminal, discount_ce, 0.0)) / n_terminal
-            
-            # Non-Terminal (6er-Regel) funktioniert schon gut → niedrige Gewichtung
-            # Terminal muss stärker lernen
-            l_discount = 0.1 * loss_non_terminal + 1.0 * loss_terminal
-            
-            return new_state, l_discount, l_reward
+            return next_latent, l_chance, l_discount, l_reward
         
-        def skip_dynamics(state):
-            return state, 0.0, 0.0
+        def skip_dynamics(state, action, card_outcome):
+            # Am Ende des Unrolls keine Dynamics mehr
+            return state, 0.0, 0.0, 0.0
         
-        next_latent, l_discount, l_reward = jax.lax.cond(
+        # Nur Dynamics wenn nicht am Ende
+        next_latent, l_chance, l_discount, l_reward = jax.lax.cond(
             k < num_unroll_steps,
             do_dynamics,
             skip_dynamics,
-            latent_state
+            latent_state, action, card_outcome
         )
-
-        discount_loss = (1.0 / config["unroll_steps"]) * DISCOUNT_SCALING * l_discount
-        reward_loss = (1.0 / config["unroll_steps"]) * REWARD_SCALING * l_reward
-
-        # Gradient scaling
+        
+        # Gradient Scaling (siehe MuZero Paper)
         next_latent = jax.lax.stop_gradient(next_latent * 0.5) + next_latent * 0.5
         
-        # return (next_latent, total_loss + step_loss + reward_loss), (l_value, l_policy, reward_loss)
-        return (next_latent, total_loss + step_loss + discount_loss + reward_loss), (l_value, l_policy, l_discount, l_reward)
+        # Gewichte die einzelnen Loss-Komponenten
+        step_loss = (1.0 / config["unroll_steps"]) * (
+            VALUE_SCALING * l_value +      # Value Loss dominiert (wie im Paper)
+            POLICY_SCALING * l_policy +           # Policy Loss
+            CHANCE_SCALING * l_chance +
+            DISCOUNT_SCALING * l_discount +  # Discount Loss
+            REWARD_SCALING * l_reward      # Reward Loss
+        )       
+        return (next_latent, total_loss + step_loss), (l_value, l_policy, l_chance, l_discount, l_reward)
     
     # Prepare scan inputs
     k_indices = jnp.arange(num_unroll_steps + 1)
     actions_padded = jnp.concatenate([batch['actions'], jnp.zeros((batch['actions'].shape[0], 1), dtype=jnp.int32)], axis=1)
-    #rewards_padded = jnp.concatenate([batch['rewards'], jnp.zeros((batch['rewards'].shape[0], 1))], axis=1)
+
+    card_outcomes_padded = jnp.concatenate([
+        batch['card_outcomes'][:, 1:],              # (B, K-2): card_outcomes[1..K-2]
+        jnp.zeros((batch['card_outcomes'].shape[0], 2), dtype=jnp.int32)         # padding
+    ], axis=1)  # shape: (B, K)
+
+    card_probs_padded = jnp.concatenate([
+        batch['card_probs'],                                             
+        jnp.zeros((batch['card_probs'].shape[0], 1, 128)).at[:, :, 0].set(1.0)        
+    ], axis=1)
+
     discount_targets_padded = jnp.concatenate([
         batch['discount_targets'],
         jnp.ones((batch['discount_targets'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = discount=0 (neutral)
@@ -121,18 +151,20 @@ def loss_fn(params, batch):
         batch['rewards'],
         jnp.ones((batch['rewards'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = reward=0 (neutral)
     ], axis=1)
-    
+
     scan_inputs = (
         k_indices,
         actions_padded.T,
         batch['target_values'].T,
         jnp.transpose(batch['policies'], (1, 0, 2)),
+        card_outcomes_padded.T,
         batch['masks'].T,
+        jnp.transpose(card_probs_padded, (1, 0, 2)),
         discount_targets_padded.T,
         reward_targets_padded.T
     )
-
-    (final_state, total_loss), (v_losses, p_losses, d_losses, r_losses) = jax.lax.scan(
+    
+    (final_state, total_loss), (v_losses, p_losses, c_losses, d_losses, r_losses) = jax.lax.scan(
         unroll_step,
         (latent_state, 0.0),
         scan_inputs
@@ -140,17 +172,18 @@ def loss_fn(params, batch):
     
     value_loss = jnp.sum(v_losses)
     policy_loss = jnp.sum(p_losses)
+    chance_loss = jnp.sum(c_losses)
     discount_loss = jnp.sum(d_losses)
     reward_loss = jnp.sum(r_losses)
     
-    return total_loss, (value_loss, policy_loss, discount_loss, reward_loss)
+    return total_loss, (value_loss, policy_loss, chance_loss, discount_loss, reward_loss)
 
 @jax.jit
 def train_step(params, opt_state, batch):
     """Führt einen Trainingsschritt aus."""
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     # (loss, (v_loss, p_loss, r_loss)), grads = grad_fn(params, batch)
-    (loss, (v_loss, p_loss, d_loss, r_loss)), grads = grad_fn(params, batch)
+    (loss, (v_loss, p_loss, c_loss, d_loss, r_loss)), grads = grad_fn(params, batch)
     
     updates, new_opt_state = optimizer.update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
@@ -159,6 +192,7 @@ def train_step(params, opt_state, batch):
         'total_loss': loss,
         'v_loss': v_loss, 
         'p_loss': p_loss, 
+        'c_loss': c_loss,
         'd_loss': d_loss, 
         'r_loss': r_loss
     }
@@ -325,6 +359,7 @@ VALUE_SCALING = 4.0
 POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
+CHANCE_SCALING = 1.0
 config = {
     "seed": 0,
     "learning_rate": 0.005,
@@ -340,7 +375,7 @@ config = {
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
     "Bootstrap_Value_Target": False,
-    "Bootstrap_Switch_Iteration": 70, # Nach X Iterationen wird auf bootstrap value targets umgestellt
+    "Bootstrap_Switch_Iteration": 101, # Nach X Iterationen wird auf bootstrap value targets umgestellt
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 2500,
     "rules": RULES,
@@ -348,7 +383,8 @@ config = {
         "value": VALUE_SCALING, 
         "policy": POLICY_SCALING, 
         "discount": DISCOUNT_SCALING, 
-        "reward": REWARD_SCALING
+        "reward": REWARD_SCALING,
+        "chance": CHANCE_SCALING
     }
 }
 # prep weights and biases

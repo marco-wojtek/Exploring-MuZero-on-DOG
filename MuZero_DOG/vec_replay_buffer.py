@@ -6,24 +6,34 @@ import sys, os
 from time import time
 import numpy as np
 import random
+
 class VectorizedReplayBuffer:
+    """
+    Replay Buffer für Stochastic MuZero mit Unterstützung für dice_outcomes.
+    
+    WICHTIGE ÄNDERUNGEN gegenüber deterministischem Buffer:
+    1. Speichert dice_outcomes (Würfelergebnisse)
+    2. Action dimension ist 4 (Pins) statt 24 (Pins × Dice)
+    3. Gibt dice_outcomes im Batch zurück
+    """
     def __init__(self, capacity: int, batch_size: int, unroll_steps: int, td_steps: int,
-                 obs_shape=(14, 56), action_dim=24, max_episode_length=500, bootstrap_value_target=True):
+                 obs_shape: tuple, action_dim=998, max_episode_length=500, bootstrap_value_target=False):
         self.capacity = capacity
         self.batch_size = batch_size
         self.unroll_steps = unroll_steps
         self.td_steps = td_steps
         self.obs_shape = obs_shape
-        self.action_dim = action_dim
+        self.action_dim = action_dim 
         self.max_episode_length = max_episode_length
         
-        # ✅ Alle Daten als zusammenhängende NumPy Arrays
         self.observations = np.zeros((capacity, max_episode_length, *obs_shape), dtype=np.float32)
-        self.actions = np.zeros((capacity, max_episode_length), dtype=np.int32)
+        self.actions = np.full((capacity, max_episode_length), -1, dtype=np.int32)
         self.rewards = np.zeros((capacity, max_episode_length), dtype=np.int32)  # Klassen-Index statt Float
         self.root_values = np.zeros((capacity, max_episode_length), dtype=np.float32)
         self.child_visits = np.zeros((capacity, max_episode_length, action_dim), dtype=np.float32)
         self.masks = np.zeros((capacity, max_episode_length), dtype=np.float32)
+        self.card_outcomes = np.zeros((capacity, max_episode_length), dtype=np.int32)  # NEU: Würfelergebnisse (0-5 für 1-6)
+        self.card_distributions = np.zeros((capacity, max_episode_length, 128), dtype=np.float32)  # NEU: Würfelverteilungen (6 mögliche Ergebnisse)
         self.players = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.teams = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.episode_lengths = np.zeros(capacity, dtype=np.int32)
@@ -52,6 +62,8 @@ class VectorizedReplayBuffer:
             self.root_values[pos, :length] = np.array(all_buffers['val'][i, :length])
             self.child_visits[pos, :length] = np.array(all_buffers['pol'][i, :length])
             self.masks[pos, :length] = np.array(all_buffers['mask'][i, :length])
+            self.card_outcomes[pos, :length] = np.array(all_buffers['card_outcome'][i, :length])  # NEU!
+            self.card_distributions[pos, :length] = np.array(all_buffers['card_dist'][i, :length])  # NEU!
             self.players[pos, :length] = np.array(all_buffers['player'][i, :length])
             self.teams[pos, :length] = np.array(all_buffers['team'][i, :length])
             self.discounts[pos, :length] = np.array(all_buffers['discount'][i, :length])
@@ -62,17 +74,22 @@ class VectorizedReplayBuffer:
     
     def sample_batch(self):
         """
-        Vollständig vektorisierte Sampling-Funktion.
+        Vollständig vektorisierte Sampling-Funktion für Stochastic MuZero.
         KEIN Python-Loop über batch_size!
+        
+        NEU: Gibt auch dice_outcomes zurück für das Training des chance_dynamics.
         """
         K = self.unroll_steps + 1
         TD = self.td_steps
         GAMMA = 0.997
         TERMINAL_RATIO = 0.25  # 25% des Batches enthält Terminal-Steps
-        
+
         n_terminal = int(self.batch_size * TERMINAL_RATIO)
         n_normal = self.batch_size - n_terminal
         
+        # ========================================
+        # SCHRITT 1: Sample Episode-Indizes
+        # ========================================
         # --- Normal Sampling: kann an JEDER Position starten ---
         # Auch nahe am Ende! Dann gibt es partielle Windows (mask=0 für padding)
         # aber Terminal-Steps können natürlich im Dynamics-Bereich landen
@@ -142,9 +159,14 @@ class VectorizedReplayBuffer:
         rewards_seq = self.rewards[ep_for_actions, action_indices]
         # Shape: (batch_size, K-1)
         
+        # Shape: (batch_size, K-1)
+        # WICHTIG: dice_seq[i, k] ist der Würfelwert der VOR der Action actions[i, k] gewürfelt wurde
+        # Das Netzwerk muss lernen: action_dynamics(state, action) → chance_logits
+        # Dann: chance_dynamics(afterstate, dice_seq[i, k]) → next_state
+        
         # Extrahiere Policies, Values, Masks (für alle K Steps)
         policies = self.child_visits[ep_indices_expanded, seq_indices_clipped]
-        # Shape: (batch_size, K, 24)
+        # Shape: (batch_size, K, 4)  # 4 Actions für Pins!
         
         values = self.root_values[ep_indices_expanded, seq_indices_clipped]
         # Shape: (batch_size, K)
@@ -167,13 +189,12 @@ class VectorizedReplayBuffer:
         final_teams_expanded = final_teams[:, None]      # (batch_size, 1)
         
         # 7.3: Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
-        game_won_seq = final_rewards_expanded == 2                   # (batch_size, K)
+        game_won_seq = final_rewards_expanded > 0                    # (batch_size, K)
         is_single_player_seq = seq_teams == -1                       # (batch_size, K)
         player_won_seq = (final_players_expanded == seq_players)     # (batch_size, K)
         team_won_seq = (final_teams_expanded == seq_teams)           # (batch_size, K)
         
         # z = 1.0 wenn gewonnen, -1.0 wenn verloren, 0.0 sonst
-        # Jetzt individuell für JEDEN Timestep!
         z_seq = np.where(
             game_won_seq,
             np.where(
@@ -183,12 +204,9 @@ class VectorizedReplayBuffer:
             ),
             0.0
         )
-        # Shape: (batch_size, K) ← WICHTIG: Nicht mehr (batch_size,)!
-
-
+        # Shape: (batch_size, K)
+        
         # 7.4: Steps bis zum Ende der Episode
-        # Bootstrap wenn: (1) >= K steps verfügbar ODER (2) Spiel nicht wirklich beendet (max_steps Abbruch)
-        # z_seq == 0 bedeutet: final_reward <= 0, d.h. kein Gewinner → max_steps Abbruch oder laufend
         steps_until_end = ep_lengths[:, None] - 1 - seq_indices  # (batch_size, K)
         
         # 7.5: Bootstrap-Condition: steps_until_end >= TD
@@ -200,7 +218,6 @@ class VectorizedReplayBuffer:
         # Shape: (batch_size, K)
         
         # ✅ NEU: 7.6b - Perspektiven-Flip für Bootstrap Values
-        # Extrahiere Spieler bei Bootstrap-Position
         bootstrap_players = self.players[ep_indices_expanded, bootstrap_indices]  # (batch_size, K)
         bootstrap_teams = self.teams[ep_indices_expanded, bootstrap_indices] 
 
@@ -221,6 +238,7 @@ class VectorizedReplayBuffer:
             bootstrap_values_raw,   # Gleiche Perspektive: Value behalten
             -bootstrap_values_raw   # Andere Perspektive: Value negieren
         )
+        
         # 7.7: Berechne Target Values
 
         # Temporaler Discount anwenden
@@ -243,6 +261,10 @@ class VectorizedReplayBuffer:
         # ========================================
         actions = np.where(valid_mask[:, :-1], actions, 0)
         rewards_seq = np.where(valid_mask[:, :-1], rewards_seq, 1)  # Klasse 1 = reward=0 (neutral)
+        card_outcomes = np.where(valid_mask[:, :-1], card_outcomes, 0)  # NEU: Card Outcome padding
+        # Uniform padding (1/128): verhindert is_non_uniform=True für gepaddte Positionen
+        dist = np.zeros(1 << 7, dtype=np.float64)
+        dist[0] = 1.0  # Alle Karten weg → nur leere Hand möglich
         policies = np.where(valid_mask[:, :, None], policies, 0.0)
         values = np.where(valid_mask, values, 0.0)
         masks = np.where(valid_mask, masks, 0.0)
@@ -253,12 +275,14 @@ class VectorizedReplayBuffer:
         # SCHRITT 9: Return Batch
         # ========================================
         return {
-            'observations': jnp.array(root_obs),       # (batch_size, 14, 56)
-            'actions': jnp.array(actions),             # (batch_size, K-1)
-            'rewards': jnp.array(rewards_seq),         # (batch_size, K-1)
-            'policies': jnp.array(policies),           # (batch_size, K, 24)
-            'values': jnp.array(values),               # (batch_size, K)
-            'masks': jnp.array(masks),                 # (batch_size, K)
-            'target_values': jnp.array(target_values),  # (batch_size, K)
+            'observations': jnp.array(root_obs),           # (batch_size, 14, 56)
+            'actions': jnp.array(actions),                 # (batch_size, K-1)
+            'rewards': jnp.array(rewards_seq),             # (batch_size, K-1)
+            'card_outcomes': jnp.array(self.card_outcomes[ep_indices, t_starts:t_starts+K]),  # NEW
+            'card_probs': jnp.array(self.card_distributions[ep_indices, t_starts:t_starts+K]),
+            'policies': jnp.array(policies),               # (batch_size, K, 4)
+            'values': jnp.array(values),                   # (batch_size, K)
+            'masks': jnp.array(masks),                     # (batch_size, K)
+            'target_values': jnp.array(target_values),    # (batch_size, K)
             'discount_targets': jnp.array(discount_targets)  # (batch_size, K-1)
         }
