@@ -1,6 +1,14 @@
 import jax
 from jax import numpy as jnp
 
+def progress_key(pos, start, board_size):
+    # -1 = home → maps to -1 (sorts first)
+    # on-board → circular distance from start
+    # goal area (>= board_size) → large positive values
+    return jnp.where(pos < 0, jnp.int8(-1),
+           jnp.where(pos >= board_size, pos,  # goal area stays large
+           (pos - start) % board_size))
+
 def all_pin_distributions(total=7):
     '''
     Erzeugt alle möglichen Verteilungen von `total` Pins auf 4 Pins (a0, a1, a2, a3).

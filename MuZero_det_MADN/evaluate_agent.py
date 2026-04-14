@@ -461,57 +461,50 @@ RULES = {
 }
 
 start_time = time()
-TEMPERATURE = 1.0
+TEMPERATURE = 0.05
 # # play_n_randomly(batch_size=1000)  
 params1 = None
 params2 = None
 params3 = None
 params4 = None
-FILENAME = "Experiment_53_100"
+FILENAME = "gumbelmuzero_madn_params_lr0.005_g1500_it100_seed72"
 print(f"Evaluating {FILENAME} vs random agents TEMP {TEMPERATURE:.2f}:")
-
 params1 = 'random_agent'
-params2 = 'random_agent'
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
 params3 = 'random_agent'
 params4 = 'random_agent'
-evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, setting2=50, setting3=100, setting4=50, batch_size=250)
+evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=100, setting3=50, setting4=50, batch_size=250)
 
-# print(f"\nEvaluating {FILENAME} vs rule-based agents TEMP {TEMPERATURE:.2f}:")
-# params1 = 'rule_based_agent'
-# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
-# params3 = 'rule_based_agent'
-# params4 = 'rule_based_agent'
-# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
+print(f"\nEvaluating {FILENAME} vs rule-based agents TEMP {TEMPERATURE:.2f}:")
+params1 = 'rule_based_agent'
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params3 = 'rule_based_agent'
+params4 = 'rule_based_agent'
+evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=100, setting3=50, setting4=50, batch_size=250)
 
-# print(f"\nEvaluating {FILENAME} vs None agents TEMP {TEMPERATURE:.2f}:")
-# params1 = None
-# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
-# params3 = None
-# params4 = None
-# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
+print(f"\nEvaluating {FILENAME} vs None agents TEMP {TEMPERATURE:.2f}:")
+params1 = None
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params3 = None
+params4 = None
+evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=100, setting3=50, setting4=50, batch_size=250)
 
-# FILENAME = "gumbelmuzero_madn_params_lr0.005_g1500_it100_seed54"
-# print(f"Evaluating {FILENAME} vs random agents TEMP {TEMPERATURE:.2f}:")
+FILENAME2 = "gumbelmuzero_madn_params_lr0.005_g1500_it100_seed54"
+print(f"Evaluating {FILENAME} vs {FILENAME2}:")
 
-# params1 = 'random_agent'
-# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
-# params3 = 'random_agent'
-# params4 = 'random_agent'
-# evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, setting2=50, setting3=100, setting4=50, batch_size=250)
+params1 = 'random_agent'
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params3 = 'random_agent'
+params4 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME2}.pkl')
+evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=100, setting3=50, setting4=100, batch_size=250)
 
-# print(f"\nEvaluating {FILENAME} vs rule-based agents TEMP {TEMPERATURE:.2f}:")
-# params1 = 'rule_based_agent'
-# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
-# params3 = 'rule_based_agent'
-# params4 = 'rule_based_agent'
-# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
+print(f"Evaluating {FILENAME} vs {FILENAME2}:")
 
-# print(f"\nEvaluating {FILENAME} vs None agents TEMP {TEMPERATURE:.2f}:")
-# params1 = None
-# params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
-# params3 = None
-# params4 = None
-# evaluate_agent_parallel(params1, params2, params3, params4, setting1=50, setting2=50, setting3=50, setting4=50, batch_size=250)
+params1 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME2}.pkl')
+params2 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME}.pkl')
+params3 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME2}.pkl')
+params4 = load_params_from_file(f'MuZero_det_MADN/models/params/{FILENAME2}.pkl')
+evaluate_agent_parallel(params1, params2, params3, params4, setting1=100, setting2=100, setting3=100, setting4=100, batch_size=250)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

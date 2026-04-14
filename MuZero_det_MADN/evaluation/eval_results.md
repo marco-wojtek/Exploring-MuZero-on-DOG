@@ -10,6 +10,24 @@ empty template:
 ---
 
 # FFA MADN
+**Improved Pin x Action assignment**
+## Seed 72 (gumbel)
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.05|930/1000|93.0%|
+|rule-based|0.05|920/1000|92.0%|
+|init MuZero|0.05|835/1000|83.5%|
+|one seed 54|0.05|886/1000|88.6%|
+|all other seed 54|0.05|669/1000|66.9%|
+
+## Seed 73 (classic Muzero)
+| Opponent | Temp | Wins (out of 600) | % |
+|------:|----:|------------------:|-------:|
+|random|0.05|933/1000|93.3%|
+|rule-based|0.05|964/1000|96.4%|
+|init MuZero|0.05|917/1000|91.7%|
+|one seed 63|0.05|747/1000|74.7%|
+|all other seed 63|0.05|529/1000|52.9%|
 ---
 ---
 **Direct Comparison of Classic and Gumbel** 

@@ -326,7 +326,7 @@ def test_training(config, params=None, opt_state=None):
     return params, opt_state, times_per_iteration
 
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
@@ -343,9 +343,9 @@ DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 DEPTH_DELTA_SCALING = 1.0
 config = {
-    "seed": 64,
+    "seed": 73,
     "learning_rate": 0.005,
-    "architecture": "Classic MuZero as Reference with TEAMS. Real Training with new RepNet2, DynNet4 and PredNet4.",
+    "architecture": "New better pin identification added. Classic MuZero",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",

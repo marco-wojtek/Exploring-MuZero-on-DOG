@@ -10,13 +10,13 @@ from MADN.deterministic_madn import *
 from MuZero_det_MADN.muzero_deterministic_madn import *
 
 RULES = {
-    'enable_teams': True,
+    'enable_teams': False,
     'enable_initial_free_pin': True,
     'enable_circular_board': False,
     'enable_friendly_fire': False,
     'enable_start_blocking': False,
     'enable_jump_in_goal_area': True,
-    'enable_start_on_1': True, 
+    'enable_start_on_1': True,
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }

@@ -32,7 +32,7 @@ from MuZero_det_MADN.muzero_deterministic_madn import (
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG
 # ═══════════════════════════════════════════════════════════════
-filename = "TEAMmuzero_madn_params_lr0.005_g1500_it100_seed64"
+filename = "gumbelmuzero_madn_params_lr0.005_g1500_it100_seed72"
 PARAM_FILE = f"MuZero_det_MADN/models/params/{filename}.pkl"
 # PARAM_FILE = None  # Für frische (untrainierte) Params
 
