@@ -191,7 +191,7 @@ class VectorizedReplayBufferStochastic:
         final_teams_expanded = final_teams[:, None]      # (batch_size, 1)
         
         # 7.3: Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
-        game_won_seq = final_rewards_expanded > 0                    # (batch_size, K)
+        game_won_seq = final_rewards_expanded == 2                    # (batch_size, K)
         is_single_player_seq = seq_teams == -1                       # (batch_size, K)
         player_won_seq = (final_players_expanded == seq_players)     # (batch_size, K)
         team_won_seq = (final_teams_expanded == seq_teams)           # (batch_size, K)

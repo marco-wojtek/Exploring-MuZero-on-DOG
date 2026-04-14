@@ -945,9 +945,9 @@ RULES = {
 }
 
 start_time = time()
-NUM_SIMULATIONS = 75
+NUM_SIMULATIONS = 100
 MAX_DEPTH = 50
-TEMPERATURE = 0.0
+TEMPERATURE = 0.10
 FOLDER = "MuZero_Classic_MADN/models/params/"
 print("Games with Temperature =", TEMPERATURE)
 print("And set seed for same dice outcomes:", 12345)
@@ -968,40 +968,49 @@ print("And set seed for same dice outcomes:", 12345)
 # params4 = 'rule_based_agent'  # Stochastic MuZero Agent
 
 # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-FILENAME = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it200_seed7"
+FILENAME = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed30"
 # play_n_randomly(batch_size=1000)  
 print(FILENAME)
-print("\nTrained Stochastic MuZero Agents 12345:")
+print("\nVersus random agents 12345:")
 params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
 params2 = 'random_agent'  # Stochastic MuZero Agent
 params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
 params4 =  'random_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150, set_seed=12345)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250, set_seed=12345)
 
-print("\nTrained Stochastic MuZero Agents:")
+print("\nVersus random agents:")
 params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
 params2 = 'random_agent'  # Stochastic MuZero Agent
 params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
 params4 =  'random_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nTrained Stochastic MuZero Agents:")
+print("\nVersus rule-based agents:")
 params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
 params2 = 'rule_based_agent'  # Stochastic MuZero Agent
 params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
 params4 =  'rule_based_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nTrained Stochastic MuZero Agents:")
+print("\nVersus untrained Stochastic MuZero Agents:")
 params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
 params2 = None # Stochastic MuZero Agent
 params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
 params4 =  None  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+
+FILENAME2 = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed7"
+print("\nVersus Trained Stochastic MuZero Agents {}:".format(FILENAME2))
+params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+params2 = load_params_from_file(f"{FILENAME2}.pkl") # Stochastic MuZero Agent
+params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+params4 = load_params_from_file(f"{FILENAME2}.pkl")  # Stochastic MuZero Agent
+
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
 

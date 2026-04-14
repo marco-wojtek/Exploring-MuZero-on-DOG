@@ -378,18 +378,18 @@ DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 if __name__ == "__main__":
     config = {
-        "seed": 8,
+        "seed": 30,
         "learning_rate": 0.005,  # Startet etwas höher, da wir weniger unrollen und damit weniger stabile Targets haben
-        "architecture": "RepNet2, DynNet4, PredNet4. Less unroll to not train far planning in highly stochastic environment. With Bootstrapping",
+        "architecture": "Per-player broadcasting for better pin understanding",
         "num_games_per_iteration": 1500,
-        "iterations": 120,
+        "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
         "Buffer_Capacity": 20000,
         "Buffer_batch_Size": 128,
         "unroll_steps": 10,
         "td_steps": 25,
         "max_episode_length": 800,
-        "MCTS_simulations": 75, # less actions to evaluate (4 Pins) → less simulations needed
+        "MCTS_simulations": 100, # less actions to evaluate (4 Pins) → less simulations needed
         "MCTS_max_depth": 50,
         "Bootstrap_Value_Target": True,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
         "Bootstrap_Switch_Iteration": 150,  # Wechselt zu Bootstrap-Targets nach 150 Iterationen

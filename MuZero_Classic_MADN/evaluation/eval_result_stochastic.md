@@ -1,3 +1,21 @@
+# Seed 30 (now with clear pin action assignment)
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random (12345)|0.0|726/1000|72.6%|
+|random|0.0|727/1000|72.7%|
+|rule-based|0.0|545/1000|54.5%|
+|random MuZero|0.0|891/1000|89.1%|
+|Seed 7 (200 it)|0.0|929/1000|92.9%|
+
+Rerun
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random (12345)|0.10|727/1000|72.7%|
+|random|0.0|748/1000|74.8%|
+|rule-based|0.10|528/1000|52.8%|
+|random MuZero|0.10|906/1000|90.6%|
+|Seed 7 (200 it)|0.10|79.8/1000|79.8%|
+
 # seed 8
 | Opponent | Temp | Wins | % |
 |---------:|-----:|-----:|--:|
