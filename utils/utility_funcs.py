@@ -1,6 +1,14 @@
 import jax
 from jax import numpy as jnp
 
+def progress_key(pos, start, board_size):
+    # -1 = home → maps to -1 (sorts first)
+    # on-board → circular distance from start
+    # goal area (>= board_size) → large positive values
+    return jnp.where(pos < 0, jnp.int8(-1),
+           jnp.where(pos >= board_size, pos,  # goal area stays large
+           (pos - start) % board_size))
+
 def all_pin_distributions(total=7):
     '''
     Erzeugt alle möglichen Verteilungen von `total` Pins auf 4 Pins (a0, a1, a2, a3).
@@ -188,50 +196,28 @@ def check_relative_order_preserved(old_pos: jnp.ndarray, new_pos: jnp.ndarray, b
     Prüft, ob die relative Reihenfolge der Pins im Zielbereich erhalten bleibt.
 
     Args:
-        old_pos: Die alten Positionen der Pins.
-        new_pos: Die neuen Positionen der Pins.
-        board_size: Die Größe des Hauptspielbretts (z.B. 40). Alles darüber ist Zielbereich.
+        old_pos: (1, 4) or (120, 4) — Startpositionen der Pins
+        new_pos: (120, 4) — Endpositionen der Pins
+        board_size: Die Größe des Hauptspielbretts. Alles darüber ist Zielbereich.
 
     Returns:
-        Ein boolean-Array, das für jeden Pin anzeigt, ob die Bedingung erfüllt ist.
+        (120, 4) boolean-Array — für jeden Pin und jede Distribution ob die Bedingung erfüllt ist.
     """
-    # Bedingung 1: Alle Pins, die nicht im Zielbereich starten, sind immer gültig.
-    # Dies schließt auch Pins im Start (-1) ein.
-    valid_outside_goal = (old_pos < board_size)
+    valid_outside_goal = (old_pos < board_size)          # (..., 4), broadcasts to (120, 4)
+    in_goal_mask = (old_pos >= board_size)               # (..., 4)
 
-    # Bedingung 2: Für Pins im Zielbereich muss die relative Reihenfolge erhalten bleiben.
-    
-    # Erstelle eine Maske für Pins, die sich im Zielbereich befinden.
-    in_goal_mask = (old_pos >= board_size)
+    # Pairwise comparisons over the pins axis using ellipsis for the batch dimension
+    # old_pos[..., :, None]: (..., 4, 1),  old_pos[..., None, :]: (..., 1, 4)
+    sign_diff_old = jnp.sign(old_pos[..., :, None] - old_pos[..., None, :])   # (..., 4, 4)
+    sign_diff_new = jnp.sign(new_pos[..., :, None] - new_pos[..., None, :])   # (120, 4, 4)
 
-    # Erweitere die Dimensionen, um paarweise Vergleiche zu ermöglichen.
-    # Shape: (num_pins, 1) und (1, num_pins)
-    old_pos_col = old_pos[:, None]
-    old_pos_row = old_pos[None, :]
-    new_pos_col = new_pos[:, None]
-    new_pos_row = new_pos[None, :]
+    order_preserved_matrix = (sign_diff_old == sign_diff_new)                 # (120, 4, 4)
 
-    # Berechne die Vorzeichen der Differenzen für alle Paare.
-    # sign(a - b) gibt an, ob a > b (+1), a < b (-1) oder a == b (0).
-    sign_diff_old = jnp.sign(old_pos_col - old_pos_row)
-    sign_diff_new = jnp.sign(new_pos_col - new_pos_row)
+    goal_pairs_mask = in_goal_mask[..., :, None] & in_goal_mask[..., None, :] # (..., 4, 4)
 
-    # Die Reihenfolge ist nur dann erhalten, wenn die Vorzeichen aller Vergleiche gleich bleiben.
-    order_preserved_matrix = (sign_diff_old == sign_diff_new)
+    valid_in_goal = jnp.all(jnp.where(goal_pairs_mask, order_preserved_matrix, True), axis=-1)  # (120, 4)
 
-    # Erstelle eine Maske für die paarweisen Vergleiche, die nur Pins im Zielbereich berücksichtigt.
-    # Ein Paar (i, j) ist relevant, wenn sowohl Pin i als auch Pin j im Ziel sind.
-    goal_pairs_mask = in_goal_mask[:, None] & in_goal_mask[None, :]
-
-    # Ein Pin im Zielbereich ist gültig, wenn für ihn die Reihenfolge zu allen
-    # anderen Pins im Zielbereich erhalten bleibt.
-    # Wir verwenden jnp.where, um nur die relevanten Paare zu prüfen.
-    # jnp.all prüft dann pro Zeile (pro Pin), ob alle seine Vergleiche stimmen.
-    valid_in_goal = jnp.all(jnp.where(goal_pairs_mask, order_preserved_matrix, True), axis=1)
-
-    # Das Endergebnis ist True, wenn der Pin entweder außerhalb des Ziels war
-    # oder wenn er im Ziel war und seine Reihenfolge beibehalten wurde.
-    return valid_outside_goal | valid_in_goal
+    return valid_outside_goal | valid_in_goal  # (120, 4)
 
 # @jax.jit(static_argnames=['board_size', 'total_board_size'])
 def get_path_matrix(start, end, start_idx, goal, target, board_size, total_board_size, traversal_over_start=False):
@@ -319,3 +305,12 @@ def check_moving_pins_hit(i, start, end, matrix):
         return start_hit & end_hit
 
 # print(jax.vmap(check_moving_pins_hit, in_axes=(0,0,0, None))(jnp.arange(4), jnp.array([38, 37, 1, -1]), jnp.array([39, 39, 8, -1]), mat))
+
+def arange_modulo(start, stop, limit):
+    def normal():
+        return jnp.arange(start, stop)
+    def wrapped():
+        length = (stop - start) % limit
+        length = jnp.where(length != 0, length, limit)
+        return (jnp.arange(start, start + length) % limit)
+    return jax.lax.cond(stop >= start, normal, wrapped)
