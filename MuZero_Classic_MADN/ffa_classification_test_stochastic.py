@@ -46,7 +46,7 @@ from MuZero_Classic_MADN.muzero_classic_madn import (
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG
 # ═══════════════════════════════════════════════════════════════
-filename = "stochastic_muzero_madn_params_lr0.005_g1500_it50_seed22"
+filename = "stochastic_muzero_madn_params_lr0.005_g1500_it100_seed31"
 PARAM_FILE = f"MuZero_Classic_MADN/models/params/{filename}.pkl"
 # PARAM_FILE = None  # ← für untrainierte Params
 

@@ -399,31 +399,31 @@ RULES = {
     'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
 }
 TEMPERATURE_SCHEDULE = [2.0, 1.75, 1.5, 1.0, 0.75]#[1.0, 0.9, 0.8, 0.7]
-VALUE_SCALING = 3.0  
-POLICY_SCALING = 1.0
-CHANCE_SCALING = 0.25 # NEU: Gewicht für Chance Loss
+VALUE_SCALING = 4.0  
+POLICY_SCALING = 2.0
+CHANCE_SCALING = 0.5 # NEU: Gewicht für Chance Loss
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
-DEPTH_DELTA_SCALING = 0.5
+DEPTH_DELTA_SCALING = 1.0
 if __name__ == "__main__":
     config = {
-        "seed": 22,
+        "seed": 31,
         "learning_rate": 0.005,  # Startet etwas höher, da wir weniger unrollen und damit weniger stabile Targets haben
-        "architecture": "RepNet2, DynNet4, PredNet4. Less unroll to not train far planning in highly stochastic environment.",
+        "architecture": "Better pin x action assignment",
         "num_games_per_iteration": 1500,
         "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
         "Buffer_Capacity": 20000,
         "Buffer_batch_Size": 128,
-        "unroll_steps": 4,
+        "unroll_steps": 10,
         "td_steps": 25,
         "max_episode_length": 700,
-        "MCTS_simulations": 200, # less actions to evaluate (4 Pins) → less simulations needed
-        "MCTS_max_depth": 100,
+        "MCTS_simulations": 100, # less actions to evaluate (4 Pins) → less simulations needed
+        "MCTS_max_depth": 50,
         "Bootstrap_Value_Target": False,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
-        "Bootstrap_Switch_Iteration": 80,  # Wechselt zu Bootstrap-Targets 
+        "Bootstrap_Switch_Iteration": 130,  # Wechselt zu Bootstrap-Targets 
         "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-        "train_steps_per_iteration": 2000,
+        "train_steps_per_iteration": 2500,
         "rules": RULES,
         "Loss Scaling": {
             "value_loss": VALUE_SCALING,

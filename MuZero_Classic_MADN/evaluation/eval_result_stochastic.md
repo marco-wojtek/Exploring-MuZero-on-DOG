@@ -1,3 +1,42 @@
+# FFA agent performances
+
+**With better pin x action assignement**
+## seed 31 50 it
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random (12345)|0.05|470/1000|47%|
+|random |0.05|460/1000|46%|
+|rule-based|0.05|450/1000|45%|
+|random MuZero|0.05|551/1000|55.1%|
+|versus seed 20 |0.05|295/1000|29.5%|
+
+## seed 31 100 it
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random (12345)|0.05|456/1000|45.6%|
+|random |0.05|452/1000|45.2%|
+|rule-based|0.05|422/1000|42.2%|
+|random MuZero|0.05|674/1000|67.4%|
+| versus seed 20 |0.05|250/1000|25%|
+
+## Seed 20
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random (12345)|0.05|403/1000|40.3%|
+|random|0.05|402/1000|40.2%|
+|rule-based|0.05|361/1000|36.1%|
+|random MuZero|0.05|582/1000|58.2%|
+
+## Seed 21
+| Opponent | Temp | Wins | % |
+|---------:|-----:|-----:|--:|
+|random (12345)|0.05|85/1000|8.5%|
+|random |0.05|106/1000|10.6%|
+|rule-based|0.05|93/1000|9.3%|
+|random MuZero|0.05|350/1000|35.0%|
+
+---
+---
 # seed 8
 | Opponent | Temp | Wins | % |
 |---------:|-----:|-----:|--:|
