@@ -1,5 +1,53 @@
 # Team MADN with reward, discount learning
+---
+# Models that learn with better pin differentiation
 
+## Seed 71 100 its
+| Opponent | Wins  | % | 
+|------:|------------------:|-------:|
+|  random agent |  996/1000 | 99.6%  |
+|  rule based |  1000/1000 | 100%  |
+|  random MuZero |  998/1000 | 99.8%  |
+|  seed 71 (50it) |  764/1000 | 76.4%  |
+|  seed 69 |  511/1000 | 51.1%  |????
+|  seed 65 |  919/1000 | 91.9%  |
+|  seed 33 |  970/1000 | 97.0%  |
+
+
+## Seed 69 50 its
+| Opponent | Wins  | % | 
+|------:|------------------:|-------:|
+|  random agent |  993/1000 | 99.3%  |
+|  rule based |  997/1000 | 99.7%  |
+|  random MuZero |  1000/1000 | 100%  |
+
+## Seed 69 100 its
+| Opponent | Wins  | % | 
+|------:|------------------:|-------:|
+|  random agent |  997/1000 | 99.7%  |
+|  rule based |  999/1000 | 99.9%  |
+|  random MuZero |  992/1000 | 99.2%  |
+
+50 its vs 100 its: 100 its won 740/1000
+100 its vs seed 65: 998
+100 its vs seed 33: 952
+
+## Seed 70 50 its (classic MADN)
+| Opponent | Wins  | % | 
+|------:|------------------:|-------:|
+|  random agent |  985/1000 | %  |
+|  rule based |  996/1000 | %  |
+|  random MuZero |  974/1000 | %  |
+
+## Seed 70 100 its
+| Opponent | Wins  | % | 
+|------:|------------------:|-------:|
+|  random agent |  994/1000 | %  |
+|  rule based |  999/1000 | %  |
+|  random MuZero |  993/1000 | %  |
+
+50 its vs 100 its: 100 its won 628/1000
+---
 ## Seed 65 (Gumble MuZero with constant gumbel scale in Training)
 | Opponent | Wins  | % | 
 |------:|------------------:|-------:|

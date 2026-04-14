@@ -25,7 +25,7 @@ from MuZero_det_MADN.muzero_deterministic_madn import (
 # ═══════════════════════════════════════════════════════════════
 #  CONFIG — hier anpassen!
 # ═══════════════════════════════════════════════════════════════
-filename = "muzero_madn_params_lr0.005_g1500_it100_seed66"
+filename = "muzero_madn_params_lr0.005_g1500_it100_seed72"
 PARAM_FILE = f"MuZero_det_MADN/models/params/{filename}.pkl"  # ← Anpassen!
 # PARAM_FILE = None  # ← Uncomment für frische (untrainierte) Params
 

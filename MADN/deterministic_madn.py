@@ -81,7 +81,7 @@ def env_reset(
     pins = - jnp.ones((num_players,num_pins), dtype=jnp.int8)
     pins = jax.lax.cond(
         enable_initial_free_pin,
-        lambda: pins.at[:,0].set(start),
+        lambda: pins.at[:,-1].set(start), # if initial free pin enabled, then that pin is furthest in progress, thus at the end of the array
         lambda: pins
     )
     board = - jnp.ones(total_board_size, dtype=jnp.int8)
@@ -221,6 +221,9 @@ def env_step(env: deterministic_MADN, action: Action) -> deterministic_MADN:
         env.pins
     )
     pins = pins.at[current_player, pin].set(jnp.where(invalid_action, env.pins[current_player, pin], new_position))
+    keys = progress_key(pins, env.start[:, None], env.board_size)
+    sorted_indices = jnp.argsort(keys, axis=1)
+    pins = jnp.take_along_axis(pins, sorted_indices, axis=1)
 
     board = jax.lax.cond(
         ~invalid_action,

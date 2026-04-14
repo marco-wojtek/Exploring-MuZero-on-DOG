@@ -438,7 +438,7 @@ class DynamicsNetwork4(nn.Module):
         
         # --- Reward Head: 3 Klassen {-1, 0, +1} ---
         reward_input = jnp.concatenate([
-            next_latent, # NEU: Sollte Leakying von reward scores in Q-Values verhindern 
+            next_latent,
             action_one_hot
         ], axis=-1)
         reward_logits = nn.Dense(64)(reward_input)
@@ -670,31 +670,31 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulati
     #dirichlet_fraction = temperature * 0.2
 
     # 2. MCTS ausführen
-    policy_output = mctx.gumbel_muzero_policy(
-        params=params,               # Wird an recurrent_fn weitergereicht
-        rng_key=key2,
-        root=root_output,            # Startpunkt der Suche
-        recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
-        num_simulations=num_simulations,
-        max_depth=max_depth,
-        invalid_actions=invalid_actions,
-        # qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
-        qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.5),
-        gumbel_scale=temperature,    
-    )
-    # policy_output = mctx.muzero_policy(
-    #    params=params,               # Wird an recurrent_fn weitergereicht
-    #    rng_key=key2,
-    #    root=root_output,            # Startpunkt der Suche
-    #    recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
+    # policy_output = mctx.gumbel_muzero_policy(
+    #     params=params,               # Wird an recurrent_fn weitergereicht
+    #     rng_key=key2,
+    #     root=root_output,            # Startpunkt der Suche
+    #     recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
     #     num_simulations=num_simulations,
     #     max_depth=max_depth,
     #     invalid_actions=invalid_actions,
-    #     qtransform=mctx.qtransform_by_parent_and_siblings, 
-    #     dirichlet_fraction=0.25,     # Exploration Noise
-    #     dirichlet_alpha=0.3,
-    #     temperature=temperature
+    #     # qtransform=functools.partial(mctx.qtransform_by_min_max, min_value=-1, max_value=1), # Wichtig für MuZero Value-Skalierung
+    #     qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.5),
+    #     gumbel_scale=temperature,    
     # )
+    policy_output = mctx.muzero_policy(
+       params=params,               # Wird an recurrent_fn weitergereicht
+       rng_key=key2,
+       root=root_output,            # Startpunkt der Suche
+       recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
+        num_simulations=num_simulations,
+        max_depth=max_depth,
+        invalid_actions=invalid_actions,
+        qtransform=mctx.qtransform_by_parent_and_siblings, 
+        dirichlet_fraction=0.25,     # Exploration Noise
+        dirichlet_alpha=0.3,
+        temperature=temperature
+    )
     
     # Der Root-Value ist der geschätzte Wert des aktuellen Zustands (für den aktuellen Spieler) nach der MCTS-Suche.
     root_value = policy_output.search_tree.summary().value

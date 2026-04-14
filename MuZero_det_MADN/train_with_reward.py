@@ -291,12 +291,12 @@ def test_training(config, params=None, opt_state=None):
               """)
         times_per_iteration.append(end_time - start_time)
 
-        if ((it+1) % 100 == 0) or (it == iterations - 1):
+        if ((it+1) % 50 == 0) or (it == iterations - 1):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'MuZero_det_MADN/models/params/muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/params/classic_muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'MuZero_det_MADN/models/opt_state/muzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/opt_state/classic_muzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
 
     return params, opt_state, times_per_iteration
@@ -312,15 +312,15 @@ RULES = {
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
-TEMPERATURE_SCHEDULE = [1.5, 1.0, 0.8, 0.6, 0.4]
+TEMPERATURE_SCHEDULE = [1.0]#[1.5, 1.0, 0.8, 0.6, 0.4]
 VALUE_SCALING = 4.0  
 POLICY_SCALING = 1.0
-DISCOUNT_SCALING = 1.0
-REWARD_SCALING = 1.0
+DISCOUNT_SCALING = 2.0
+REWARD_SCALING = 2.0
 config = {
-    "seed": 66,
+    "seed": 71,
     "learning_rate": 0.005,
-    "architecture": "Classic MuZero with new RepNet2, DynNet4 and PredNet4. Constant Gumbel Score",
+    "architecture": "Per-player broadcasting for better pin understanding with gumbel MuZero q value scaling to default 0.1",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
