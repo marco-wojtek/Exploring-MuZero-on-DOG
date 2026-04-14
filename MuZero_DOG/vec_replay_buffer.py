@@ -17,7 +17,7 @@ class VectorizedReplayBuffer:
     3. Gibt dice_outcomes im Batch zurück
     """
     def __init__(self, capacity: int, batch_size: int, unroll_steps: int, td_steps: int,
-                 obs_shape: tuple, action_dim=998, max_episode_length=500, bootstrap_value_target=False):
+                 obs_shape: tuple, action_dim=454, max_episode_length=500, bootstrap_value_target=False):
         self.capacity = capacity
         self.batch_size = batch_size
         self.unroll_steps = unroll_steps
@@ -26,18 +26,22 @@ class VectorizedReplayBuffer:
         self.action_dim = action_dim 
         self.max_episode_length = max_episode_length
         
-        self.observations = np.zeros((capacity, max_episode_length, *obs_shape), dtype=np.float32)
-        self.actions = np.full((capacity, max_episode_length), -1, dtype=np.int32)
-        self.rewards = np.zeros((capacity, max_episode_length), dtype=np.int32)  # Klassen-Index statt Float
-        self.root_values = np.zeros((capacity, max_episode_length), dtype=np.float32)
-        self.child_visits = np.zeros((capacity, max_episode_length, action_dim), dtype=np.float32)
-        self.masks = np.zeros((capacity, max_episode_length), dtype=np.float32)
-        self.card_outcomes = np.zeros((capacity, max_episode_length), dtype=np.int32)  # NEU: Würfelergebnisse (0-5 für 1-6)
-        self.card_distributions = np.zeros((capacity, max_episode_length, 128), dtype=np.float32)  # NEU: Würfelverteilungen (6 mögliche Ergebnisse)
-        self.players = np.zeros((capacity, max_episode_length), dtype=np.int32)
-        self.teams = np.zeros((capacity, max_episode_length), dtype=np.int32)
+        # float16: halves RAM; repr_net upcasts to float32 at its first line
+        self.observations = np.zeros((capacity, max_episode_length, *obs_shape), dtype=np.float16)
+        # int16: range -1..997 fits in [-32768, 32767]; initial fill -1
+        self.actions = np.full((capacity, max_episode_length), -1, dtype=np.int16)
+        # int8: class labels 0/1/2 fit in [-128, 127]
+        self.rewards = np.zeros((capacity, max_episode_length), dtype=np.int8)
+        self.root_values = np.zeros((capacity, max_episode_length), dtype=np.float16)
+        # float16: halves RAM; upcast to float32 in sample_batch return for softmax CE
+        self.child_visits = np.zeros((capacity, max_episode_length, action_dim), dtype=np.float16)
+        self.masks = np.zeros((capacity, max_episode_length), dtype=np.bool_)
+        self.card_outcomes = np.zeros((capacity, max_episode_length), dtype=np.uint8)  # 0..127
+        self.card_distributions = np.zeros((capacity, max_episode_length, 128), dtype=np.float16)
+        self.players = np.zeros((capacity, max_episode_length), dtype=np.int8)  # 0..3
+        self.teams = np.zeros((capacity, max_episode_length), dtype=np.int8)    # -1/0/1
         self.episode_lengths = np.zeros(capacity, dtype=np.int32)
-        self.discounts = np.zeros((capacity, max_episode_length), dtype=np.int32)  # Klassen-Index statt Float
+        self.discounts = np.zeros((capacity, max_episode_length), dtype=np.int8)  # class labels 0/1/2
         
         self.position = 0
         self.size = 0
@@ -45,8 +49,10 @@ class VectorizedReplayBuffer:
     
     def save_games_from_buffers(self, all_buffers):
         """Speichert Batch von Spielen direkt."""
+        # Single bulk device-to-host transfer (statt vieler np.array()-Aufrufe im Loop)
+        all_buffers = jax.device_get(all_buffers)
         num_games = all_buffers['idx'].shape[0]
-        episode_lengths = np.array(all_buffers['idx'])
+        episode_lengths = all_buffers['idx']
         
         for i in range(num_games):
             pos = self.position
@@ -55,18 +61,18 @@ class VectorizedReplayBuffer:
             if length == 0:
                 continue
             
-            # Kopiere Daten (NumPy ist hier schnell)
-            self.observations[pos, :length] = np.array(all_buffers['obs'][i, :length])
-            self.actions[pos, :length] = np.array(all_buffers['act'][i, :length])
-            self.rewards[pos, :length] = np.array(all_buffers['rew'][i, :length])
-            self.root_values[pos, :length] = np.array(all_buffers['val'][i, :length])
-            self.child_visits[pos, :length] = np.array(all_buffers['pol'][i, :length])
-            self.masks[pos, :length] = np.array(all_buffers['mask'][i, :length])
-            self.card_outcomes[pos, :length] = np.array(all_buffers['card_outcome'][i, :length])  # NEU!
-            self.card_distributions[pos, :length] = np.array(all_buffers['card_dist'][i, :length])  # NEU!
-            self.players[pos, :length] = np.array(all_buffers['player'][i, :length])
-            self.teams[pos, :length] = np.array(all_buffers['team'][i, :length])
-            self.discounts[pos, :length] = np.array(all_buffers['discount'][i, :length])
+            # Kopiere Daten (alles bereits NumPy nach device_get oben)
+            self.observations[pos, :length] = all_buffers['obs'][i, :length]
+            self.actions[pos, :length] = all_buffers['act'][i, :length]
+            self.rewards[pos, :length] = all_buffers['rew'][i, :length]
+            self.root_values[pos, :length] = all_buffers['val'][i, :length]
+            self.child_visits[pos, :length] = all_buffers['pol'][i, :length]  # both float16
+            self.masks[pos, :length] = all_buffers['mask'][i, :length]
+            self.card_outcomes[pos, :length] = all_buffers['card_outcome'][i, :length]
+            self.card_distributions[pos, :length] = all_buffers['card_dist'][i, :length]
+            self.players[pos, :length] = all_buffers['player'][i, :length]
+            self.teams[pos, :length] = all_buffers['team'][i, :length]
+            self.discounts[pos, :length] = all_buffers['discount'][i, :length]
             self.episode_lengths[pos] = length
             
             self.position = (pos + 1) % self.capacity
@@ -81,7 +87,7 @@ class VectorizedReplayBuffer:
         """
         K = self.unroll_steps + 1
         TD = self.td_steps
-        GAMMA = 0.997
+        GAMMA = 1.0
         TERMINAL_RATIO = 0.25  # 25% des Batches enthält Terminal-Steps
 
         n_terminal = int(self.batch_size * TERMINAL_RATIO)
@@ -105,7 +111,7 @@ class VectorizedReplayBuffer:
         # terminal_k = zufällige Position (0..K-2) wo der letzte Step der Episode landen soll
         # K-1 = 10 Positionen für Actions (k=0..9), davon nutzen wir k=0..K-2
         max_terminal_k = np.minimum(self.unroll_steps - 1, ep_lengths_terminal - 1)  # kann nicht vor Episode-Start
-        terminal_k = np.array([np.random.randint(0, int(m) + 1) for m in max_terminal_k])
+        terminal_k = np.floor(np.random.uniform(0, 1, size=n_terminal) * (max_terminal_k + 1)).astype(np.int32)
         # t_start so setzen dass ep_length-1 (letzter Step) bei Position terminal_k liegt
         t_starts_terminal = np.maximum(ep_lengths_terminal - 1 - terminal_k, 0)
         
@@ -159,10 +165,11 @@ class VectorizedReplayBuffer:
         rewards_seq = self.rewards[ep_for_actions, action_indices]
         # Shape: (batch_size, K-1)
         
+        # Extrahiere Card Outcomes (nur für k=0..K-2)
+        card_outcomes = self.card_outcomes[ep_for_actions, action_indices]
         # Shape: (batch_size, K-1)
-        # WICHTIG: dice_seq[i, k] ist der Würfelwert der VOR der Action actions[i, k] gewürfelt wurde
-        # Das Netzwerk muss lernen: action_dynamics(state, action) → chance_logits
-        # Dann: chance_dynamics(afterstate, dice_seq[i, k]) → next_state
+        card_probs_seq = self.card_distributions[ep_for_actions, action_indices]
+        # Shape: (batch_size, K-1, 128)
         
         # Extrahiere Policies, Values, Masks (für alle K Steps)
         policies = self.child_visits[ep_indices_expanded, seq_indices_clipped]
@@ -189,7 +196,7 @@ class VectorizedReplayBuffer:
         final_teams_expanded = final_teams[:, None]      # (batch_size, 1)
         
         # 7.3: Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
-        game_won_seq = final_rewards_expanded > 0                    # (batch_size, K)
+        game_won_seq = final_rewards_expanded == 2                    # (batch_size, K)
         is_single_player_seq = seq_teams == -1                       # (batch_size, K)
         player_won_seq = (final_players_expanded == seq_players)     # (batch_size, K)
         team_won_seq = (final_teams_expanded == seq_teams)           # (batch_size, K)
@@ -263,8 +270,9 @@ class VectorizedReplayBuffer:
         rewards_seq = np.where(valid_mask[:, :-1], rewards_seq, 1)  # Klasse 1 = reward=0 (neutral)
         card_outcomes = np.where(valid_mask[:, :-1], card_outcomes, 0)  # NEU: Card Outcome padding
         # Uniform padding (1/128): verhindert is_non_uniform=True für gepaddte Positionen
-        dist = np.zeros(1 << 7, dtype=np.float64)
-        dist[0] = 1.0  # Alle Karten weg → nur leere Hand möglich
+        uniform_dist = np.zeros(128, dtype=np.float32)
+        uniform_dist[0] = 1.0  # Alle Karten weg → nur leere Hand möglich
+        card_probs_seq = np.where(valid_mask[:, :-1, None], card_probs_seq, uniform_dist)
         policies = np.where(valid_mask[:, :, None], policies, 0.0)
         values = np.where(valid_mask, values, 0.0)
         masks = np.where(valid_mask, masks, 0.0)
@@ -275,14 +283,14 @@ class VectorizedReplayBuffer:
         # SCHRITT 9: Return Batch
         # ========================================
         return {
-            'observations': jnp.array(root_obs),           # (batch_size, 14, 56)
-            'actions': jnp.array(actions),                 # (batch_size, K-1)
-            'rewards': jnp.array(rewards_seq),             # (batch_size, K-1)
-            'card_outcomes': jnp.array(self.card_outcomes[ep_indices, t_starts:t_starts+K]),  # NEW
-            'card_probs': jnp.array(self.card_distributions[ep_indices, t_starts:t_starts+K]),
-            'policies': jnp.array(policies),               # (batch_size, K, 4)
-            'values': jnp.array(values),                   # (batch_size, K)
-            'masks': jnp.array(masks),                     # (batch_size, K)
-            'target_values': jnp.array(target_values),    # (batch_size, K)
-            'discount_targets': jnp.array(discount_targets)  # (batch_size, K-1)
+            'observations': jnp.array(root_obs),                              # float16 → repr_net upcasts
+            'actions': jnp.array(actions),                                    # int16 → promoted in concat
+            'rewards': jnp.array(rewards_seq),                                # int8  → .astype(int32) in loss
+            'card_outcomes': jnp.array(card_outcomes),                        # uint8 → bit-ops in chance_dyn
+            'card_probs': jnp.array(card_probs_seq, dtype=jnp.float32),       # float16 → float32 for CE loss
+            'policies': jnp.array(policies, dtype=jnp.float32),               # float16 → float32 for CE loss
+            'values': jnp.array(values),                                      # float16, debug only
+            'masks': jnp.array(masks, dtype=jnp.float32),                     # bool_ → float32 for multiply
+            'target_values': jnp.array(target_values),                        # float64 np → float32 JAX
+            'discount_targets': jnp.array(discount_targets)                   # int8  → .astype(int32) in loss
         }

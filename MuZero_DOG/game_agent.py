@@ -10,17 +10,29 @@ from DOG.dog import *
 from MuZero_DOG.muzero_dog import *
 from card_dist import *
 
+# RULES = {
+#     'enable_teams': True, # DOG-standard is True
+#     'enable_initial_free_pin': True, # DOG-standard is False
+#     'enable_circular_board': False, # DOG-standard is True
+#     'enable_friendly_fire': True, # DOG-standard is True
+#     'enable_start_blocking': True, # DOG-standard is True
+#     'enable_jump_in_goal_area': False, # DOG-standard is False
+#     'must_traverse_start': False, # DOG-standard is True
+#     'disable_swapping': False, # DOG-standard is False
+#     'disable_hot_seven': False, # DOG-standard is False
+#     'disable_joker': False, # DOG-standard is False
+# }
 RULES = {
-    'enable_teams': True,
-    'enable_initial_free_pin': False,
-    'enable_circular_board': True,
-    'enable_friendly_fire': True,
-    'enable_start_blocking': True,
-    'enable_jump_in_goal_area': False,
-    'must_traverse_start': True,
-    'disable_swapping': False,
-    'disable_hot_seven': False,
-    'disable_joker': False,
+    'enable_teams': True, # DOG-standard is True
+    'enable_initial_free_pin': False, # DOG-standard is False
+    'enable_circular_board': False, # DOG-standard is True
+    'enable_friendly_fire': True, # DOG-standard is True
+    'enable_start_blocking': True, # DOG-standard is True
+    'enable_jump_in_goal_area': False, # DOG-standard is False
+    'must_traverse_start': True, # DOG-standard is True
+    'disable_swapping': False, # DOG-standard is False
+    'disable_hot_seven': False, # DOG-standard is False
+    'disable_joker': False, # DOG-standard is False
 }
 
 def env_reset_batched(seed):
@@ -44,6 +56,9 @@ def env_reset_batched(seed):
     )
 
 # 2. Vektorisierte Funktionen vorbereiten
+# NOTE: batch_reset cannot be jax.jit-wrapped because env_reset uses boolean array
+# indexing ([layout]) whose output shape depends on concrete values — incompatible
+# with JAX abstract tracing. Plain vmap is correct here.
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_actions)
 batch_encode = jax.vmap(encode_board)
@@ -85,7 +100,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                     policy_output, root_value = run_muzero_mcts(
                         params, key2, obs, invalid_actions=invalid_mask, num_simulations=num_simulations, max_depth=max_depth, temperature=temp
                     )
-                    # Action ist ein Index (0-998)
+                    # Action ist ein Index (0-454)
                     action = policy_output.action[0]
                     next_env, reward, next_done = env_step(env, action)
 
@@ -117,13 +132,20 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                     deal_happened = jnp.sum(next_env.hands) > jnp.sum(env.hands)
                     card_outcome = jnp.where(deal_happened, compute_card_outcome_jax(next_env, current_player_before), 0)
 
-                    return next_env, obs[0], action, reward, root_value[0], policy_output.action_weights[0], next_done, 1, card_outcome, discount_target, reward_target
+                    return (next_env, obs[0].astype(jnp.float16),
+                            action.astype(jnp.int16), reward,
+                            root_value[0].astype(jnp.float16),
+                            policy_output.action_weights[0].astype(jnp.float16),
+                            next_done, jnp.bool_(True),
+                            card_outcome.astype(jnp.uint8),
+                            discount_target.astype(jnp.int8),
+                            reward_target.astype(jnp.int8))
                 
                 def do_skip(env):
                     # Keine validen Actions → no_step
                     next_env, reward, next_done = no_step(env)
-                    dummy_obs = jnp.zeros_like(obs[0])
-                    return next_env, dummy_obs, jnp.int32(-1), reward, 0.0, jnp.zeros(get_play_action_size(env)), next_done, 0, 0, 1, 1
+                    dummy_obs = jnp.zeros_like(obs[0], dtype=jnp.float16)
+                    return next_env, dummy_obs, jnp.int16(-1), reward, jnp.float16(0.0), jnp.zeros(454, dtype=jnp.float16), next_done, jnp.bool_(False), jnp.uint8(0), jnp.int8(1), jnp.int8(1)
                 
                 # Wähle zwischen MCTS und no_step
                 next_env, step_obs, action, reward, value, policy, next_done, mask, card_outcome, discount_target, reward_target = jax.lax.cond(
@@ -142,17 +164,17 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 # Using one-hot is equivalent to integer-label cross-entropy and is JIT-safe.
                 c_dist = jax.nn.one_hot(card_outcome, num_classes=128)
                 new_buffer = {
-                    'obs': buffer['obs'].at[idx].set(step_obs),
-                    'act': buffer['act'].at[idx].set(action),
-                    'rew': buffer['rew'].at[idx].set(reward_target),  # NEU: Reward Target speichern
-                    'val': buffer['val'].at[idx].set(value),
-                    'pol': buffer['pol'].at[idx].set(policy),
-                    'mask': buffer['mask'].at[idx].set(mask),
-                    'card_outcome': buffer['card_outcome'].at[idx].set(card_outcome),  # NEU: Card Outcome speichern
-                    'card_dist': buffer['card_dist'].at[idx].set(c_dist),  # Würfelverteilung speichern
+                    'obs': buffer['obs'].at[idx].set(step_obs.astype(jnp.float16)),
+                    'act': buffer['act'].at[idx].set(action.astype(jnp.int16)),
+                    'rew': buffer['rew'].at[idx].set(reward_target.astype(jnp.int8)),
+                    'val': buffer['val'].at[idx].set(value.astype(jnp.float16)),
+                    'pol': buffer['pol'].at[idx].set(policy.astype(jnp.float16)),
+                    'mask': buffer['mask'].at[idx].set(mask.astype(jnp.bool_)),
+                    'card_outcome': buffer['card_outcome'].at[idx].set(card_outcome.astype(jnp.uint8)),
+                    'card_dist': buffer['card_dist'].at[idx].set(c_dist.astype(jnp.float16)),
                     'player': buffer['player'].at[idx].set(current_player),
                     'team': buffer['team'].at[idx].set(team),
-                    'discount': buffer['discount'].at[idx].set(discount_target),  # NEU: Discount Target speichern
+                    'discount': buffer['discount'].at[idx].set(discount_target.astype(jnp.int8)),
                     'idx': idx + 1
                 }
                 return next_env, new_buffer, next_done
@@ -171,19 +193,31 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
         return (new_envs, new_buffers, new_dones, step_count + 1, rng_key)
     
     # Initialisierung
+    # GPU while-loop carry dtype summary (num_envs=500, max_steps=800):
+    #   obs:       float16  (500×800×448×2 = 358 MB, was 716 MB float32)
+    #   pol:       float16  (454 = 798 MB, was 1597 MB float32)
+    #   card_dist: float16  (500×800×128×2 = 102 MB, was 204 MB float32)
+    #   all others: int8/uint8/int16/bool_ (< 2 MB each)
+    # Total carry: ~1.27 GB vs ~2.54 GB before.
+    # NOTE: jax.lax.cond under jax.vmap evaluates BOTH branches for ALL envs,
+    # so MCTS runs even for finished games each while-loop step. The loop exits
+    # as soon as jnp.any(~dones) is False, so minimising max_steps is the best
+    # way to reduce this overhead.
     init_buffers = {
-        'obs': jnp.zeros((num_envs, max_steps, *input_shape)),
-        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
-        'rew': jnp.zeros((num_envs, max_steps)),
-        'val': jnp.zeros((num_envs, max_steps)),
-        'pol': jnp.zeros((num_envs, max_steps, 998)),
-        'mask': jnp.zeros((num_envs, max_steps)),
-        'card_outcome': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  # NEU: Card Outcome speichern
-        'card_dist': jnp.zeros((num_envs, max_steps, 128)),  # 7-bit: 128 possible category masks
-        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
-        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
-        'discount': jnp.zeros((num_envs, max_steps)),  # NEU: Discount Target speichern
-        'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
+        # float16 saves ~358 MB vs float32; repr_net does x.astype(float32) at first line
+        'obs': jnp.zeros((num_envs, max_steps, *input_shape), dtype=jnp.float16),
+        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int16),    # range 0-997 < 32767
+        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),     # class labels 0/1/2
+        'val': jnp.zeros((num_envs, max_steps), dtype=jnp.float16),  # root value in [-1,1]
+        'pol': jnp.zeros((num_envs, max_steps, 454), dtype=jnp.float16),
+        'mask': jnp.zeros((num_envs, max_steps), dtype=jnp.bool_),   # binary 0/1
+        'card_outcome': jnp.zeros((num_envs, max_steps), dtype=jnp.uint8),  # 0..127
+        # float16 saves ~102 MB vs float32; upcast to float32 in sample_batch return
+        'card_dist': jnp.zeros((num_envs, max_steps, 128), dtype=jnp.float16),
+        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),  # 0..3
+        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int8), # -1/0/1
+        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),# class labels 0/1/2
+        'idx': jnp.zeros(num_envs, dtype=jnp.int32)
     }
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
     

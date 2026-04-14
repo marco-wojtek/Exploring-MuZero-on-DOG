@@ -3,10 +3,6 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import mctx
-import sys, os
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(project_root)
-from DOG.dog import *
 
 class ResBlock(nn.Module):
     features: int
@@ -31,8 +27,8 @@ class RepresentationNetwork(nn.Module):
         x = x.astype(jnp.float32)
 
         # === SPATIAL STREAM === 
-        spacial = x[:, :6, :]  # (Batch, 6, 56) !! ANPASSEN !!
-        global_f = x[:, 6:, 0]  # (Batch, 28) !! ANPASSEN !!
+        spacial = x[:, :6, :] 
+        global_f = x[:, 6:, 0]  
         
         spacial = jnp.transpose(spacial, (0, 2, 1))
         
@@ -85,25 +81,26 @@ class RepresentationNetwork(nn.Module):
 class DynamicsNetwork(nn.Module):
     latent_dim: int = 256
     num_res_blocks: int = 2
-    num_actions: int = 998       # Classic MADN: 4 Pins 
+    num_actions: int = 454       # Classic MADN: 4 Pins 
     num_chance_outcomes: int = 128  # 2^7: joker|swap|13|7|1-11|4-card|normal-fwd
 
     @nn.compact
     def __call__(self, latent_state, action, chance_outcome=None):
         """Init-Call: durchläuft beide Pfade um alle Parameter zu erstellen."""
-        afterstate, reward_logits, chance_logits, discount_logits = self.action_dynamics(latent_state, action)
+        afterstate, afterstate_value, reward_logits, chance_logits, discount_logits = self.action_dynamics(latent_state, action)
         if chance_outcome is not None:
             next_state = self.chance_dynamics(afterstate, chance_outcome)
-            return afterstate, reward_logits, chance_logits, discount_logits, next_state
-        return afterstate, reward_logits, chance_logits, discount_logits
+            return afterstate, afterstate_value, reward_logits, chance_logits, discount_logits, next_state
+        return afterstate, afterstate_value, reward_logits, chance_logits, discount_logits
 
     @nn.compact
     def action_dynamics(self, latent_state, action):
         """State + Action → Afterstate + Reward/Discount/Chance-Logits"""
         # 1. Action Embedding
-        action_one_hot = jax.nn.one_hot(action, num_classes=self.num_actions)
-        action_embed = nn.Dense(64, name='act_embed')(action_one_hot)
-        action_embed = nn.relu(action_embed)
+        # action_one_hot = jax.nn.one_hot(action, num_classes=self.num_actions, dtype=jnp.float32)
+        # action_embed = nn.Dense(64, name='act_embed')(action_one_hot)
+        # action_embed = nn.relu(action_embed)
+        action_embed = nn.Embed(num_embeddings=self.num_actions, features=64, name='act_embed')(action)
 
         # 2. FiLM Conditioning
         latent_normed = nn.LayerNorm(name='act_input_ln')(latent_state)
@@ -121,15 +118,15 @@ class DynamicsNetwork(nn.Module):
         for i in range(self.num_res_blocks):
             x = ResBlock(self.latent_dim)(x)
 
-        # 4. Residual + Min-Max
+        # 4. Residual + LayerNorm (replaces min-max: avoids 1/(max-min) gradient explosion)
         x = nn.Dense(self.latent_dim, name='act_proj')(x)
         x = latent_state + x
-        min_val = jnp.min(x, axis=-1, keepdims=True)
-        max_val = jnp.max(x, axis=-1, keepdims=True)
-        afterstate = (x - min_val) / (max_val - min_val + 1e-8)
+        afterstate = nn.LayerNorm(name='afterstate_ln')(x)
 
         # 5. Reward Head: 3 Klassen {-1, 0, +1}
-        reward_input = jnp.concatenate([afterstate, action_one_hot], axis=-1)
+        # reward_input = jnp.concatenate([afterstate, action_one_hot], axis=-1)
+        # reward_logits = nn.Dense(64, name='reward_dense')(reward_input)
+        reward_input = jnp.concatenate([afterstate, action_embed], axis=-1)  # (B, 256+64) instead of (B, 1254)
         reward_logits = nn.Dense(64, name='reward_dense')(reward_input)
         reward_logits = nn.relu(reward_logits)
         reward_logits = nn.Dense(3, name='reward_head')(reward_logits)
@@ -143,7 +140,12 @@ class DynamicsNetwork(nn.Module):
         # 7. Chance Logits: Vorhersage der Würfelverteilung
         chance_logits = nn.Dense(self.num_chance_outcomes, name='chance_head')(afterstate)
 
-        return afterstate, reward_logits, chance_logits, discount_logits
+        afterstate_value = nn.Dense(64, name='afterstate_val_dense')(afterstate)
+        afterstate_value = nn.relu(afterstate_value)
+        afterstate_value = nn.Dense(1, name='afterstate_val_head')(afterstate_value)
+        afterstate_value = nn.tanh(afterstate_value).squeeze(-1)
+
+        return afterstate, afterstate_value, reward_logits, chance_logits, discount_logits
 
     @nn.compact
     def chance_dynamics(self, afterstate, chance_outcome):
@@ -172,19 +174,17 @@ class DynamicsNetwork(nn.Module):
         for i in range(self.num_res_blocks):
             x = ResBlock(self.latent_dim)(x)
 
-        # 4. Residual + Min-Max
+        # 4. Residual + LayerNorm (replaces min-max: avoids 1/(max-min) gradient explosion)
         x = nn.Dense(self.latent_dim, name='chance_proj')(x)
         x = afterstate + x  # Skip zum Afterstate
-        min_val = jnp.min(x, axis=-1, keepdims=True)
-        max_val = jnp.max(x, axis=-1, keepdims=True)
-        next_state = (x - min_val) / (max_val - min_val + 1e-8)
+        next_state = nn.LayerNorm(name='next_state_ln')(x)
 
         return next_state
 
 class PredictionNetwork(nn.Module):
     latent_dim: int = 256
     num_res_blocks: int = 2
-    num_actions: int = 998  # Pins x Karten
+    num_actions: int = 454  # Pins x Karten
     
     @nn.compact
     def __call__(self, latent_state):
@@ -221,31 +221,17 @@ repr_net = RepresentationNetwork()
 dynamics_net = DynamicsNetwork()
 pred_net = PredictionNetwork()
 
-def root_inference_fn(params, observation):
-    embedding = repr_net.apply(params['representation'], observation)
-    prior_logits, value = pred_net.apply(params['prediction'], embedding)
-    # value: (Batch, 1) -> (Batch,)
-    value = value.squeeze(-1)
-    return mctx.RootFnOutput(
-        embedding=embedding,
-        prior_logits=prior_logits,
-        value=value
-    )
-
 def decision_recurrent_fn(params, rng_key, action, embedding):
-    afterstate, reward_logits, chance_logits, discount_logits = dynamics_net.apply(
+    afterstate, afterstate_value, reward_logits, chance_logits, discount_logits = dynamics_net.apply(
         params['dynamics'], embedding, action, method=dynamics_net.action_dynamics
     )
     # Reward/Discount → Scalar
-    support = jnp.array([-1.0, 0.0, 1.0])
+    support = jnp.array([-1.0, 0.0, 1.0], dtype=jnp.float32)
     reward = jnp.sum(jax.nn.softmax(reward_logits) * support, axis=-1)
     discount = jnp.sum(jax.nn.softmax(discount_logits) * support, axis=-1)
     
     # Reward + Discount an Afterstate anhängen (werden in chance_recurrent_fn extrahiert)
     afterstate_with_info = jnp.concatenate([afterstate, reward[:, None], discount[:, None]], axis=-1)
-    
-    _, afterstate_value = pred_net.apply(params['prediction'], afterstate)
-    afterstate_value = afterstate_value.squeeze(-1)
     
     return mctx.DecisionRecurrentFnOutput(
         chance_logits=chance_logits,
@@ -318,6 +304,70 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulati
 
     root_value = policy_output.search_tree.summary().value
 
+    return policy_output, root_value
+
+def combined_recurrent_fn(params, rng_key, action, embedding):
+    """1 NN forward pass per simulation vs 4 for stochastic_muzero_policy.
+    
+    stochastic_muzero_policy uses jnp.where (not lax.cond) → BOTH
+    decision_recurrent_fn AND chance_recurrent_fn always execute.
+    Here we collapse the decision+chance step into one call.
+    
+    The chance outcome is sampled from chance_logits so different simulations
+    explore different card futures → trees stay broad → while_loop exits early.
+    """
+    afterstate, afterstate_value, reward_logits, chance_logits, discount_logits = dynamics_net.apply(
+        params['dynamics'], embedding, action, method=dynamics_net.action_dynamics
+    )
+    # Sample one chance outcome per batch element; different simulations will
+    # draw different outcomes, keeping the PUCT tree broad rather than a single chain.
+    chance_outcome = jax.random.categorical(rng_key, chance_logits)  # [B]
+
+    next_embedding = dynamics_net.apply(
+        params['dynamics'], afterstate, chance_outcome, method=dynamics_net.chance_dynamics
+    )
+    prior_logits, value = pred_net.apply(params['prediction'], next_embedding)
+    value = value.squeeze(-1)
+
+    support = jnp.array([-1.0, 0.0, 1.0], dtype=jnp.float32)
+    reward   = jnp.sum(jax.nn.softmax(reward_logits)   * support, axis=-1)
+    discount = jnp.sum(jax.nn.softmax(discount_logits) * support, axis=-1)
+
+    return mctx.RecurrentFnOutput(
+        prior_logits=prior_logits, value=value,
+        reward=reward, discount=discount,
+    ), next_embedding
+
+
+@functools.partial(jax.jit, static_argnames=['num_simulations', 'max_depth', 'temperature'])
+def run_muzero_mcts_fast(params, rng_key, observations, invalid_actions,
+                         num_simulations, max_depth, temperature):
+    """muzero_policy + combined_recurrent_fn: 4x fewer NN calls than stochastic variant."""
+    key1, key2 = jax.random.split(rng_key)
+    root_output = root_inference_fn(params, observations)
+    # policy_output = mctx.muzero_policy(
+    #     params=params,
+    #     rng_key=key2,
+    #     root=root_output,
+    #     recurrent_fn=combined_recurrent_fn,
+    #     num_simulations=num_simulations,
+    #     invalid_actions=invalid_actions,
+    #     max_depth=max_depth,
+    #     qtransform=mctx.qtransform_by_parent_and_siblings,
+    #     temperature=temperature,
+    # )
+    policy_output = mctx.gumbel_muzero_policy(
+        params=params,               # Wird an recurrent_fn weitergereicht
+        rng_key=key2,
+        root=root_output,            # Startpunkt der Suche
+        recurrent_fn=combined_recurrent_fn, # Funktion für Schritte im latenten Raum
+        num_simulations=num_simulations,
+        max_depth=max_depth,
+        invalid_actions=invalid_actions,
+        qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.5),
+        gumbel_scale=temperature,    
+    )
+    root_value = policy_output.search_tree.summary().value
     return policy_output, root_value
 
 def init_muzero_params(rng_key, input_shape):

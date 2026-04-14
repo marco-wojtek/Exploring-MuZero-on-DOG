@@ -1,4 +1,7 @@
+import gc
 import os
+import datetime
+import numpy as np
 import jax
 from time import time
 import jax
@@ -46,7 +49,7 @@ def loss_fn(params, batch):
             - observations: (B, T, H, W) oder (B, T, Features)
             - actions: (B, T)
             - target_values: (B, T)
-            - policies: (B, T, 998) 
+            - policies: (B, T, 454) 
             - card_outcomes: (B, T)  # NEU: Tatsächliche Kartenereignisse
             - masks: (B, T)
             
@@ -85,7 +88,7 @@ def loss_fn(params, batch):
         # ===== DYNAMICS LOSS (State Transition) =====
         # Schritt 1: Action Dynamics (Spieler wählt Aktion)
         def do_dynamics(state, action, card_outcome):
-            afterstate, pred_reward_logits, pred_chance_logits, pred_discount_logits = dynamics_net.apply(
+            afterstate, afterstate_value, pred_reward_logits, pred_chance_logits, pred_discount_logits = dynamics_net.apply(
                 params['dynamics'], state, action, method=dynamics_net.action_dynamics
             )
 
@@ -199,6 +202,64 @@ def train_step(params, opt_state, batch):
 
 # --- Initialisierung (Beispiel) ---
 
+def _print_gpu_stats(label: str):
+    """Print GPU memory and live JAX array count for diagnosing fragmentation."""
+    import subprocess
+    # Temperature + clock speed: these queries don't require elevated permissions
+    try:
+        r = subprocess.run(
+            ['nvidia-smi',
+             '--query-gpu=temperature.gpu,clocks.current.sm,clocks.current.memory',
+             '--format=csv,noheader,nounits'],
+            capture_output=True, text=True, timeout=5
+        )
+        parts = [s.strip() for s in r.stdout.strip().split(',')]
+        print(f"  [GPU/{label}] temp={parts[0]}\u00b0C  SM={parts[1]}MHz  mem_clk={parts[2]}MHz")
+    except Exception as e:
+        print(f"  [GPU/{label}] nvidia-smi unavailable: {e}")
+    # JAX allocator stats. With BFC (default): shows pool bytes.
+    # With platform allocator (XLA_PYTHON_CLIENT_ALLOCATOR=platform): returns None.
+    try:
+        device = jax.devices('gpu')[0]
+        stats = device.memory_stats()
+        if stats:
+            used_gb  = stats.get('bytes_in_use', 0) / 1e9
+            peak_gb  = stats.get('peak_bytes_in_use', 0) / 1e9
+            limit_gb = stats.get('bytes_limit', 0) / 1e9
+            print(f"  [GPU/{label}] BFC pool: {used_gb:.2f} GB in use  "
+                  f"{peak_gb:.2f} GB peak  {limit_gb:.2f} GB limit")
+        else:
+            # platform allocator active — use nvidia-smi for process memory instead
+            import subprocess
+            try:
+                r2 = subprocess.run(
+                    ['nvidia-smi', '--query-compute-apps=pid,used_memory',
+                     '--format=csv,noheader'],
+                    capture_output=True, text=True, timeout=5
+                )
+                pid = os.getpid()
+                for line in r2.stdout.strip().splitlines():
+                    if str(pid) in line:
+                        print(f"  [GPU/{label}] platform-alloc live CUDA: {line.strip()}")
+                        break
+                else:
+                    print(f"  [GPU/{label}] platform allocator active (no BFC pool stats)")
+            except Exception:
+                print(f"  [GPU/{label}] platform allocator active (no BFC pool stats)")
+    except Exception as e:
+        print(f"  [GPU/{label}] memory_stats unavailable: {e}")
+    # Python-tracked JAX arrays (only covers objects with Python refs)
+    try:
+        lines = []
+        for dev in jax.devices('gpu') + jax.devices('cpu'):
+            arrs = jax.live_arrays(dev)
+            if arrs:
+                gb = sum(a.nbytes for a in arrs) / 1e9
+                lines.append(f"{dev.device_kind}:{gb:.2f}GB({len(arrs)}arr)")
+        print(f"  [GPU/{label}] live arrays: {' | '.join(lines) if lines else 'none'}")
+    except Exception:
+        pass
+
 def test_training(config, params=None, opt_state=None):
     seed = config["seed"]
     iterations = config["iterations"]
@@ -221,7 +282,7 @@ def test_training(config, params=None, opt_state=None):
         0,  # <- Das wird an '_' übergeben
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
-        distance=10,
+        distance=16,
         starting_player=0,
         seed=0,  # <- Das ist das eigentliche Seed-Keyword-Argument
         enable_teams=RULES['enable_teams'],
@@ -230,12 +291,13 @@ def test_training(config, params=None, opt_state=None):
         enable_friendly_fire=RULES['enable_friendly_fire'],
         enable_start_blocking=RULES['enable_start_blocking'],
         enable_jump_in_goal_area=RULES['enable_jump_in_goal_area'],
-        enable_start_on_1=RULES['enable_start_on_1'],
-        enable_bonus_turn_on_6=RULES['enable_bonus_turn_on_6'],
-        must_traverse_start=RULES['must_traverse_start']
+        must_traverse_start=RULES['must_traverse_start'],
+        disable_swapping=RULES['disable_swapping'],
+        disable_hot_seven=RULES['disable_hot_seven'],
+        disable_joker=RULES['disable_joker']
     )
     enc = encode_board(env)  # z.B. (8, 56)
-    print(enc.shape)
+    print(f"Observation shape: {enc.shape}")
     input_shape = enc.shape  # (8, 56)
 
     if params is None:
@@ -250,14 +312,15 @@ def test_training(config, params=None, opt_state=None):
         unroll_steps=unroll_steps, 
         td_steps=td_steps,
         obs_shape=input_shape, 
+        action_dim=454,
         max_episode_length=max_episode_length, 
         bootstrap_value_target=config["Bootstrap_Value_Target"]
     )
     
-    dog_wandb_session.log({"games_in_replay_buffer": replay.size})
+    # dog_wandb_session.log({"games_in_replay_buffer": replay.size})
     # collect initial set of games
     print("Collecting initial games...")
-    game_warmup = 3
+    game_warmup = 0 # TODO: 
     for n in range(game_warmup):
         print(f"{n+1}/{game_warmup} Playing games to fill replay buffer...")
         buffers = play_n_games_v3(
@@ -271,21 +334,23 @@ def test_training(config, params=None, opt_state=None):
             temp=get_temperature(0, iterations)
         )
         replay.save_games_from_buffers(buffers)
-        dog_wandb_session.log({"games_in_replay_buffer": replay.size})
+        # dog_wandb_session.log({"games_in_replay_buffer": replay.size})
 
     times_per_iteration = []
     global_step = 0
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
-        # ✅ Automatically switch to bootstrap after Phase 1
-        if (it) == switch_to_bootstrap_iteration:
+        if it == switch_to_bootstrap_iteration:
             print("=" * 60)
             print("SWITCHING TO BOOTSTRAP VALUE TARGETS")
             print("=" * 60)
             replay.bootstrap_value_target = True
 
-        temp = get_temperature(it, iterations)  # Phasenbasiert: nur 4 verschiedene Werte
+        temp = get_temperature(it, iterations)
+        start_time = time()
+
+        game_start = time()
         buffers = play_n_games_v3(
             params, 
             jax.random.PRNGKey(seed+it**3), 
@@ -296,63 +361,138 @@ def test_training(config, params=None, opt_state=None):
             max_steps=max_episode_length, 
             temp=temp
         )
+        game_gen_time = time() - game_start
         episode_lengths = buffers['idx']
-        print(f"  Episode lengths: min={episode_lengths.min()}, max={episode_lengths.max()}, mean={episode_lengths.mean():.1f}")
+        ep_max = int(episode_lengths.max())
+        ep_mean = float(episode_lengths.mean())
+        pct_at_cap = float(100 * (episode_lengths >= max_episode_length).mean())
+        print(f"  Game generation took {game_gen_time:.1f}s")
+        print(f"  Episode lengths: min={int(episode_lengths.min())}, max={ep_max}, mean={ep_mean:.1f}, pct_at_cap={pct_at_cap:.1f}%")
+
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
-        dog_wandb_session.log({"games_in_replay_buffer": replay.size})
+        # dog_wandb_session.log({"games_in_replay_buffer": replay.size})
+
         print("Training on collected data...")
         train_start = time()
-        for i in range(train_steps_per_iteration):  
+        for i in range(train_steps_per_iteration):
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
             current_lr = learning_rate_schedule(global_step)
-            dog_wandb_session.log({**losses, 'learning_rate': float(current_lr)})
+            # dog_wandb_session.log({**losses, 'learning_rate': float(current_lr)})
             global_step += 1
             if i % (train_steps_per_iteration // 4) == 0:
-                print(f"Step {i}, Losses: {{")
-                print(f"  total_loss: {losses['total_loss']:.2f},")
-                print(f"  v_loss: {losses['v_loss']:.2f} ({losses['v_loss']/unroll_steps:.3f} per step),")
-                print(f"  p_loss: {losses['p_loss']:.2f} ({losses['p_loss']/unroll_steps:.3f} per step)")
-                print(f"  d_loss: {losses['d_loss']:.2f} ({losses['d_loss']/unroll_steps:.3f} per step)")
-                print(f"  r_loss: {losses['r_loss']:.2f} ({losses['r_loss']/unroll_steps:.3f} per step)")
-                print(f"}}")
+                log_losses = {k: float(v) for k, v in losses.items()}
+                print(f"  Step {i}: total={log_losses['total_loss']:.2f} "
+                      f"v={log_losses['v_loss']:.2f} p={log_losses['p_loss']:.2f} "
+                      f"c={log_losses['c_loss']:.2f} d={log_losses['d_loss']:.2f} "
+                      f"r={log_losses['r_loss']:.2f}")
         end_time = time()
-        print(f"""
-              Iteration {it+1} completed in {end_time - start_time:.2f} seconds.
-              Game playing + data collection time: {train_start - start_time:.2f} seconds.
-              Training time: {end_time - train_start:.2f} seconds.
-              """)
+        print(f"  Iteration {it+1} done in {end_time - start_time:.1f}s  "
+              f"(game_gen={game_gen_time:.1f}s  train={end_time - train_start:.1f}s)")
         times_per_iteration.append(end_time - start_time)
 
-        # if ((it+1) % 50 == 0):
+        # if ((it+1) % 50 == 0) or (it == iterations - 1):
         #     print(f"Saving checkpoint at iteration {it+1}...")
-        #     with open(f'MuZero_DOG/models/params/gumbelmuzero_dog_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+        #     with open(f'MuZero_DOG/models/params/muzero_dog_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
         #         pickle.dump(params, f)
 
-        #     with open(f'MuZero_DOG/models/opt_state/gumbelmuzero_dog_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+        #     with open(f'MuZero_DOG/models/opt_state/muzero_dog_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
         #         pickle.dump(opt_state, f)
-        if ((it+1) % 100 == 0):
-            print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'MuZero_DOG/models/params/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
-                pickle.dump(params, f)
 
-            with open(f'MuZero_DOG/models/opt_state/Experiment_{config["seed"]}_{it+1}.pkl', 'wb') as f:
-                pickle.dump(opt_state, f)
+    # ============================================================
+    # DIAGNOSTIC DUMP: Write replay buffer contents to file
+    # ============================================================
+    valid = replay.size
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    diag_path = f'MuZero_DOG/models/replay_diag_{timestamp}.npz'
+
+    rew    = replay.rewards[:valid]             # (valid, max_ep_len) int8, classes 0/1/2
+    masks  = replay.masks[:valid]               # (valid, max_ep_len) bool
+    clens  = replay.episode_lengths[:valid]     # (valid,) int32
+    plrs   = replay.players[:valid]             # (valid, max_ep_len) int8
+    cdist  = replay.card_distributions[:valid]  # (valid, max_ep_len, 128) float16
+    pols   = replay.child_visits[:valid]        # (valid, max_ep_len, 454) float16
+
+    print(f"\n{'='*60}")
+    print(f"Replay buffer diagnostic ({valid} episodes, max_ep_len={max_episode_length}):")
+    print(f"  Episode lengths : min={clens.min()}, max={clens.max()}, "
+          f"mean={clens.mean():.1f}, pct_at_cap={100*(clens>=max_episode_length).mean():.1f}%")
+    print(f"  Reward classes  : 0(loss)={np.sum(rew==0):,}  1(neutral)={np.sum(rew==1):,}  2(win)={np.sum(rew==2):,}")
+    print(f"  Masks           : valid_steps={np.sum(masks):,}, valid_fraction={np.mean(masks):.4f}")
+    print(f"  Player dist     : " + "  ".join(f"p{i}={np.sum(plrs==i):,}" for i in range(4)))
+    # card_dist: count steps where a deal actually happened (non-degenerate distribution)
+    cdist_f32 = cdist.astype(np.float32)
+    deal_steps = np.sum(cdist_f32[:, :, 0] < 0.99)   # first bin < 0.99 → non-trivial dist
+    print(f"  Card dist deals : {deal_steps:,} steps with non-trivial card distribution")
+    top_cards = np.argsort(-cdist_f32[cdist_f32[:, :, 0] < 0.99].sum(axis=0))[:5] \
+        if deal_steps > 0 else []
+    if len(top_cards):
+        print(f"  Top-5 card bins (by freq): {top_cards.tolist()}")
+    # Policy / valid-action stats: a policy entry > 0 means that action was visited by MCTS
+    # (invalid actions are masked → weight 0). Number of nonzero entries = valid actions seen.
+    pols_f32 = pols.astype(np.float32)  # (valid, max_ep_len, 454)
+    # Only look at masked (real MCTS) steps
+    active_mask_3d = masks[:, :, None]  # (valid, max_ep_len, 1)
+    valid_action_counts = np.sum(pols_f32 > 0, axis=-1)  # (valid, max_ep_len) — actions with any visit
+    active_counts = valid_action_counts[masks]             # only real steps
+    if len(active_counts) > 0:
+        print(f"  Valid actions   : mean={active_counts.mean():.1f}  "
+              f"min={active_counts.min()}  max={active_counts.max()}  "
+              f"median={int(np.median(active_counts))}")
+        # Distribution: how often 1, 2-5, 6-10, 11-20, 21+ valid actions
+        buckets = [(1,1,'=1'), (2,5,'2-5'), (6,10,'6-10'), (11,20,'11-20'), (21,50,'21-50'), (51,454,'51+')]
+        bucket_str = '  '.join(
+            f"{lbl}:{np.sum((active_counts>=lo)&(active_counts<=hi)):,}"
+            for lo, hi, lbl in buckets
+        )
+        print(f"  Action buckets  : {bucket_str}")
+        # Most common single action (dominant policy concentration)
+        mean_pol = pols_f32[masks].mean(axis=0)  # (454,)
+        top3_actions = np.argsort(-mean_pol)[:3]
+        print(f"  Top-3 actions by avg weight: {top3_actions.tolist()} "
+              f"weights={np.round(mean_pol[top3_actions], 4).tolist()}")
+    print(f"Saving replay diagnostic to {diag_path} ...")
+    np.savez_compressed(
+        diag_path,
+        rewards=rew,
+        masks=masks,
+        card_distributions=cdist,
+        episode_lengths=clens,
+        players=plrs,
+        policies=pols,
+    )
+    print(f"Saved ({os.path.getsize(diag_path)/1e6:.1f} MB)")
+    print('='*60)
 
     return params, opt_state, times_per_iteration
 
+# ============================================================================
+# MAIN: Konfiguration und Training starten
+# ============================================================================
+# RULES = {
+#     'enable_teams': True, # DOG-standard is True
+#     'enable_initial_free_pin': True, # DOG-standard is False
+#     'enable_circular_board': False, # DOG-standard is True
+#     'enable_friendly_fire': True, # DOG-standard is True
+#     'enable_start_blocking': True, # DOG-standard is True
+#     'enable_jump_in_goal_area': False, # DOG-standard is False
+#     'must_traverse_start': False, # DOG-standard is True
+#     'disable_swapping': False, # DOG-standard is False
+#     'disable_hot_seven': False, # DOG-standard is False
+#     'disable_joker': False, # DOG-standard is False
+# }
 RULES = {
-    'enable_teams': True,
-    'enable_initial_free_pin': False,
-    'enable_circular_board': True,
-    'enable_friendly_fire': True,
-    'enable_start_blocking': True,
-    'enable_jump_in_goal_area': False,
-    'must_traverse_start': True,
-    'disable_swapping': False,
-    'disable_hot_seven': False,
-    'disable_joker': False,
+    'enable_teams': True, # DOG-standard is True
+    'enable_initial_free_pin': False, # DOG-standard is False
+    'enable_circular_board': False, # DOG-standard is True
+    'enable_friendly_fire': True, # DOG-standard is True
+    'enable_start_blocking': True, # DOG-standard is True
+    'enable_jump_in_goal_area': False, # DOG-standard is False
+    'must_traverse_start': True, # DOG-standard is True
+    'disable_swapping': False, # DOG-standard is False
+    'disable_hot_seven': False, # DOG-standard is False
+    'disable_joker': False, # DOG-standard is False
 }
 TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.6]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 4.0  
@@ -361,23 +501,30 @@ DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 CHANCE_SCALING = 1.0
 config = {
-    "seed": 0,
-    "learning_rate": 0.005,
-    "architecture": "DOG model.",
-    "num_games_per_iteration": 1500,
-    "iterations": 100,
-    "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
-    "Buffer_Capacity": 20000,
-    "Buffer_batch_Size": 128,
+    "seed": 18,
+    "learning_rate": 0.001,
+    "architecture": "DOG model. Non-circular board.",
+    "num_games_per_iteration": 20,
+    # game_gen_batch_size: number of parallel envs per play_n_games_v3 call.
+    # The mctx stochastic tree is (batch × sims × 582) — DOG has action_dim=454 +
+    # chance_dim=128 = 582, vs MADN's 28. Running 500 envs at once allocates a
+    # ~6 GB tree. Splitting into 5×100 keeps the live tree at ~1.2 GB and
+    # avoids HBM bandwidth saturation that causes 2-3x slowdown after training.
+    # Trade-off: 5 separate JIT calls (each already compiled) vs 1. The between-
+    # batch overhead is the numpy merge (~0.5s total), negligible vs game gen.
+    "iterations": 2,
+    "optimizer": "100 simulations training with small batch size and real DOG ruleset",
+    "Buffer_Capacity": 1500,
+    "Buffer_batch_Size": 64,
     "unroll_steps": 10,
     "td_steps": 50, 
-    "max_episode_length": 550, # lower, since 700 is really rare and causes very long episodes which are hard to learn from. 550 is still above the mean episode length of random games
-    "MCTS_simulations": 100,
-    "MCTS_max_depth": 50,
+    "max_episode_length": 1500,
+    "MCTS_simulations": 50,
+    "MCTS_max_depth": 40,
     "Bootstrap_Value_Target": False,
     "Bootstrap_Switch_Iteration": 101, # Nach X Iterationen wird auf bootstrap value targets umgestellt
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-    "train_steps_per_iteration": 2500,
+    "train_steps_per_iteration": 500,
     "rules": RULES,
     "Loss scaling": {
         "value": VALUE_SCALING, 
@@ -387,20 +534,17 @@ config = {
         "chance": CHANCE_SCALING
     }
 }
-# prep weights and biases
-dog_wandb_session = wandb.init(
-    entity="marco-wojtek-tu-dortmund",
-    project="dog-muzero",
-    config=config,
-)
+
+# # prep weights and biases
+# dog_wandb_session = wandb.init(entity="marco-wojtek-tu-dortmund",project="dog-muzero",config=config,)
 
 # --- Setup Optimizer ---
 learning_rate_schedule = optax.piecewise_constant_schedule(
-    init_value=config["learning_rate"],  # 0.005
+    init_value=config["learning_rate"],  # 0.001
     boundaries_and_scales={
-        30 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
-        60 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-        85 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+        10 * config["train_steps_per_iteration"]: 0.2,    # It 15:  0.001 → 0.0002
+        25 * config["train_steps_per_iteration"]: 0.2,   # It 35: 0.0002 → 0.00004
+        40 * config["train_steps_per_iteration"]: 0.5,   # It 40: 0.00004 → 0.00002
     }
 )
 

@@ -6,7 +6,6 @@ import sys, os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from DOG.dog import *
-jax.config.update("jax_enable_x64", True)
 JOKER_IDX      = 0
 SWAP_IDX       = 1
 NEG4_IDX       = 4   # 4-card: uniquely enables the -4 backward move into the goal area
@@ -48,38 +47,38 @@ def presence_prob_array(env:DOG):
 
     # Precompute C(r, N) / C(T, N) for r = 0 … T
     binom_T_N = comb(T, N)
-    binom_vals = jnp.array(
+    binom_vals = np.array(
         [comb(r, N) / binom_T_N if r >= N else 0.0 for r in range(T + 1)],
-        dtype=jnp.float64,
+        dtype=np.float64,
     )
 
-    deck_arr = jnp.array(deck_counts, dtype=jnp.int32)
-    m_idx = jnp.arange(n_masks, dtype=jnp.int32)  # shape (2^k,)
+    deck_arr = np.array(deck_counts, dtype=np.int32)
+    m_idx = np.arange(n_masks, dtype=np.int32)  # shape (2^k,)
 
     # bits[m, t] = (m >> t) & 1  →  shape (2^k, k)
-    bits = (m_idx[:, None] >> jnp.arange(k, dtype=jnp.int32)[None, :]) & 1
+    bits = (m_idx[:, None] >> np.arange(k, dtype=np.int32)[None, :]) & 1
 
     # removed[m] = total cards belonging to the types in subset m
-    removed = (bits @ deck_arr).astype(jnp.int32)
+    removed = (bits @ deck_arr).astype(np.int32)
 
     # Q[m] = C(removed[m], N) / C(T, N)  =  P(all N draws come from types in m)
     Q = binom_vals[removed]
 
     # sign[m] = (-1)^|m|  where |m| is the popcount of m
     popcount = bits.sum(axis=1)
-    sign = jnp.where(popcount % 2 == 0, 1.0, -1.0).astype(jnp.float64)
+    sign = np.where(popcount % 2 == 0, 1.0, -1.0).astype(np.float64)
 
     # SOS DP (Möbius zeta transform):  F[B] = Σ_{A ⊆ B}  sign[A] · Q[A]
     F = sign * Q
     for i in range(k):
-        mask_bit = jnp.int32(1 << i)
+        mask_bit = np.int32(1 << i)
         m_prev = m_idx & ~mask_bit        # index of m with bit i cleared
         has_bit = (m_idx & mask_bit) != 0
-        F = jnp.where(has_bit, F + F[m_prev], F)
+        F = np.where(has_bit, F + F[m_prev], F)
 
     MAX_CARD_TYPES = 14
     # Möbius inversion:  P[B] = sign[B] · F[B]
-    P_local = np.asarray(sign * F)  # shape (2^k,)
+    P_local = sign * F  # shape (2^k,)
 
     # Embed into fixed-size output of length 2^13 = 8192.
     # Bits k..12 are unused (those card types don't exist), so their

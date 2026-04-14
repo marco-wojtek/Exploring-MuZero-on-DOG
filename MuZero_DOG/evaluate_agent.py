@@ -255,7 +255,7 @@ def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
 def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
     # use random agents if params are None
     env = env_reset_batched(0, 0)  # Dummy-Reset, um die Form der Beobachtungen zu erhalten
-    enc = encode_board(env)  # z.B. (8, 56)
+    enc = encode_board(env)  # 
     agents = []
     for param in [params1, params2, params3, params4]:
         if param is None:
@@ -270,6 +270,13 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
         else:               
             param['type'] = 0
         agents.append(param)
+
+    for i, param in enumerate(agents):
+        if isinstance(param, dict):
+            print(f"Agent {i} dynamics param keys:", param['dynamics']['params'].keys())
+        else:
+            print(f"Agent {i} is not a param dict, but:", param)
+
 
     winners = jnp.array([[0, 0, 0, 0],
                [0, 0, 0, 0],
@@ -532,7 +539,7 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
 RULES = {
     'enable_teams': True,
     'enable_initial_free_pin': False,
-    'enable_circular_board': True,
+    'enable_circular_board': False,
     'enable_friendly_fire': True,
     'enable_start_blocking': True,
     'enable_jump_in_goal_area': False,
@@ -543,22 +550,24 @@ RULES = {
 }
 
 start_time = time()
-NUM_SIMULATIONS = 100
-MAX_DEPTH = 50
+NUM_SIMULATIONS = 70
+MAX_DEPTH = 40
 TEMPERATURE = 0.0
 # # play_n_randomly(batch_size=1000)  
-params1 = None
-params2 = None
-params3 = None
-params4 = None
-TEMPERATURE = 0.20
 
+FILENAME = 'MuZero_DOG/models/params/muzero_dog_params_lr0.001_g200_it50_seed18.pkl'
 
 params1 = 'random_agent'
-params2 = 'random_agent'
+params2 = load_params_from_file(FILENAME)
 params3 = 'random_agent'
-params4 = 'random_agent'
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=1)
+params4 = load_params_from_file(FILENAME)
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=50)
+
+params1 = 'random_agent'
+params2 = None
+params3 = 'random_agent'
+params4 = None
+evaluate_agent_parallel(params1, params2, params3, params4, batch_size=50)
 
 end_time = time()
 print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
