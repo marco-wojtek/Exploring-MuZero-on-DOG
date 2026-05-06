@@ -20,16 +20,16 @@ RULES = {
     'enable_start_on_1': True,
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False,
-    'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
+    'enable_dice_rethrow': True  
 }
 def env_reset_batched(seed):
     return env_reset(
-        seed,  # <- Das wird an '_' übergeben
+        seed, 
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=10,
         starting_player=0,
-        seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
+        seed=seed, 
         enable_teams=RULES['enable_teams'],
         enable_initial_free_pin=RULES['enable_initial_free_pin'],
         enable_circular_board=RULES['enable_circular_board'],
@@ -39,13 +39,12 @@ def env_reset_batched(seed):
         enable_start_on_1=RULES['enable_start_on_1'],
         enable_bonus_turn_on_6=RULES['enable_bonus_turn_on_6'],
         must_traverse_start=RULES['must_traverse_start'],
-        enable_dice_rethrow=RULES['enable_dice_rethrow']  # Wichtig für unterschiedliche Würfelverteilungen!
+        enable_dice_rethrow=RULES['enable_dice_rethrow']  
     )
 
-# 2. Vektorisierte Funktionen vorbereiten
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_action)
-batch_encode = jax.vmap(encode_board)  # Verwende board_to_matrix für classic MADN
+batch_encode = jax.vmap(encode_board) 
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_throw_die = jax.vmap(throw_die)
 
@@ -53,14 +52,6 @@ batch_throw_die = jax.vmap(throw_die)
 def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps, temp):
     """
     Spielt einen Batch von Spielen parallel mit Stochastic MuZero.
-    
-    WICHTIG: Der Ablauf ist:
-    1. Würfel werfen (automatisch in Environment)
-    2. State speichern (nach dem Würfeln)
-    3. MCTS ausführen und Aktion wählen
-    4. Aktion ausführen
-    5. Nächster Spieler (wiederholen)
-    
     Args:
         envs: Batch von Environments
         num_envs: Anzahl der parallelen Environments
@@ -82,15 +73,12 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
         rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
         step_keys = jnp.array(step_keys)
 
-        # ✅ PARALLEL: vmap über alle aktiven Envs
         def step_single_env(env, buffer, done, key):
             def do_active_step(env, buffer):
-                # 1. WÜRFELN (automatisch in der Environment)
                 key1, key2 = jax.random.split(key)
                 env_after_dice = throw_die(env)
                 dice_value = env_after_dice.die  # Speichern für Replay
                 
-                # 2. State nach dem Würfeln speichern (DAS ist der Decision Node!)
                 obs = encode_board(env_after_dice)[None, ...]
                 valid_mask = valid_action(env_after_dice).flatten()
                 invalid_mask = (~valid_mask)[None, :]
@@ -103,7 +91,6 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                     lambda: jnp.int8(-1)
                 )
                 
-                # 3. Unterscheidung: MCTS oder no_step
                 def do_mcts(env):
                     # Stochastic MuZero MCTS
                     policy_output, root_value = run_stochastic_muzero_mcts(
@@ -157,19 +144,19 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 idx = buffer['idx']
                 current_player = env_after_dice.current_player
                 team = jax.lax.cond(env_after_dice.rules['enable_teams'], lambda: jnp.int8(current_player%2), lambda: jnp.int8(-1))
-                dice_dist = dice_probabilities(next_env)  # Würfelverteilung speichern
+                dice_dist = dice_probabilities(next_env)  
                 new_buffer = {
                     'obs': buffer['obs'].at[idx].set(step_obs),
                     'act': buffer['act'].at[idx].set(action),
-                    'rew': buffer['rew'].at[idx].set(reward_target),  # NEU: Reward Target speichern
+                    'rew': buffer['rew'].at[idx].set(reward_target),  
                     'val': buffer['val'].at[idx].set(value),
                     'pol': buffer['pol'].at[idx].set(policy),
                     'mask': buffer['mask'].at[idx].set(mask),
-                    'dice': buffer['dice'].at[idx].set(dice),  # Würfelergebnis speichern
-                    'dice_dist': buffer['dice_dist'].at[idx].set(dice_dist),  # Würfelverteilung speichern
+                    'dice': buffer['dice'].at[idx].set(dice),  
+                    'dice_dist': buffer['dice_dist'].at[idx].set(dice_dist),  
                     'player': buffer['player'].at[idx].set(current_player),
                     'team': buffer['team'].at[idx].set(team),
-                    'discount': buffer['discount'].at[idx].set(discount_target),  # NEU: Discount Target speichern
+                    'discount': buffer['discount'].at[idx].set(discount_target),  
                     'idx': idx + 1
                 }
                 return next_env, new_buffer, next_done
@@ -180,7 +167,6 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
             
             return jax.lax.cond(~done, do_active_step, do_skip_step, env, buffer)
         
-        # ✅ HIER: vmap über alle Envs gleichzeitig!
         new_envs, new_buffers, new_dones = jax.vmap(step_single_env)(
             envs_state, buffers, dones, step_keys
         )
@@ -193,20 +179,19 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
         'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
         'rew': jnp.zeros((num_envs, max_steps)),
         'val': jnp.zeros((num_envs, max_steps)),
-        'pol': jnp.zeros((num_envs, max_steps, 4)),  # NUR 4 Actions für Pins!
+        'pol': jnp.zeros((num_envs, max_steps, 4)),
         'mask': jnp.zeros((num_envs, max_steps)),
         'dice': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),  
-        'dice_dist': jnp.zeros((num_envs, max_steps, 6)),  # NEU: Würfelverteilung (6 mögliche Ergebnisse)
+        'dice_dist': jnp.zeros((num_envs, max_steps, 6)),  
         'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int32),
         'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int32),
-        'discount': jnp.zeros((num_envs, max_steps)),  # NEU: Discount Target speichern
+        'discount': jnp.zeros((num_envs, max_steps)),  
         'idx': jnp.zeros(num_envs, dtype=jnp.int32)    
     }
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
     
     def cond_fn(carry):
         _, _, dones, step_count, _ = carry
-        # Stoppe wenn ALLE done ODER max_steps erreicht
         return jnp.any(~dones) & (step_count < max_steps)
     
     final_envs, final_buffers, final_dones, _, _ = jax.lax.while_loop(
@@ -272,8 +257,6 @@ def play_n_games_v3_batched(params, rng_key, input_shape, num_envs=2048, batch_s
         )
         all_buffers_list.append(batch_buffers)
     
-    # Kombiniere alle Batches
-    # Stack entlang der Env-Dimension (axis=0)
     combined_buffers = jax.tree_util.tree_map(
         lambda *x: jnp.concatenate(x, axis=0), 
         *all_buffers_list

@@ -50,7 +50,7 @@ def loss_fn(params, batch):
                 params['dynamics'], state, action
             )
             
-            # ✅ REWARD: Balanced per-class loss
+            # REWARD: Balanced per-class loss
             target_reward_class = target_reward.astype(jnp.int32)
             reward_ce = optax.softmax_cross_entropy_with_integer_labels(
                 pred_reward_logits, target_reward_class
@@ -67,9 +67,7 @@ def loss_fn(params, batch):
             # 50/50 Gewichtung: Neutral lernt "default 0", Non-Neutral lernt Win/Lose
             l_reward = 0.1 * loss_neutral + 1.0 * loss_non_neutral
             
-            # ✅ DISCOUNT: Balanced per-class loss (analog zu Reward)
-            # Klasse 0=-1 (Gegner), Klasse 1=0 (Terminal), Klasse 2=+1 (eigener Zug)
-            # Terminal (Klasse 1) ist extrem selten → separate Normierung
+            # DISCOUNT: Balanced per-class loss (analog zu Reward)
             target_discount_class = target_discount.astype(jnp.int32)
             discount_ce = optax.softmax_cross_entropy_with_integer_labels(
                 pred_discount_logits, target_discount_class
@@ -116,7 +114,6 @@ def loss_fn(params, batch):
         jnp.ones((batch['discount_targets'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = discount=0 (neutral)
     ], axis=1)
 
-    # ✅ NEU: Reward Targets padden
     reward_targets_padded = jnp.concatenate([
         batch['rewards'],
         jnp.ones((batch['rewards'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = reward=0 (neutral)
@@ -244,7 +241,7 @@ def test_training(config, params=None, opt_state=None):
     for it in range(iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
-        # ✅ Automatically switch to bootstrap after Phase 1
+
         if (it) == switch_to_bootstrap_iteration:
             print("=" * 60)
             print("SWITCHING TO BOOTSTRAP VALUE TARGETS")

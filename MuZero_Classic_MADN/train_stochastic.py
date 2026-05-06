@@ -56,7 +56,7 @@ def loss_fn_stochastic(params, batch):
         (value_loss, policy_loss, chance_loss): Tuple of scalars
     """
     
-    # 1. Root Encoding
+    # Root Encoding
     root_obs = batch['observations']  # (B, Features) - nur der erste Timestep
     latent_state = repr_net.apply(params['representation'], root_obs)
     
@@ -84,7 +84,6 @@ def loss_fn_stochastic(params, batch):
         is_non_uniform = jnp.sum((true_dice_probs - 1.0/6.0) ** 2, axis=-1) > 1e-6  # (B,)
 
         # ===== DYNAMICS LOSS (State Transition) =====
-        # Schritt 1: Action Dynamics (Spieler wählt Aktion)
         def do_dynamics(state, action, dice_outcome):
             afterstate, pred_reward_logits, pred_chance_logits, pred_discount_logits = dynamics_net.apply(
                 params['dynamics'], state, action, method=dynamics_net.action_dynamics
@@ -120,11 +119,11 @@ def loss_fn_stochastic(params, batch):
         
         # Gewichte die einzelnen Loss-Komponenten
         step_loss = (1.0 / config["unroll_steps"]) * (
-            VALUE_SCALING * l_value +      # Value Loss dominiert (wie im Paper)
-            POLICY_SCALING * l_policy +           # Policy Loss
+            VALUE_SCALING * l_value +      
+            POLICY_SCALING * l_policy +           
             CHANCE_SCALING * l_chance +
-            DISCOUNT_SCALING * l_discount +  # Discount Loss
-            REWARD_SCALING * l_reward      # Reward Loss
+            DISCOUNT_SCALING * l_discount +  
+            REWARD_SCALING * l_reward     
         )       
         return (next_latent, total_loss + step_loss), (l_value, l_policy, l_chance, l_discount, l_reward)
     
@@ -148,7 +147,6 @@ def loss_fn_stochastic(params, batch):
         jnp.ones((batch['discount_targets'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = discount=0 (neutral)
     ], axis=1)
 
-    # ✅ NEU: Reward Targets padden
     reward_targets_padded = jnp.concatenate([
         batch['rewards'],
         jnp.ones((batch['rewards'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = reward=0 (neutral)
@@ -193,9 +191,9 @@ def train_step(params, opt_state, batch):
         'total_loss': loss, 
         'v_loss': v_loss, 
         'p_loss': p_loss, 
-        'c_loss': c_loss,  # NEU: Chance Loss
-        'd_loss': d_loss,  # NEU: Discount Loss
-        'r_loss': r_loss   # NEU: Reward Loss
+        'c_loss': c_loss,  
+        'd_loss': d_loss,  
+        'r_loss': r_loss 
     }
 
 def test_training(config, params=None, opt_state=None):
@@ -247,7 +245,6 @@ def test_training(config, params=None, opt_state=None):
         opt_state = optimizer.init(params)
 
     # Replay Buffer Setup
-    # WICHTIG: Für Stochastic MuZero brauchen wir dice_outcomes!
     replay = VectorizedReplayBufferStochastic(
         capacity=buffer_capacity, 
         batch_size=config["Buffer_batch_Size"], 
@@ -285,7 +282,7 @@ def test_training(config, params=None, opt_state=None):
     for it in range(iterations):
         start_time = time()
         print(f"\nIteration {it+1}/{iterations}")
-        # ✅ Automatically switch to bootstrap after Phase 1
+
         if ((it) == switch_to_bootstrap_iteration) and not config["Bootstrap_Value_Target"]:
             print("=" * 60)
             print("SWITCHING TO BOOTSTRAP VALUE TARGETS")
@@ -368,12 +365,12 @@ RULES = {
     'enable_start_on_1': True,
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False,
-    'enable_dice_rethrow': True  # NEU: Für unterschiedliche Würfelverteilungen!
+    'enable_dice_rethrow': True 
 }
 TEMPERATURE_SCHEDULE = [2.0, 1.5, 1, 0.8, 0.7]#[1.0, 0.9, 0.8, 0.7]
 VALUE_SCALING = 4.0  
 POLICY_SCALING = 2.0
-CHANCE_SCALING = 0.5 # NEU: Gewicht für Chance Loss
+CHANCE_SCALING = 0.5 
 DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 if __name__ == "__main__":
@@ -431,7 +428,6 @@ if __name__ == "__main__":
     params = None
     opt_state = None
     
-    # Optional: Load pretrained params
     # params = load_params_from_file('muzero_stochastic_madn_params_00001.pkl')
     # with open('muzero_stochastic_madn_opt_state_00001.pkl', 'rb') as f:
     #     opt_state = pickle.load(f)
