@@ -34,13 +34,7 @@ def balanced_loss(ce, is_rare, mask, n_valid, w_rare=1.0, w_common=0.1):
 def loss_fn_stochastic(params, batch):
     """
     Loss Function für Stochastic MuZero.
-    
-    WICHTIGE ÄNDERUNGEN gegenüber deterministischem MuZero:
-    1. Dynamics Network hat 2 Teile: action_dynamics und chance_dynamics
-    2. Zusätzlicher Loss für chance_logits (Würfelverteilung vorhersagen)
-    3. Unroll-Schritt ist: action → afterstate → chance → next_state
-    4. KEIN Reward Loss (Brettspiele haben nur End-Rewards)
-    
+
     Args:
         params: Dictionary mit 'representation', 'dynamics', 'prediction'
         batch: Dictionary mit:
@@ -85,7 +79,7 @@ def loss_fn_stochastic(params, batch):
                 params['dynamics'], state, action, method=dynamics_net.action_dynamics
             )
 
-            # ✅ REWARD: Balanced per-class loss
+            # REWARD: Balanced per-class loss
             target_reward_class = target_reward.astype(jnp.int32)
             reward_ce = optax.softmax_cross_entropy_with_integer_labels(
                 pred_reward_logits, target_reward_class
@@ -101,7 +95,7 @@ def loss_fn_stochastic(params, batch):
             # Erkennung: L2-Abstand von uniform > threshold → non-uniform
             is_non_uniform = jnp.sum((true_dice_probs - 1.0/6.0) ** 2, axis=-1) > 1e-6  # (B,)
 
-            l_reward   = balanced_loss(reward_ce,   target_reward_class != 1,   mask, n_valid) # != 1 → seltene Klassen (reward≠0)
+            l_reward   = balanced_loss(reward_ce,   target_reward_class != 1,   mask, n_valid) # != 1 → seltene Klassen (reward!=0)
             l_discount = balanced_loss(discount_ce, target_discount_class == 0, mask, n_valid) # == 0 → seltene Klasse (terminal)
             l_chance   = balanced_loss(chance_ce,   is_non_uniform,             mask, n_valid)
             
@@ -112,8 +106,6 @@ def loss_fn_stochastic(params, batch):
             )
 
             # DEPTH DELTA: Balanced Binary BCE Loss
-            # Target: 0=gleicher Spieler (6er Bonus, selten ~1/6), 1=Spielerwechsel (häufig ~5/6)
-            # depth_delta=0 (Bonus-Zug) ist die seltene Klasse → balanced_loss nötig
             target_depth_delta_f = target_depth_delta.astype(jnp.float32)
             dd_ce = optax.sigmoid_binary_cross_entropy(
                 pred_depth_delta_logit.squeeze(-1), target_depth_delta_f
@@ -168,7 +160,6 @@ def loss_fn_stochastic(params, batch):
         jnp.ones((batch['discount_targets'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = discount=0 (neutral)
     ], axis=1)
 
-    # ✅ NEU: Reward Targets padden
     reward_targets_padded = jnp.concatenate([
         batch['rewards'],
         jnp.ones((batch['rewards'].shape[0], 1), dtype=jnp.int32) # Klasse 1 = reward=0 (neutral)

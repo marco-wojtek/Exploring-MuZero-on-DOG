@@ -17,7 +17,6 @@ class VectorizedReplayBuffer:
         self.action_dim = action_dim
         self.max_episode_length = max_episode_length
         
-        # ✅ Alle Daten als zusammenhängende NumPy Arrays
         self.observations = np.zeros((capacity, max_episode_length, *obs_shape), dtype=np.float32)
         self.actions = np.zeros((capacity, max_episode_length), dtype=np.int32)
         self.rewards = np.zeros((capacity, max_episode_length), dtype=np.int32)  # Klassen-Index statt Float
@@ -39,7 +38,6 @@ class VectorizedReplayBuffer:
         Einmaliger GPU->CPU Sync via device_get, dann schnelles NumPy-Slicing.
         Vermeidet große temporäre Allokationen durch :length-Slicing pro Spiel.
         """
-        # Einmaliger Sync-Punkt: alle Arrays gleichzeitig und blockierend von der GPU holen
         host = jax.device_get(all_buffers)
         episode_lengths = host['idx']
 
@@ -78,15 +76,12 @@ class VectorizedReplayBuffer:
         n_normal = self.batch_size - n_terminal
         
         # --- Normal Sampling: kann an JEDER Position starten ---
-        # Auch nahe am Ende! Dann gibt es partielle Windows (mask=0 für padding)
-        # aber Terminal-Steps können natürlich im Dynamics-Bereich landen
         ep_indices_normal = np.random.randint(0, self.size, size=n_normal)
         ep_lengths_normal = self.episode_lengths[ep_indices_normal]
         max_starts_normal = ep_lengths_normal - 1  # kann überall starten
         t_starts_normal = np.random.randint(0, max_starts_normal + 1)
         
         # --- Terminal Sampling: Terminal-Step an ZUFÄLLIGER Position k im Fenster ---
-        # Nicht immer k=9! Bei k=0 kommt latent_state direkt aus RepNet → beste Qualität
         ep_indices_terminal = np.random.randint(0, self.size, size=n_terminal)
         ep_lengths_terminal = self.episode_lengths[ep_indices_terminal]
         # terminal_k = zufällige Position (0..K-2) wo der letzte Step der Episode landen soll
@@ -102,24 +97,23 @@ class VectorizedReplayBuffer:
         ep_lengths = self.episode_lengths[ep_indices]
         # Shape: (batch_size,)
         
-        # ========================================
-        # SCHRITT 3: Extrahiere Root Observations
-        # ========================================
+        
+        # Extrahiere Root Observations
         root_obs = self.observations[ep_indices, t_starts]
         # Shape: (batch_size, 14, 56)
         
-        # ========================================
-        # SCHRITT 4: Finale Episode-Daten (für Bootstrap)
-        # ========================================
+        
+        # Finale Episode-Daten (für Bootstrap)
+        
         final_indices = ep_lengths - 1  # Letzter Timestep jeder Episode
         
         final_rewards = self.rewards[ep_indices, final_indices]  # (batch_size,)
         final_players = self.players[ep_indices, final_indices]  # (batch_size,)
         final_teams = self.teams[ep_indices, final_indices]      # (batch_size,)
         
-        # ========================================
-        # SCHRITT 5: Extrahiere Sequenzen (K Steps)
-        # ========================================
+        
+        # Extrahiere Sequenzen (K Steps)
+        
         k_offsets = np.arange(K)  # [0, 1, 2, 3, 4, 5] wenn K=6
         seq_indices = t_starts[:, None] + k_offsets[None, :]
         # Shape: (batch_size, K)
@@ -129,9 +123,9 @@ class VectorizedReplayBuffer:
         seq_indices_clipped = np.minimum(seq_indices, ep_lengths[:, None] - 1)
         # Shape: (batch_size, K)
         
-        # ========================================
-        # SCHRITT 6: Extrahiere alle Daten mit Advanced Indexing
-        # ========================================
+        
+        # Extrahiere alle Daten mit Advanced Indexing
+        
         ep_indices_broadcast = ep_indices[:, None]  # (batch_size, 1)
         ep_indices_expanded = np.broadcast_to(ep_indices_broadcast, (self.batch_size, K))
         # Shape: (batch_size, K)
@@ -158,20 +152,18 @@ class VectorizedReplayBuffer:
         
         discount_targets = self.discounts[ep_for_actions, action_indices]
         depth_delta_targets = self.depth_deltas[ep_for_actions, action_indices]
-        # ========================================
-        # SCHRITT 7: Berechne Target Values (Bootstrap) - KORRIGIERT!
-        # ========================================
         
-        # 7.1: Extrahiere Players/Teams für JEDEN Timestep der Sequenz
+        # Berechne Target Values (Bootstrap)
+        # Extrahiere Players/Teams für JEDEN Timestep der Sequenz
         seq_players = self.players[ep_indices_expanded, seq_indices_clipped]  # (batch_size, K)
         seq_teams = self.teams[ep_indices_expanded, seq_indices_clipped]      # (batch_size, K)
         
-        # 7.2: Expand finale Werte für Broadcasting
+        # Expand finale Werte für Broadcasting
         final_rewards_expanded = final_rewards[:, None]  # (batch_size, 1)
         final_players_expanded = final_players[:, None]  # (batch_size, 1)
         final_teams_expanded = final_teams[:, None]      # (batch_size, 1)
         
-        # 7.3: Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
+        # Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
         game_won_seq = final_rewards_expanded == 2                   # (batch_size, K)
         is_single_player_seq = seq_teams == -1                       # (batch_size, K)
         player_won_seq = (final_players_expanded == seq_players)     # (batch_size, K)
@@ -191,29 +183,29 @@ class VectorizedReplayBuffer:
         # Shape: (batch_size, K) ← WICHTIG: Nicht mehr (batch_size,)!
 
 
-        # 7.4: Steps bis zum Ende der Episode
+        # Steps bis zum Ende der Episode
         # Bootstrap wenn: (1) >= K steps verfügbar ODER (2) Spiel nicht wirklich beendet (max_steps Abbruch)
         # z_seq == 0 bedeutet: final_reward <= 0, d.h. kein Gewinner → max_steps Abbruch oder laufend
         steps_until_end = ep_lengths[:, None] - 1 - seq_indices  # (batch_size, K)
         
-        # 7.5: Bootstrap-Condition: steps_until_end >= TD
+        # Bootstrap-Condition: steps_until_end >= TD
         bootstrap_from_value = (steps_until_end >= TD)
         
-        # 7.6: Bootstrap-Indizes (idx + TD, aber clipped)
+        # Bootstrap-Indizes (idx + TD, aber clipped)
         bootstrap_indices = np.minimum(seq_indices + TD, ep_lengths[:, None] - 1)
         bootstrap_values_raw = self.root_values[ep_indices_expanded, bootstrap_indices]
         # Shape: (batch_size, K)
         
-        # ✅ NEU: 7.6b - Perspektiven-Flip für Bootstrap Values
+        # Perspektiven-Flip für Bootstrap Values
         # Extrahiere Spieler bei Bootstrap-Position
         bootstrap_players = self.players[ep_indices_expanded, bootstrap_indices]  # (batch_size, K)
-        bootstrap_teams = self.teams[ep_indices_expanded, bootstrap_indices] 
+        bootstrap_teams = self.teams[ep_indices_expanded, bootstrap_indices]   # (batch_size, K)
 
         
         # Check: Gleicher Spieler ODER gleiches Team (wenn Teams aktiv)
         is_team_mode = seq_teams != -1  # (batch_size, K)
         same_player_bootstrap = (seq_players == bootstrap_players)  # (batch_size, K)
-        same_team_bootstrap = (seq_teams == bootstrap_teams)   
+        same_team_bootstrap = (seq_teams == bootstrap_teams)   # (batch_size, K)
 
         same_perspective = np.where(
             is_team_mode,
@@ -226,7 +218,8 @@ class VectorizedReplayBuffer:
             bootstrap_values_raw,   # Gleiche Perspektive: Value behalten
             -bootstrap_values_raw   # Andere Perspektive: Value negieren
         )
-        # 7.7: Berechne Target Values
+
+        # Berechne Target Values
 
         # Temporaler Discount anwenden
         steps_to_end = np.maximum(steps_until_end, 0)
@@ -243,9 +236,9 @@ class VectorizedReplayBuffer:
         target_values = np.clip(target_values, -1.0, 1.0)
         # Shape: (batch_size, K)
 
-        # ========================================
+        
         # 4-VALUE TARGETS für Multi-Value Head
-        # ========================================
+        
         # z_seq_4[i, k, j] = Terminal-Outcome für relativen Spieler j bei Schritt k
         # j=0: aktueller Spieler, j=1: nächster, j=2: übernächster, j=3: +3
         z_seq_4 = np.zeros((self.batch_size, K, 4), dtype=np.float32)
@@ -281,22 +274,19 @@ class VectorizedReplayBuffer:
         target_values_4 = np.clip(target_values_4, -1.0, 1.0)
         # Shape: (batch_size, K, 4)
 
-        # ========================================
-        # SCHRITT 8: Padding für ungültige Positionen
-        # ========================================
+        
+        # Padding für ungültige Positionen
+        
         actions = np.where(valid_mask[:, :-1], actions, 0)
-        rewards_seq = np.where(valid_mask[:, :-1], rewards_seq, 1)  # Klasse 1 = reward=0 (neutral)
+        rewards_seq = np.where(valid_mask[:, :-1], rewards_seq, 1)  
         policies = np.where(valid_mask[:, :, None], policies, 0.0)
         values = np.where(valid_mask, values, 0.0)
         masks = np.where(valid_mask, masks, 0.0)
         target_values = np.where(valid_mask, target_values, 0.0)
         target_values_4 = np.where(valid_mask[:, :, None], target_values_4, 0.0)
-        discount_targets = np.where(valid_mask[:, :-1], discount_targets, 1)  # Klasse 1 = Non-Terminal (masked, irrelevant)
-        depth_delta_targets = np.where(valid_mask[:, :-1], depth_delta_targets, 1)  # Default Spielerwechsel (irrelevant wenn masked)
+        discount_targets = np.where(valid_mask[:, :-1], discount_targets, 1)  
+        depth_delta_targets = np.where(valid_mask[:, :-1], depth_delta_targets, 1)  
         
-        # ========================================
-        # SCHRITT 9: Return Batch
-        # ========================================
         return {
             'observations': jnp.array(root_obs),
             'actions': jnp.array(actions),

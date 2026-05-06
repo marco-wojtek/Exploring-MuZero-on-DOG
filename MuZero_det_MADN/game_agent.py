@@ -23,12 +23,12 @@ RULES = {
 
 def env_reset_batched(seed):
     return env_reset(
-        0,  # <- Das wird an '_' übergeben
+        0,  
         num_players=4,
         layout=jnp.array([True, True, True, True], dtype=jnp.bool_),
         distance=10,
         starting_player=0,
-        seed=seed,  # <- Das ist das eigentliche Seed-Keyword-Argument
+        seed=seed, 
         enable_teams=RULES['enable_teams'],
         enable_initial_free_pin=RULES['enable_initial_free_pin'],
         enable_circular_board=RULES['enable_circular_board'],
@@ -40,7 +40,6 @@ def env_reset_batched(seed):
         must_traverse_start=RULES['must_traverse_start']
     )
 
-# 2. Vektorisierte Funktionen vorbereiten
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_action)
 batch_encode = jax.vmap(encode_board)
@@ -60,7 +59,6 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
         rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
         step_keys = jnp.array(step_keys)
 
-        # ✅ PARALLEL: vmap über alle aktiven Envs
         def step_single_env(env, buffer, done, key):
             def do_active_step(env, buffer):
                 obs = encode_board(env)[None, ...]
@@ -78,7 +76,6 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                     action = policy_output.action[0]
                     next_env, reward, next_done = env_step(env, map_action(action))
 
-                    # ✅ NEU: Spieler NACH dem Zug
                     next_player = next_env.current_player
                     next_team = jax.lax.cond(
                         env.rules['enable_teams'],
@@ -146,9 +143,8 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
             
             return jax.lax.cond(~done, do_active_step, do_skip_step, env, buffer)
         
-        # ✅ HIER: vmap über alle Envs gleichzeitig!
         new_envs, new_buffers, new_dones = jax.vmap(step_single_env)(
-            envs_state, buffers, dones, step_keys  # keys muss pro Step neu sein!
+            envs_state, buffers, dones, step_keys
         )
         
         return (new_envs, new_buffers, new_dones, step_count + 1, rng_key)
@@ -171,7 +167,6 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     
     def cond_fn(carry):
         _, _, dones, step_count, _ = carry
-        # Stoppe wenn ALLE done ODER max_steps erreicht
         return jnp.any(~dones) & (step_count < max_steps)
     
     final_envs, final_buffers, final_dones, _, _ = jax.lax.while_loop(

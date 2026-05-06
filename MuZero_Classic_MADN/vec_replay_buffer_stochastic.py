@@ -10,11 +10,6 @@ import random
 class VectorizedReplayBufferStochastic:
     """
     Replay Buffer für Stochastic MuZero mit Unterstützung für dice_outcomes.
-    
-    WICHTIGE ÄNDERUNGEN gegenüber deterministischem Buffer:
-    1. Speichert dice_outcomes (Würfelergebnisse)
-    2. Action dimension ist 4 (Pins) statt 24 (Pins × Dice)
-    3. Gibt dice_outcomes im Batch zurück
     """
     def __init__(self, capacity: int, batch_size: int, unroll_steps: int, td_steps: int,
                  obs_shape=(11, 56), action_dim=4, max_episode_length=500, bootstrap_value_target=True):
@@ -49,11 +44,6 @@ class VectorizedReplayBufferStochastic:
         num_games = all_buffers['idx'].shape[0]
         episode_lengths = np.array(all_buffers['idx'])
 
-        # Nur bis zur tatsächlichen maximalen Episodenlänge transferieren.
-        # Die while_loop allokiert immer max_steps Schritte, aber gültige Daten
-        # existieren nur bis max(episode_lengths). Das reduziert den GPU→CPU
-        # Transfer von ~3 GB auf typisch <1 GB und erklärt die gelegentlichen Spikes
-        # (wenn ein Spiel nahe max_steps läuft, explodiert die Transfergröße).
         max_len = int(np.max(episode_lengths)) if np.any(episode_lengths > 0) else 1
 
         np_obs        = np.array(all_buffers['obs'][:, :max_len])
@@ -96,9 +86,6 @@ class VectorizedReplayBufferStochastic:
     def sample_batch(self, terminal_ratio = 0.25):
         """
         Vollständig vektorisierte Sampling-Funktion für Stochastic MuZero.
-        KEIN Python-Loop über batch_size!
-        
-        NEU: Gibt auch dice_outcomes zurück für das Training des chance_dynamics.
         """
         K = self.unroll_steps + 1
         TD = self.td_steps
@@ -108,52 +95,42 @@ class VectorizedReplayBufferStochastic:
         n_terminal = int(self.batch_size * TERMINAL_RATIO)
         n_normal = self.batch_size - n_terminal
         
-        # ========================================
-        # SCHRITT 1: Sample Episode-Indizes
-        # ========================================
-        # --- Normal Sampling: kann an JEDER Position starten ---
-        # Auch nahe am Ende! Dann gibt es partielle Windows (mask=0 für padding)
-        # aber Terminal-Steps können natürlich im Dynamics-Bereich landen
+        
+        # Sample Episode-Indizes
         ep_indices_normal = np.random.randint(0, self.size, size=n_normal)
         ep_lengths_normal = self.episode_lengths[ep_indices_normal]
         max_starts_normal = ep_lengths_normal - 1  # kann überall starten
         t_starts_normal = np.random.randint(0, max_starts_normal + 1)
         
-        # --- Terminal Sampling: Terminal-Step an ZUFÄLLIGER Position k im Fenster ---
-        # Nicht immer k=9! Bei k=0 kommt latent_state direkt aus RepNet → beste Qualität
+        # Terminal Sampling: Terminal-Step an ZUFÄLLIGER Position k im Fenster 
         ep_indices_terminal = np.random.randint(0, self.size, size=n_terminal)
         ep_lengths_terminal = self.episode_lengths[ep_indices_terminal]
-        # terminal_k = zufällige Position (0..K-2) wo der letzte Step der Episode landen soll
-        # K-1 = 10 Positionen für Actions (k=0..9), davon nutzen wir k=0..K-2
+
         max_terminal_k = np.minimum(self.unroll_steps - 1, ep_lengths_terminal - 1)  # kann nicht vor Episode-Start
         terminal_k = np.array([np.random.randint(0, int(m) + 1) for m in max_terminal_k])
         # t_start so setzen dass ep_length-1 (letzter Step) bei Position terminal_k liegt
         t_starts_terminal = np.maximum(ep_lengths_terminal - 1 - terminal_k, 0)
         
-        # --- Zusammenführen ---
+        # Zusammenführen 
         ep_indices = np.concatenate([ep_indices_normal, ep_indices_terminal])
         t_starts = np.concatenate([t_starts_normal, t_starts_terminal])
         ep_lengths = self.episode_lengths[ep_indices]
-        # Shape: (batch_size,)
         
-        # ========================================
-        # SCHRITT 3: Extrahiere Root Observations
-        # ========================================
         root_obs = self.observations[ep_indices, t_starts]
         # Shape: (batch_size, 14, 56)
         
-        # ========================================
-        # SCHRITT 4: Finale Episode-Daten (für Bootstrap)
-        # ========================================
+        
+        # Finale Episode-Daten (für Bootstrap)
+        
         final_indices = ep_lengths - 1  # Letzter Timestep jeder Episode
         
         final_rewards = self.rewards[ep_indices, final_indices]  # (batch_size,)
         final_players = self.players[ep_indices, final_indices]  # (batch_size,)
         final_teams = self.teams[ep_indices, final_indices]      # (batch_size,)
         
-        # ========================================
-        # SCHRITT 5: Extrahiere Sequenzen (K Steps)
-        # ========================================
+        
+        #Extrahiere Sequenzen (K Steps)
+        
         k_offsets = np.arange(K)  # [0, 1, 2, 3, 4, 5] wenn K=6
         seq_indices = t_starts[:, None] + k_offsets[None, :]
         # Shape: (batch_size, K)
@@ -163,9 +140,9 @@ class VectorizedReplayBufferStochastic:
         seq_indices_clipped = np.minimum(seq_indices, ep_lengths[:, None] - 1)
         # Shape: (batch_size, K)
         
-        # ========================================
-        # SCHRITT 6: Extrahiere alle Daten mit Advanced Indexing
-        # ========================================
+        
+        # Extrahiere alle Daten mit Advanced Indexing
+        
         ep_indices_broadcast = ep_indices[:, None]  # (batch_size, 1)
         ep_indices_expanded = np.broadcast_to(ep_indices_broadcast, (self.batch_size, K))
         # Shape: (batch_size, K)
@@ -180,12 +157,9 @@ class VectorizedReplayBufferStochastic:
         rewards_seq = self.rewards[ep_for_actions, action_indices]
         # Shape: (batch_size, K-1)
         
-        # NEU: Extrahiere Dice Outcomes (nur für k=0..K-2)
+        # Extrahiere Dice Outcomes (nur für k=0..K-2)
         dice_seq = self.dice_outcomes[ep_for_actions, action_indices]
         # Shape: (batch_size, K-1)
-        # WICHTIG: dice_seq[i, k] ist der Würfelwert der VOR der Action actions[i, k] gewürfelt wurde
-        # Das Netzwerk muss lernen: action_dynamics(state, action) → chance_logits
-        # Dann: chance_dynamics(afterstate, dice_seq[i, k]) → next_state
         
         # Extrahiere Policies, Values, Masks (für alle K Steps)
         policies = self.child_visits[ep_indices_expanded, seq_indices_clipped]
@@ -198,24 +172,19 @@ class VectorizedReplayBufferStochastic:
         # Shape: (batch_size, K)
         
         discount_targets = self.discounts[ep_for_actions, action_indices]
-        # depth_delta_targets: KEIN Shift nötig!
-        # depth_delta_head liest von afterstate_normed, welcher die[k] enkodiert.
-        # Target: depth_deltas[k] = 0 if die[k]==6 else 1 → direkt aligned mit afterstate_k.
+
         depth_delta_targets = self.depth_deltas[ep_for_actions, action_indices]
-        # ========================================
-        # SCHRITT 7: Berechne Target Values (Bootstrap) - KORRIGIERT!
-        # ========================================
-        
-        # 7.1: Extrahiere Players/Teams für JEDEN Timestep der Sequenz
+
+        # extrahiere Players/Teams für JEDEN Timestep der Sequenz
         seq_players = self.players[ep_indices_expanded, seq_indices_clipped]  # (batch_size, K)
         seq_teams = self.teams[ep_indices_expanded, seq_indices_clipped]      # (batch_size, K)
         
-        # 7.2: Expand finale Werte für Broadcasting
+        # Expand finale Werte für Broadcasting
         final_rewards_expanded = final_rewards[:, None]  # (batch_size, 1)
         final_players_expanded = final_players[:, None]  # (batch_size, 1)
         final_teams_expanded = final_teams[:, None]      # (batch_size, 1)
         
-        # 7.3: Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
+        # Berechne z FÜR JEDEN TIMESTEP (nicht nur Root!)
         game_won_seq = final_rewards_expanded == 2                    # (batch_size, K)
         is_single_player_seq = seq_teams == -1                       # (batch_size, K)
         player_won_seq = (final_players_expanded == seq_players)     # (batch_size, K)
@@ -233,18 +202,18 @@ class VectorizedReplayBufferStochastic:
         )
         # Shape: (batch_size, K)
         
-        # 7.4: Steps bis zum Ende der Episode
+        # Steps bis zum Ende der Episode
         steps_until_end = ep_lengths[:, None] - 1 - seq_indices  # (batch_size, K)
         
-        # 7.5: Bootstrap-Condition: steps_until_end >= TD
+        # Bootstrap-Condition: steps_until_end >= TD
         bootstrap_from_value = (steps_until_end >= TD)
         
-        # 7.6: Bootstrap-Indizes (idx + TD, aber clipped)
+        # Bootstrap-Indizes (idx + TD, aber clipped)
         bootstrap_indices = np.minimum(seq_indices + TD, ep_lengths[:, None] - 1)
         bootstrap_values_raw = self.root_values[ep_indices_expanded, bootstrap_indices]
         # Shape: (batch_size, K)
         
-        # ✅ NEU: 7.6b - Perspektiven-Flip für Bootstrap Values
+        # Perspektiven-Flip für Bootstrap Values
         bootstrap_players = self.players[ep_indices_expanded, bootstrap_indices]  # (batch_size, K)
         bootstrap_teams = self.teams[ep_indices_expanded, bootstrap_indices] 
 
@@ -266,7 +235,7 @@ class VectorizedReplayBufferStochastic:
             -bootstrap_values_raw   # Andere Perspektive: Value negieren
         )
         
-        # 7.7: Berechne Target Values
+        # Berechne Target Values
 
         # Temporaler Discount anwenden
         steps_to_end = np.maximum(steps_until_end, 0)
@@ -283,9 +252,9 @@ class VectorizedReplayBufferStochastic:
         target_values = np.clip(target_values, -1.0, 1.0)
         # Shape: (batch_size, K)
         
-        # ========================================
+        
         # 4-VALUE TARGETS für Multi-Value Head
-        # ========================================
+        
         # z_seq_4[i, k, j] = Terminal-Outcome für relativen Spieler j bei Schritt k
         # j=0: aktueller Spieler, j=1: nächster, j=2: übernächster, j=3: +3
         z_seq_4 = np.zeros((self.batch_size, K, 4), dtype=np.float32)
@@ -320,9 +289,9 @@ class VectorizedReplayBufferStochastic:
         )
         target_values_4 = np.clip(target_values_4, -1.0, 1.0)
 
-        # ========================================
-        # SCHRITT 8: Padding für ungültige Positionen
-        # ========================================
+        
+        # Padding für ungültige Positionen
+        
         actions = np.where(valid_mask[:, :-1], actions, 0)
         rewards_seq = np.where(valid_mask[:, :-1], rewards_seq, 1)  # Klasse 1 = reward=0 (neutral)
         dice_seq = np.where(valid_mask[:, :-1], dice_seq, 0)  # NEU: Dice padding
@@ -337,22 +306,16 @@ class VectorizedReplayBufferStochastic:
         discount_targets = np.where(valid_mask[:, :-1], discount_targets, 1)  # Klasse 1 = Non-Terminal (masked, irrelevant)
         depth_delta_targets = np.where(valid_mask[:, :-1], depth_delta_targets, 1)  # Default Spielerwechsel (irrelevant wenn masked)
         
-        # ========================================
-        # SCHRITT 9: Konvertiere Dice Values (1-6) zu Indizes (0-5)
-        # ========================================
-        # WICHTIG: Im Environment sind Würfel 1-6, im Netzwerk verwenden wir 0-5
-        dice_seq_indices = np.maximum(dice_seq - 1, 0)  # 1→0, 2→1, ..., 6→5
-        # Bei padding (dice_seq=0 nach Maske) wird das zu -1, dann zu 0 (harmlos wegen Mask)
         
-        # ========================================
-        # SCHRITT 10: Return Batch
-        # ========================================
+        # Konvertiere Dice Values (1-6) zu Indizes (0-5)
+        dice_seq_indices = np.maximum(dice_seq - 1, 0)  
+        
         return {
             'observations': jnp.array(root_obs),           # (batch_size, 14, 56)
             'actions': jnp.array(actions),                 # (batch_size, K-1)
             'rewards': jnp.array(rewards_seq),             # (batch_size, K-1)
-            'dice_outcomes': jnp.array(dice_seq_indices),  # (batch_size, K-1) NEU! (0-5)
-            'dice_probs': jnp.array(dice_probs_seq),       # (batch_size, K-1, 6) NEU! (0-5)
+            'dice_outcomes': jnp.array(dice_seq_indices),  # (batch_size, K-1) 
+            'dice_probs': jnp.array(dice_probs_seq),       # (batch_size, K-1, 6) 
             'policies': jnp.array(policies),               # (batch_size, K, 4)
             'values': jnp.array(values),                   # (batch_size, K)
             'masks': jnp.array(masks),                     # (batch_size, K)
