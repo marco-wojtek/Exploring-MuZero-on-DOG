@@ -10,7 +10,7 @@ import pickle
 import wandb
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-from MuZero_Classic_MADN.muzero_classic_madn import repr_net, dynamics_net, pred_net, decision_recurrent_fn, chance_recurrent_fn
+from MuZero_Classic_MADN.muzero_classic_madn import load_params_from_file, repr_net, dynamics_net, pred_net, decision_recurrent_fn, chance_recurrent_fn
 from MADN.classic_madn import env_reset, dice_probabilities, encode_board
 from MuZero_Classic_MADN.muzero_classic_madn import init_muzero_params
 from MuZero_Classic_MADN.vec_replay_buffer_stochastic import VectorizedReplayBufferStochastic
@@ -378,9 +378,9 @@ DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 if __name__ == "__main__":
     config = {
-        "seed": 30,
+        "seed": 36,
         "learning_rate": 0.005,  # Startet etwas höher, da wir weniger unrollen und damit weniger stabile Targets haben
-        "architecture": "Per-player broadcasting for better pin understanding",
+        "architecture": "TEAM with Bootstrapping at half",
         "num_games_per_iteration": 1500,
         "iterations": 100,
         "optimizer": "adamw with piecewise_constant_schedule",
@@ -391,8 +391,8 @@ if __name__ == "__main__":
         "max_episode_length": 800,
         "MCTS_simulations": 100, # less actions to evaluate (4 Pins) → less simulations needed
         "MCTS_max_depth": 50,
-        "Bootstrap_Value_Target": True,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
-        "Bootstrap_Switch_Iteration": 150,  # Wechselt zu Bootstrap-Targets nach 150 Iterationen
+        "Bootstrap_Value_Target": False,  # Startet mit finalen Rewards als Zielwerten, wechselt später zu Bootstrap-Targets
+        "Bootstrap_Switch_Iteration": 50,  # Wechselt zu Bootstrap-Targets nach 50 Iterationen
         "Temperature_Schedule": TEMPERATURE_SCHEDULE,
         "train_steps_per_iteration": 2500,
         "rules": RULES,
@@ -416,9 +416,9 @@ if __name__ == "__main__":
     learning_rate_schedule = optax.piecewise_constant_schedule(
         init_value=config["learning_rate"],  # 0.005
         boundaries_and_scales={
-            40 * config["train_steps_per_iteration"]: 0.1,    # It 50:  0.005 → 0.001
-            85 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-            105 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+            35 * config["train_steps_per_iteration"]: 0.1,    # It 50:  0.005 → 0.001
+            70 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+            90 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
         }
     )
 
@@ -449,4 +449,66 @@ if __name__ == "__main__":
     print(f"Total training time: {int(passed_time / 3600)} hours and {int(passed_time % 3600 / 60)} minutes.")
     print(f"Average time per iteration: {jnp.mean(jnp.array(times_per_iteration)) / 60:.2f} minutes.")
     print(f"{'='*60}\n")
+    
+
+    # print("ADDITIONAL EVALUATION:")
+    # from MuZero_Classic_MADN.muzero_classic_madn import load_params_from_file
+    # from MuZero_Classic_MADN.evaluate_agent_stochastic import evaluate_agent_parallel
+    # NUM_SIMULATIONS = 100
+    # MAX_DEPTH = 50
+    # TEMPERATURE = 0.05
+    # FOLDER = "MuZero_Classic_MADN/models/params/"
+    # print("Games with Temperature =", TEMPERATURE)
+    # FILENAME = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr{config['learning_rate']}_g{config['num_games_per_iteration']}_it{config['iterations']}_seed{config['seed']}"
+    # # play_n_randomly(batch_size=1000)  
+    # print(FILENAME)
+    # print("\nVersus random agents 12345:")
+    # params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+    # params2 = 'random_agent'  # Stochastic MuZero Agent
+    # params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+    # params4 =  'random_agent'  # Stochastic MuZero Agent
+
+    # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250, set_seed=12345)
+
+    # print("\nVersus random agents:")
+    # params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+    # params2 = 'random_agent'  # Stochastic MuZero Agent
+    # params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+    # params4 =  'random_agent'  # Stochastic MuZero Agent
+
+    # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+
+    # print("\nVersus rule-based agents:")
+    # params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+    # params2 = 'rule_based_agent'  # Stochastic MuZero Agent
+    # params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+    # params4 =  'rule_based_agent'  # Stochastic MuZero Agent
+
+    # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+
+    # print("\nVersus untrained Stochastic MuZero Agents:")
+    # params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+    # params2 = None # Stochastic MuZero Agent
+    # params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+    # params4 =  None  # Stochastic MuZero Agent
+
+    # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+
+    # FILENAME2 = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed30"
+    # print("\nVersus Trained Stochastic MuZero Agents {}:".format(FILENAME2))
+    # params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+    # params2 = load_params_from_file(f"{FILENAME2}.pkl") # Stochastic MuZero Agent
+    # params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+    # params4 = load_params_from_file(f"{FILENAME2}.pkl")  # Stochastic MuZero Agent
+
+    # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+
+    # FILENAME2 = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it200_seed7"
+    # print("\nVersus Trained Stochastic MuZero Agents {}:".format(FILENAME2))
+    # params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+    # params2 = load_params_from_file(f"{FILENAME2}.pkl") # Stochastic MuZero Agent
+    # params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+    # params4 = load_params_from_file(f"{FILENAME2}.pkl")  # Stochastic MuZero Agent
+
+    # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
     

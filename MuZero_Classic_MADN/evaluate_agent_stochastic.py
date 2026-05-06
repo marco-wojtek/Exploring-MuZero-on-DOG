@@ -314,408 +314,6 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20, s
     print("Average Final Pin distance per Player and different Starters:\n", average_progress)
     print("Average Final Pin distance per Player:\n", jnp.sum(average_progress, axis=0) / 4)
 
-def play_n_randomly(batch_size=20, seed=42):
-    winners = jnp.array([[0, 0, 0, 0],
-               [0, 0, 0, 0],
-               [0, 0, 0, 0],
-               [0, 0, 0, 0]])
-    average_game_length = 0
-    max_game_length = 0
-    games_longer_600 = 0
-    for i in range(4):
-        envs = batch_reset(jax.random.randint(jax.random.PRNGKey(seed + i*54321), (batch_size,), 0, 1000000), jnp.full((batch_size,), i))
-        active_mask = np.ones(batch_size, dtype=bool)
-        step_counter = 0
-        MAX_STEPS = 2000
-        dones = envs.done  # Initialen Done-Status speichern
-        
-        while np.any(active_mask) and step_counter < MAX_STEPS:
-            step_counter += 1
-            rng_key, subkey = jax.random.split(jax.random.PRNGKey(seed + i*99999 + step_counter))
-            valid_actions = batch_valid_action(envs).reshape(envs.board.shape[0], -1)
-
-            def random_step(env, val_actions, done, key):
-                def do_step():
-                    # Maskiere ungültige Aktionen mit -1e9
-                    logits = jnp.where(val_actions, 0.0, -1e9)
-                    action = jax.random.categorical(key, logits)
-                    mapped_act = map_action(action)
-                    next_env, reward, next_done = env_step(env, mapped_act)
-                    return next_env, reward, next_done
-                def no_step_action():
-                    next_env, reward, next_done = no_step(env)
-                    return next_env, reward, next_done
-                return jax.lax.cond(
-                    jnp.any(val_actions) & (~done),
-                    do_step,
-                    no_step_action
-                )
-            
-            envs, rewards, next_dones = jax.vmap(random_step, in_axes=(0,0,0,0))(envs, valid_actions, dones, jax.random.split(subkey, batch_size))
-            final_dones = jnp.logical_or(dones, next_dones)
-            
-            # Winner-Tracking wie in play_n_games_for_eval
-            for j in range(batch_size):
-                if active_mask[j] and final_dones[j]:
-                    active_mask[j] = False
-                    average_game_length += step_counter
-                    if step_counter > max_game_length:
-                        max_game_length = step_counter
-                    if step_counter > 600:
-                        games_longer_600 += 1
-                    winner = manual_get_winner(envs.board[j], envs.num_players, envs.goal[j], envs.rules)
-                    winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
-            
-            dones = final_dones  # Update dones für nächsten Step
-
-    print("Final Results for Random Agents:")
-    print("Total Wins per Player and different Starters:\n", winners)
-    print("Total Wins per Player:\n", jnp.sum(winners, axis=0))
-    print("Statistics:")
-    if RULES['enable_teams']:
-        total_win_chance = jnp.sum(winners,axis=0)/ jnp.sum(winners) * 100
-        print("Total win chances in % for Team 0&2 and Team 1&3:", ( total_win_chance[0] + total_win_chance[2], total_win_chance[1] + total_win_chance[3]))
-    else:
-        print("Total win chances in %:", jnp.sum(winners,axis=0) / jnp.sum(winners) * 100)
-    print("Chance to win when starting first:", jnp.sum(jnp.diag(winners)) / jnp.sum(winners) * 100)
-    progress_mean, progress_all = calculate_player_progress(envs)
-    print("Mean Final Pin distance per Player:\n", progress_mean)
-    print("Average game length:", average_game_length / (4 * batch_size))
-    print("Max game length:", max_game_length)
-    print("Games longer than 600 steps:", games_longer_600)
-
-def test_agent_vs_random(params, num_games, batch_size=100, seed=42):
-    '''
-    Testet einen einzelnen Agenten gegen Random-Gegner über viele Spiele.
-    
-    Args:
-        params: Parameter des zu testenden Agenten
-        num_games: Gesamtanzahl der Spiele
-        batch_size: Anzahl paralleler Spiele pro Batch
-        seed: Random seed
-    
-    Returns:
-        Anzahl der Siege des Agenten
-    '''
-    rng_key = jax.random.PRNGKey(seed)
-    
-    # Initialize dummy params if None
-    env = env_reset_batched(0, 0)  # Dummy-Reset, um die Form der Beobachtungen zu erhalten
-    enc = encode_board(env)
-    
-    agent = params if params is not None else init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
-    dummy_agent = init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
-    
-    total_wins = 0
-    num_batches = (num_games + batch_size - 1) // batch_size  # Aufrunden
-    pin_progress = jnp.array([0, 0, 0, 0])
-    
-    for batch_idx in range(num_batches):
-        # Berechne Batch-Größe für letzten Batch
-        current_batch_size = min(batch_size, num_games - batch_idx * batch_size)
-        
-        rng_key, subkey = jax.random.split(rng_key)
-        seeds = jax.random.randint(subkey, (current_batch_size,), 0, 1000000)
-        envs = batch_reset(seeds, jnp.full((current_batch_size,), -1))  # Random starting player
-        
-        winners = jnp.zeros((current_batch_size, 4), dtype=jnp.int32)
-        active_mask = np.ones(current_batch_size, dtype=bool)
-        
-        step_counter = 0
-        MAX_STEPS = 2000
-        
-        while np.any(active_mask) and step_counter < MAX_STEPS:
-            step_counter += 1
-            rng_key, subkey = jax.random.split(rng_key)
-            
-            # Generate RNG keys for this step
-            step_keys = jax.random.split(subkey, current_batch_size)
-            
-            current_players = envs.current_player
-            
-            # Build params_for_envs with use_mcts flags
-            params_for_envs = []
-            use_mcts_flags = []
-            for i in range(current_batch_size):
-                player_idx = int(current_players[i])
-                if (player_idx == 0 ) or ((player_idx == 2) and envs.rules['enable_teams']):
-                    # Trained agent plays at position 0
-                    params_for_envs.append(agent)
-                    use_mcts_flags.append(True)
-                else:
-                    # Random agent
-                    params_for_envs.append(dummy_agent)
-                    use_mcts_flags.append(False)
-            
-            use_mcts_flags = jnp.array(use_mcts_flags, dtype=jnp.bool_)
-            
-            envs, data = multiactor_step_with_random_agent_v2(envs, tuple(params_for_envs), use_mcts_flags, step_keys)
-            
-            obs, acts, rews, vals, pols, dones = jax.device_get(data)
-            
-            for i in range(current_batch_size):
-                if active_mask[i] and dones[i]:
-                    active_mask[i] = False
-                    winner = manual_get_winner(envs.board[i], envs.num_players, envs.goal[i], envs.rules)
-                    winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
-        
-        # Count wins at position 0 (where the agent plays)
-        batch_wins = jnp.sum(winners[:, 0])
-        total_wins += int(batch_wins)
-        # print(envs.pins)
-        progress_mean, progress_all = calculate_player_progress(envs)
-        # print(progress_all)
-        pin_progress = pin_progress + progress_mean
-        
-        if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
-            current_total = (batch_idx + 1) * batch_size
-            current_total = min(current_total, num_games)
-            print(f"  Progress: {current_total}/{num_games} games, Wins so far: {total_wins} ({total_wins/current_total*100:.1f}%)")
-    
-    return total_wins, pin_progress/num_batches
-
-@jax.jit
-def multiactor_step_with_random_agent_v2(envs, params, use_mcts, rng_key):
-    """
-    Führt einen Schritt für N parallele Spiele aus.
-    params: Tuple von Parameter-Sets, eines pro Environment.
-    use_mcts: Boolean array, True = use MCTS, False = random action
-    rng_key: Array of RNG keys, one per environment
-    """
-    obs = batch_encode(envs)
-    val_actions = batch_valid_action(envs).reshape(envs.board.shape[0], -1)
-    dones = envs.done
-
-    def perform_action(env, obs, val_act, done, params, use_mcts_flag, rng_key):
-        def mcts_step():
-            obs_batched = obs[None, ...] 
-            invalid_actions_batched = (~val_act)[None, ...]
-            
-            policy_output, root_values = run_stochastic_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, num_simulations=NUM_SIMULATIONS, max_depth=MAX_DEPTH, temperature=0.0)
-            
-            act = policy_output.action[0]
-            action_weights = policy_output.action_weights[0]
-            root_value = root_values[0]
-            
-            mapped_act = map_action(act)
-            next_env, reward, next_done = env_step(env, mapped_act)
-            return next_env, obs, act, reward, root_value, action_weights, next_done
-        
-        def random_step():
-            logits = jnp.where(val_act, 0.0, -1e9)
-            action = jax.random.categorical(rng_key, logits)
-            mapped_act = map_action(action)
-            next_env, reward, next_done = env_step(env, mapped_act)
-            dummy_policy = jnp.zeros_like(val_act, dtype=jnp.float32)
-            dummy_root_value = 0.0
-            return next_env, obs, action, reward, dummy_root_value, dummy_policy, next_done
-        
-        def rule_based_step():
-            '''
-            Improved rule-based agent:
-            - Prioritizes abundant actions (saves rare moves)
-            - Adaptive strategy based on game state
-            - Stochastic selection with softmax
-            '''
-            current_player = env.current_player
-            current_goal = env.goal[current_player] # (num_pins,)
-            current_positions = env.pins[current_player][:,None] # (num_pins, 1)
-            actions = jnp.arange(6)
-            # normal moved positions
-            moved_positions = current_positions + actions  # (num_pins, 6)
-            # fitted moved positions
-            fitted_positions = moved_positions % env.board_size # (num_pins, 6)
-            # steps into goal area
-            x = moved_positions - env.target[current_player] - jnp.int8(env.rules['must_traverse_start']) # (num_pins, 6)
-
-            # calc which position is correct for each pin x action
-            new_positions = jnp.where( # shape: (num_pins, 6)
-                (current_positions < 0) ,
-                env.start[current_player],  # pins in home can only move to start, shape: (num_pins, 6)
-                jnp.where(
-                    current_positions >= env.board_size,
-                    moved_positions,  # pins in goal area move normally, shape: (num_pins, 6)
-                    jnp.where(
-                        (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
-                        env.goal[current_player, x-1],
-                        fitted_positions  # pins on board move normally, shape: (num_pins, 6)
-                    )
-                )
-            ) 
-
-            # Calculate opponent pins
-            all_pins = env.pins
-            opp = jnp.ones_like(all_pins).at[current_player].set(0)
-            pos = jax.lax.cond(
-                env.rules['enable_teams'],
-                lambda opp: opp.at[(current_player + 2) % 4].set(0),
-                lambda opp: opp,
-                operand=opp
-            )
-            opponent_pins = jnp.where(
-                pos == 1,
-                all_pins,
-                -jnp.ones_like(all_pins)
-            ).flatten()
-
-            # Count pins in home for early-game strategy
-            pins_in_home = jnp.sum(env.pins[current_player] < 0)
-            
-            # BASE SCORE: Prefer actions that are abundant (reshape to count per action type)
-            val_act_reshaped = val_act.reshape(4, 6)  # (num_pins, 6)
-            action_counts = jnp.sum(val_act_reshaped, axis=0)  # (6,) - count how often each action is available
-            action_abundance = action_counts / jnp.maximum(jnp.sum(action_counts), 1.0)  # Normalize to 0-1
-            base_score = jnp.repeat(action_abundance, 4)  # (24,) repeated for each pin
-            
-            # BONUS 1: Moving into goal (+5.0)
-            goal_bonus = jnp.where(
-                jnp.isin(new_positions, current_goal) & (current_positions < env.board_size),
-                5.0,
-                0.0
-            ).flatten()
-            
-            # BONUS 2: Getting pin out of house (+3.0 early game, +1.5 late game)
-            out_of_home_weight = jnp.where(pins_in_home >= 2, 3.0, 1.5)
-            out_bonus = jnp.where(
-                (current_positions < 0) & (new_positions == env.start[current_player]),
-                out_of_home_weight,
-                0.0
-            ).flatten()
-            
-            # BONUS 3: Hitting opponent (+2.5)
-            hit_bonus = jnp.where(
-                (new_positions != current_positions) & jnp.isin(new_positions, opponent_pins),
-                2.5,
-                0.0
-            ).flatten()
-            
-            # TOTAL SCORE
-            policy_scores = base_score + goal_bonus + out_bonus + hit_bonus
-
-            # WICHTIG: Erst mit val_act maskieren, damit nur legale Aktionen gewählt werden!
-            policy_scores = jnp.where(val_act, policy_scores, -jnp.inf)
-            
-            # Softmax with temperature for stochastic selection
-            temperature = 0.5
-            policy_logits = policy_scores / temperature
-            
-            action = jax.random.categorical(rng_key, policy_logits)
-            mapped_act = map_action(action)
-            next_env, reward, next_done = env_step(env, mapped_act)
-            dummy_policy = jnp.zeros_like(val_act, dtype=jnp.float32)
-            dummy_root_value = 0.0
-            return next_env, obs, action, reward, dummy_root_value, dummy_policy, next_done
-        
-        def no_action_step():
-            next_env, reward, next_done = no_step(env)
-            dummy_action = jnp.int32(-1)
-            dummy_policy = jnp.zeros_like(val_act, dtype=jnp.float32)
-            dummy_root_value = 0.0
-            return next_env, obs, dummy_action, reward, dummy_root_value, dummy_policy, next_done
-
-        return jax.lax.cond(
-            jnp.any(val_act) & (~done),
-            lambda: jax.lax.cond(
-                use_mcts_flag,
-                mcts_step,
-                random_step
-            ),
-            no_action_step
-        )
-
-    results = []
-    for i in range(envs.board.shape[0]):
-        result = perform_action(
-            jax.tree.map(lambda x: x[i], envs),
-            obs[i],
-            val_actions[i],
-            dones[i],
-            params[i],
-            use_mcts[i],
-            rng_key[i]
-        )
-        results.append(result)
-
-    next_envs = jax.tree.map(lambda *xs: jnp.stack(xs), *[r[0] for r in results])
-    obs = jnp.stack([r[1] for r in results])
-    actions = jnp.stack([r[2] for r in results])
-    rewards = jnp.stack([r[3] for r in results])
-    root_values = jnp.stack([r[4] for r in results])
-    policy_output_action_weights = jnp.stack([r[5] for r in results])
-    next_dones = jnp.stack([r[6] for r in results])
-    
-    rewards = jnp.where(dones, 0.0, rewards)
-    final_dones = jnp.logical_or(dones, next_dones)
-    
-    return next_envs, (obs, actions, rewards, root_values, policy_output_action_weights, final_dones)
-
-def compare_agents_statistically(params1, params2, num_games=1000, batch_size=100):
-    '''
-    Vergleicht zwei Agenten statistisch über viele unabhängige Spiele.
-    Jeder spielt separat gegen Random-Agenten.
-    '''
-    print(f"\n{'='*60}")
-    print(f"Statistical Agent Comparison")
-    print(f"{'='*60}")
-    print(f"Total games per agent: {num_games}")
-    print(f"Batch size: {batch_size}")
-    
-    print(f"\n{'='*60}")
-    print(f"Testing Agent 1...")
-    print(f"{'='*60}")
-    i = np.random.randint(0, 1000000)
-    print(f"Using random seed: {i}")
-    wins1, progress1 = test_agent_vs_random(params1, num_games, batch_size, seed=i)
-    
-    print(f"\nAgent 1 games average pin progress: {progress1}")
-    
-    print(f"\n{'='*60}")
-    print(f"Testing Agent 2...")
-    print(f"{'='*60}")
-    wins2, progress2 = test_agent_vs_random(params2, num_games, batch_size, seed=i)  # Different seed
-    
-    print(f"\nAgent 2 games average pin progress: {progress2}")
-
-    winrate1 = wins1 / num_games
-    winrate2 = wins2 / num_games
-    
-    # Statistischer Test (z.B. Z-Test für Proportionen)
-    diff = winrate1 - winrate2
-    se = np.sqrt((winrate1 * (1 - winrate1) / num_games) + 
-                 (winrate2 * (1 - winrate2) / num_games))
-    
-    # Vermeiden von Division durch 0
-    if se > 0:
-        z_score = diff / se
-        p_value = 2 * (1 - 0.5 * (1 + math.erf(abs(z_score) / math.sqrt(2))))  # Two-tailed test
-    else:
-        z_score = 0
-        p_value = 1.0
-    
-    print(f"\n{'='*60}")
-    print(f"Statistical Comparison Results")
-    print(f"{'='*60}")
-    print(f"Agent 1: {wins1}/{num_games} wins = {winrate1*100:.2f}%")
-    print(f"Agent 2: {wins2}/{num_games} wins = {winrate2*100:.2f}%")
-    print(f"\nDifference: {diff*100:+.2f}% (Agent 1 - Agent 2)")
-    print(f"Standard Error: {se*100:.3f}%")
-    print(f"Z-score: {z_score:.3f}")
-    print(f"P-value: {p_value:.4f}")
-    
-    print(f"\n{'='*60}")
-    if abs(z_score) > 1.96:  # 95% Konfidenzintervall
-        print(f"✓ Result: Statistically SIGNIFICANT (p < 0.05)")
-        if z_score > 0:
-            print(f"  → Agent 1 is significantly BETTER!")
-        else:
-            print(f"  → Agent 2 is significantly BETTER!")
-    else:
-        print(f"✗ Result: No significant difference (p >= 0.05)")
-        print(f"  → Agents perform similarly")
-    print(f"{'='*60}\n")
-    
-    return winrate1, winrate2
-
 def play_n_games_for_eval_jitted(params_list, rng_key, num_envs=20, starting_player=0):
     """JIT-compilierte Version wie game_agent"""
     rng_key, subkey = jax.random.split(rng_key)
@@ -930,6 +528,113 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
     
     return final_envs, final_winners
 
+def fairness_check(batch_size=20, seed=None):
+    """
+    Spielt batch_size * 4 Spiele mit ausschließlich Random-Agenten.
+    Jeder Startspieler (0-3) beginnt exakt batch_size Spiele.
+    Nutzt einen eigenen JIT-Loop der nur random / no_step kennt.
+    """
+    if seed is None:
+        seed = np.random.randint(0, 1_000_000)
+
+    rng_key = jax.random.PRNGKey(seed)
+    rng_key, subkey = jax.random.split(rng_key)
+
+    num_total = batch_size * 4
+    seeds = jax.random.randint(subkey, (num_total,), 0, 1_000_000)
+    starting_players = jnp.repeat(jnp.arange(4), batch_size)
+    envs = batch_reset(seeds, starting_players)
+
+    final_envs, winners_flat = _random_only_loop(envs, subkey, num_total)
+
+    winners_split = jnp.array_split(winners_flat, 4, axis=0)
+    winners = jnp.stack([jnp.sum(w, axis=0) for w in winners_split])  # (4, 4)
+
+    progress_mean, _ = calculate_player_progress(final_envs)
+
+    total_wins = jnp.sum(winners)
+    wins_per_player = jnp.sum(winners, axis=0)
+    win_pct = wins_per_player / total_wins * 100
+
+    print("\n" + "=" * 60)
+    print("FAIRNESS CHECK – All Random Agents")
+    print("=" * 60)
+    print(f"Games per starting position: {batch_size}  (total: {num_total})")
+    print("\nTotal Wins per Player and different Starters:\n", winners)
+    print("\nTotal Wins per Player:\n", wins_per_player)
+    print("\nWin % per Player:", win_pct)
+    if RULES['enable_teams']:
+        team_a = float(win_pct[0] + win_pct[2])
+        team_b = float(win_pct[1] + win_pct[3])
+        print(f"\nTeam A (0&2): {team_a:.1f}%  |  Team B (1&3): {team_b:.1f}%")
+    print("\nMean Final Pin Distance per Player:\n", progress_mean)
+    print("=" * 60)
+
+    return winners, progress_mean
+
+@functools.partial(jax.jit, static_argnames=['num_envs'])
+def _random_only_loop(envs, rng_key, num_envs):
+    """JIT-Loop der ausschließlich Random-Aktionen oder No-Step ausführt."""
+
+    def body_fn(carry):
+        envs, winners, dones, step_count, rng_key = carry
+
+        rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
+        step_keys = jnp.array(step_keys)
+
+        def step_single_env(env, done, key, winner):
+            def do_step(env, winner):
+                env = throw_die(env)
+                valid_mask = valid_action(env).flatten()
+
+                def do_random():
+                    logits = jnp.where(valid_mask, 0.0, -1e9)
+                    action = jax.random.categorical(key, logits)
+                    next_env, _, next_done = env_step(env, action)
+                    return next_env, next_done
+
+                def do_no_step():
+                    next_env, _, next_done = no_step(env)
+                    return next_env, next_done
+
+                next_env, next_done = jax.lax.cond(
+                    jnp.any(valid_mask),
+                    do_random,
+                    do_no_step,
+                )
+
+                new_winner = jax.lax.cond(
+                    next_done,
+                    lambda: winner + manual_get_winner(
+                        next_env.board, next_env.num_players,
+                        next_env.goal, next_env.rules
+                    ).astype(jnp.int32),
+                    lambda: winner,
+                )
+                return next_env, next_done, new_winner
+
+            return jax.lax.cond(
+                ~done,
+                lambda: do_step(env, winner),
+                lambda: (env, done, winner),
+            )
+
+        new_envs, new_dones, new_winners = jax.vmap(step_single_env)(
+            envs, dones, step_keys, winners
+        )
+        return (new_envs, new_winners, new_dones, step_count + 1, rng_key)
+
+    def cond_fn(carry):
+        _, _, dones, step_count, _ = carry
+        return jnp.any(~dones) & (step_count < 2000)
+
+    init_winners = jnp.zeros((num_envs, 4), dtype=jnp.int32)
+    final_envs, final_winners, _, _, _ = jax.lax.while_loop(
+        cond_fn,
+        body_fn,
+        (envs, init_winners, envs.done, 0, rng_key),
+    )
+    return final_envs, final_winners
 
 # Rules for evaluation games - can be adjusted to test specific rule variations
 RULES = {
@@ -944,74 +649,56 @@ RULES = {
     'must_traverse_start': False
 }
 
-start_time = time()
+# start_time = time()
 NUM_SIMULATIONS = 100
 MAX_DEPTH = 50
-TEMPERATURE = 0.10
-FOLDER = "MuZero_Classic_MADN/models/params/"
-print("Games with Temperature =", TEMPERATURE)
-print("And set seed for same dice outcomes:", 12345)
-# # play_n_randomly(batch_size=1000)  
-# print("\nVersus Random Agents:")
-# params1 = 'random_agent'  # Random Agent
-# params2 = 'rule_based_agent'  # Stochastic MuZero Agent
-# params3 = 'random_agent'  # MCTS Agent
-# params4 = 'rule_based_agent'  # Stochastic MuZero Agent
-
-# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-
-# # play_n_randomly(batch_size=1000)  
-# print("\nVersus Rule-Based Agents:")
-# params1 = 'rule_based_agent'  # Rule-Based Agent
-# params2 = 'rule_based_agent'  # Stochastic MuZero Agent
-# params3 = 'rule_based_agent'  # MCTS Agent
-# params4 = 'rule_based_agent'  # Stochastic MuZero Agent
-
-# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-FILENAME = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed30"
+TEMPERATURE = 0.0
+# FOLDER = "MuZero_Classic_MADN/models/params/"
+# # print("Games with Temperature =", TEMPERATURE)
+# FILENAME = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed30"
 # play_n_randomly(batch_size=1000)  
-print(FILENAME)
-print("\nVersus random agents 12345:")
-params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = 'random_agent'  # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  'random_agent'  # Stochastic MuZero Agent
+# print(FILENAME)
+# print("\nVersus random agents 12345:")
+# params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = 'random_agent'  # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  'random_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250, set_seed=12345)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250, set_seed=12345)
 
-print("\nVersus random agents:")
-params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = 'random_agent'  # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  'random_agent'  # Stochastic MuZero Agent
+# print("\nVersus random agents:")
+# params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = 'random_agent'  # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  'random_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nVersus rule-based agents:")
-params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = 'rule_based_agent'  # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  'rule_based_agent'  # Stochastic MuZero Agent
+# print("\nVersus rule-based agents:")
+# params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = 'rule_based_agent'  # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  'rule_based_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nVersus untrained Stochastic MuZero Agents:")
-params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = None # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  None  # Stochastic MuZero Agent
+# print("\nVersus untrained Stochastic MuZero Agents:")
+# params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = None # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  None  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-FILENAME2 = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed7"
-print("\nVersus Trained Stochastic MuZero Agents {}:".format(FILENAME2))
-params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = load_params_from_file(f"{FILENAME2}.pkl") # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 = load_params_from_file(f"{FILENAME2}.pkl")  # Stochastic MuZero Agent
+# FILENAME2 = f"{FOLDER}TEAMstochastic_muzero_madn_params_lr0.005_g1500_it100_seed7"
+# print("\nVersus Trained Stochastic MuZero Agents {}:".format(FILENAME2))
+# params1 = load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = load_params_from_file(f"{FILENAME2}.pkl") # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 = load_params_from_file(f"{FILENAME2}.pkl")  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
-end_time = time()
-print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# end_time = time()
+# print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
 
 

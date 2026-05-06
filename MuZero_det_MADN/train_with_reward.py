@@ -293,10 +293,10 @@ def test_training(config, params=None, opt_state=None):
 
         if ((it+1) % 50 == 0) or (it == iterations - 1):
             print(f"Saving checkpoint at iteration {it+1}...")
-            with open(f'MuZero_det_MADN/models/params/classic_muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/params/muzero_madn_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(params, f)
 
-            with open(f'MuZero_det_MADN/models/opt_state/classic_muzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+            with open(f'MuZero_det_MADN/models/opt_state/muzero_madn_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
                 pickle.dump(opt_state, f)
 
     return params, opt_state, times_per_iteration
@@ -308,19 +308,19 @@ RULES = {
     'enable_friendly_fire': False,
     'enable_start_blocking': False,
     'enable_jump_in_goal_area': True,
-    'enable_start_on_1': True,
+    'enable_start_on_1': True, 
     'enable_bonus_turn_on_6': True,
     'must_traverse_start': False
 }
-TEMPERATURE_SCHEDULE = [1.0]#[1.5, 1.0, 0.8, 0.6, 0.4]
+TEMPERATURE_SCHEDULE = [1.5, 1.0, 0.8, 0.6, 0.4]
 VALUE_SCALING = 4.0  
 POLICY_SCALING = 1.0
 DISCOUNT_SCALING = 2.0
 REWARD_SCALING = 2.0
 config = {
-    "seed": 71,
+    "seed": 77,
     "learning_rate": 0.005,
-    "architecture": "Per-player broadcasting for better pin understanding with gumbel MuZero q value scaling to default 0.1",
+    "architecture": "TEAM Classic with Bootstrapping",
     "num_games_per_iteration": 1500,
     "iterations": 100,
     "optimizer": "adamw with piecewise_constant_schedule (similar as MuZero paper)",
@@ -331,8 +331,8 @@ config = {
     "max_episode_length": 550,
     "MCTS_simulations": 100,
     "MCTS_max_depth": 50,
-    "Bootstrap_Value_Target": False,
-    "Bootstrap_Switch_Iteration": 130, # Nach X Iterationen wird auf bootstrap value targets umgestellt
+    "Bootstrap_Value_Target": True,
+    "Bootstrap_Switch_Iteration": 0, # Nach X Iterationen wird auf bootstrap value targets umgestellt
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
     "train_steps_per_iteration": 2500,
     "rules": RULES,
@@ -354,9 +354,9 @@ deterministic_madn_wandb_session = wandb.init(
 learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],  # 0.005
     boundaries_and_scales={
-        30 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
-        60 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
-        85 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
+        35 * config["train_steps_per_iteration"]: 0.2,    # It 50:  0.005 → 0.001
+        70 * config["train_steps_per_iteration"]: 0.2,   # It 120: 0.001 → 0.0002
+        90 * config["train_steps_per_iteration"]: 0.5,   # It 170: 0.0002 → 0.0001
     }
 )
 
