@@ -831,58 +831,34 @@ def test_7_move(pins, player, dist, rules, expected_valid):
     print(pins)
     assert jnp.array_equal(pins, expected_valid)
 
-env = env_reset(0, num_players=4,
+env = env_reset(0, seed=0,
+                num_players=4,
                     distance=jnp.int32(16),
                     enable_circular_board=False,
                     enable_jump_in_goal_area=True,
                     enable_start_blocking=True,
-                    enable_friendly_fire=False,
+                    enable_friendly_fire=True,
                     enable_teams=True,
                     must_traverse_start=True)
-# pins = jnp.array([[-1, 11, 10, -1], [9, 0, 21, -1], [22, -1, -1, -1], [30, -1, -1, -1]])
-# env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=1, phase=0)
-# va = val_swap(env) # (4,56)
-# idx = jnp.arange(va.shape[1]) # (56,)
-# idx_tile = jnp.tile(idx, (va.shape[0], 1)) # (4,56)
-# print(idx_tile[va])
-# env = env.replace(pins=jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8], [-1, -1, -1, -1], [-1, -1, -1, -1]]), board=set_pins_on_board(env.board, jnp.array([[-1, 10, 7, 3], [12, 20, 21, 8], [-1, -1, -1, -1], [-1, -1, -1, -1]])), current_player=0)
-# print(env.hands)
-# print(env.phase)
-# env, _, _ = env_step(env, jnp.array(get_play_action_size(env)+4))
-# print(env.swap_choices)
-# env, _, _ = env_step(env, jnp.array(get_play_action_size(env)))
-# print(env.swap_choices)
-# env, _, _ = env_step(env, jnp.array(get_play_action_size(env)+5))
-# print(env.swap_choices)
-# env, _, _ = env_step(env, jnp.array(get_play_action_size(env)+1))
-# print(env.swap_choices)
-# print(env.hands)
-# print(env.phase)
-# print(map_action_to_move(env, jnp.array(757)))
-# env, r, d = env_step(env, jnp.array(757))
-# print(env.pins)
-# print(env.current_player)
-# print(env.hands)
 
-# test_normal_move(jnp.array([[1, 35, 3, 1], [6, 14, 44, 10]]),
-#         jnp.array(0),
-#         jnp.array(0),
-#         jnp.array(13),
-#         {'enable_circular_board': True, 'enable_jump_in_goal_area': True, 'enable_start_blocking': True, 'enable_friendly_fire': True, 'must_traverse_start': False},
-#         jnp.array([[1, 35, 3, 1], [6, 14, 44, 10]]))
+h = jnp.array([[1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1],
+               [1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0],
+               [1, 2, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
+               [1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0]])
+pins = jnp.array([[-1,-1,-1,0], [-1,1,10,-1], [-1,-1,-1,-1], [-1,-1,-1,-1]])
+env = env.replace(pins = pins,board=set_pins_on_board(env.board, pins), hands=h,current_player=0, phase=0)
+print(encode_board_with_belief(env))
+# print(env.goal)
+# print(env.hands)
+# val = valid_actions(env)
+# print(val)
+# print(sum(val))
+# idx = jnp.arange(len(val))
+# print(idx[val])
+# print(map_action_to_move(env, idx[val][0]))
 
-pins = jnp.array([[64, 65, 66, 67], [16, 20, 21, 8], [-1, -1, -1, 1], [-1, -1, -1, -11]])
-env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=0, phase=0)
-print(env.goal)
-print(env.hands)
-x = map_move_to_action(env, jnp.array([0, 0, 0, 0, 0, 2]))
-print(x)
-print(valid_step_actions(env))
-print(valid_step_actions(env)[x])
-x = map_move_to_action(env, jnp.array([0, 0, 0, 0, 0, 6]))
-print(x)
-print(valid_step_actions(env)[x])
-
-# pins = jnp.array([[-1, 11, 7, 3], [12, 16, 21, 8], [-1, -1, 32, 1], [-1, 31, 48, 78]])
-# env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=0)
-# print(val_swap(env))
+# # pins = jnp.array([[-1, 11, 7, 3], [12, 16, 21, 8], [-1, -1, 32, 1], [-1, 31, 48, 78]])
+# # env = env.replace(pins=pins, board=set_pins_on_board(env.board, pins), current_player=0)
+# # print(val_swap(env))
+# for i in range(len(DISTS_7_4)):
+#     print(i, ":", DISTS_7_4[i])

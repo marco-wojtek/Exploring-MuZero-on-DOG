@@ -12,7 +12,10 @@ import math
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from DOG.dog import *
-from MuZero_DOG.muzero_dog import *
+# from MuZero_DOG.muzero_dog import *
+from MuZero_DOG.eval_config.classic import run_muzero_mcts as classic_muzero, init_muzero_params as init_classic_params
+from MuZero_DOG.eval_config.sample import run_muzero_mcts as sample_muzero, init_muzero_params as init_sample_params
+from MuZero_DOG.eval_config.session import run_muzero_mcts as session_muzero, init_muzero_params as init_session_params
 
 def manual_get_winner(board: Board, num_players, goal, rules) -> chex.Array:
     '''
@@ -68,65 +71,9 @@ def env_reset_batched(seed, starting_player):
 # 2. Vektorisierte Funktionen vorbereiten
 batch_reset = jax.vmap(env_reset_batched, in_axes=(0, 0))
 batch_valid_action = jax.vmap(valid_actions)
-batch_encode = jax.vmap(encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 batch_map_action = jax.vmap(map_move_to_action)
-jnp.repeat
-@jax.jit
-def multiactor_step(envs, params_list, rng_key):
-    """
-    Führt einen Schritt für N parallele Spiele aus.
-    params_list: Eine Liste der 4 Parameter-Sets für die Spieler.
-    """
-    # A. Observations
-    obs = batch_encode(envs)
-    val_actions = batch_valid_action(envs).reshape(envs.board.shape[0], -1)
-    dones = envs.done
-    current_players = envs.current_player
-    branches = [lambda p=p: p for p in params_list]
-    def perform_action(env, obs, val_act, done, player_idx, rng_key):
-        # Wähle die richtigen Parameter basierend auf dem Index des aktuellen Spielers.
-        # jax.lax.switch wird für JIT-kompatibles bedingtes Indexieren verwendet.
-        
-        params = jax.lax.switch(player_idx, branches)
 
-        def mcts_step():
-            obs_batched = obs[None, ...] 
-            invalid_actions_batched = (~val_act)[None, ...]
-            
-            policy_output, root_values = run_muzero_mcts(params, rng_key, obs_batched, invalid_actions=invalid_actions_batched, num_simulations=NUM_SIMULATIONS, max_depth=MAX_DEPTH, temperature=0.25)
-            
-            act = policy_output.action[0]
-            action_weights = policy_output.action_weights[0]
-            root_value = root_values[0]
-            
-            mapped_act = map_move_to_action(act)
-            next_env, reward, next_done = env_step(env, mapped_act)
-            return next_env, obs, act, reward, root_value, action_weights, next_done
-        
-        def no_action_step():
-            next_env, reward, next_done = no_step(env)
-            dummy_action = jnp.int32(-1)
-            dummy_policy = jnp.zeros_like(val_act, dtype=jnp.float32)
-            dummy_root_value = 0.0
-            return next_env, obs, dummy_action, reward, dummy_root_value, dummy_policy, next_done
-
-        return jax.lax.cond(
-            jnp.any(val_act) & (~done),
-            mcts_step,
-            no_action_step
-        )
-
-    # Führe vmap aus. Beachte, dass `params_list` nicht mehr Teil des vmap-Aufrufs ist.
-    # Stattdessen übergeben wir `current_players`, um die Auswahl innerhalb von `perform_action` zu treffen.
-    next_envs, obs, actions, rewards, root_values, policy_output_action_weights, next_dones = jax.vmap(
-        perform_action, in_axes=(0, 0, 0, 0, 0, 0)
-    )(envs, obs, val_actions, dones, current_players, jax.random.split(rng_key, envs.board.shape[0]))
-    
-    rewards = jnp.where(dones, 0.0, rewards)
-    final_dones = jnp.logical_or(dones, next_dones)
-    
-    return next_envs, (obs, actions, rewards, root_values, policy_output_action_weights, final_dones)
 
 def calculate_progress(env: DOG, player_idx: int) -> int:
     '''
@@ -211,72 +158,25 @@ def calculate_player_progress(envs):
     x = jax.vmap(player_progress_single)(envs)
     return jnp.mean(x, axis=0), x
 
-def play_n_games_for_eval(params_list, rng_key, num_envs=20, starting_player=0):
-    """
-    Spielt num_envs Spiele parallel und gibt eine Liste von Episoden zurück.
-    """
-    # 1. Initialisierung der Environments
-    rng_key, subkey = jax.random.split(rng_key)
-    seeds = jax.random.randint(subkey, (num_envs,), 0, 1000000)
-    envs = batch_reset(seeds, jnp.full((num_envs,), starting_player))
-    
-    # Buffer für jedes Environment (Liste von Listen)
-    winners = jnp.zeros((num_envs,4), dtype=jnp.int32)
-    
-    active_mask = np.ones(num_envs, dtype=bool)
-    
-    step_counter = 0
-    MAX_STEPS = 2000 # Sicherheitsabbruch, falls Spiele hängen
-    
-    # Loop solange noch mindestens ein Spiel läuft
-    while np.any(active_mask) and step_counter < MAX_STEPS:
-        step_counter += 1
-        rng_key, subkey = jax.random.split(rng_key)
-        
-        # JIT-Step ausführen (läuft auf GPU/TPU für alle Envs gleichzeitig)
-        current_players = envs.current_player
-        params_for_envs = [params_list[int(player)] for player in current_players]
-        envs, data = multiactor_step(envs, tuple(params_for_envs), subkey)
-        
-        # Daten auf CPU holen für Listen-Operationen
-        obs, acts, rews, vals, pols, dones = jax.device_get(data)
-        
-        # fetch winners if done
-        for i in range(num_envs):
-            if active_mask[i] and dones[i]:
-                active_mask[i] = False
-                winner = manual_get_winner(envs.board[i], envs.num_players, envs.goal[i], envs.rules)
-                winners = winners.at[i].add(jnp.array(winner, dtype=jnp.int32))
-    
-    # Get Progress Stats
-    progress_mean, progress_all = calculate_player_progress(envs)
-    return jnp.sum(winners, axis=0), progress_mean
-
-def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20):
+def evaluate_agent_parallel(params1, params2, params3, params4, type1=None, type2=None, type3=None, type4=None, batch_size=20):
     # use random agents if params are None
     env = env_reset_batched(0, 0)  # Dummy-Reset, um die Form der Beobachtungen zu erhalten
     enc = encode_board(env)  # 
+    enc = encode_board_with_belief(env)  #
     agents = []
-    for param in [params1, params2, params3, params4]:
+    for param, agent_type in zip([params1, params2, params3, params4], [type1, type2, type3, type4]):
         if param is None:
-            param = init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
-            param['type'] = 1
+            param = init_session_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
+            param['type'] = 1 if agent_type is None else agent_type
         elif param == 'rule_based_agent':
-            param = init_muzero_params(jax.random.PRNGKey(0), enc.shape)
+            param = init_session_params(jax.random.PRNGKey(0), enc.shape)
             param['type'] = 2
         elif param == 'random_agent':
-            param = init_muzero_params(jax.random.PRNGKey(0), enc.shape)
+            param = init_session_params(jax.random.PRNGKey(0), enc.shape)
             param['type'] = 3
         else:               
-            param['type'] = 0
+            param['type'] = agent_type if agent_type is not None else 1
         agents.append(param)
-
-    for i, param in enumerate(agents):
-        if isinstance(param, dict):
-            print(f"Agent {i} dynamics param keys:", param['dynamics']['params'].keys())
-        else:
-            print(f"Agent {i} is not a param dict, but:", param)
-
 
     winners = jnp.array([[0, 0, 0, 0],
                [0, 0, 0, 0],
@@ -360,12 +260,13 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                     lambda: params_tuple[3],
                 ])
                 
-                obs = encode_board(env)[None, ...]
+                # obs = encode_board(env)[None, ...]
+                obs = encode_board_with_belief(env)[None, ...]
                 valid_mask = valid_actions(env).flatten()
                 invalid_mask = (~valid_mask)[None, :]
                 
                 def do_mcts():
-                    policy_output, _ = run_muzero_mcts(
+                    policy_output, _ = session_muzero( #TODO:
                         params, key, obs, 
                         invalid_actions=invalid_mask,
                         num_simulations=NUM_SIMULATIONS,
@@ -383,92 +284,92 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
                     return next_env, next_done
                 
                 def do_rule_based():
-                    next_env, reward, next_done = env_step(env, 0)
-                    return next_env, next_done
-                    current_player = env.current_player
-                    current_goal = env.goal[current_player] # (num_pins,)
-                    current_positions = env.pins[current_player][:,None] # (num_pins, 1)
-                    actions = jnp.arange(6)
-                    # normal moved positions
-                    moved_positions = current_positions + actions  # (num_pins, 6)
-                    # fitted moved positions
-                    fitted_positions = moved_positions % env.board_size # (num_pins, 6)
-                    # steps into goal area
-                    x = moved_positions - env.target[current_player] - jnp.int8(env.rules['must_traverse_start']) # (num_pins, 6)
-
-                    # calc which position is correct for each pin x action
-                    new_positions = jnp.where( # shape: (num_pins, 6)
-                        (current_positions < 0) ,
-                        env.start[current_player],  # pins in home can only move to start, shape: (num_pins, 6)
-                        jnp.where(
-                            current_positions >= env.board_size,
-                            moved_positions,  # pins in goal area move normally, shape: (num_pins, 6)
-                            jnp.where(
-                                (4 >= x) & (x > 0) & (current_positions <= env.target[current_player]),
-                                env.goal[current_player, x-1],
-                                fitted_positions  # pins on board move normally, shape: (num_pins, 6)
-                            )
+                    # ── Play phase: score every action by immediate progress gain ──────────
+                    # actual_player: in team mode, if current player's pins are already done,
+                    # env_step moves the partner's pins instead — track those.
+                    def do_play_phase():
+                        player_id = env.current_player
+                        actual_player = jnp.where(
+                            env.rules["enable_teams"] & is_player_done(
+                                env.num_players, env.board, env.goal, player_id),
+                            (player_id + 2) % 4,
+                            player_id
                         )
-                    ) 
-                    # Calculate opponent pins
-                    all_pins = env.pins
-                    opp = jnp.ones_like(all_pins).at[current_player].set(0)
-                    pos = jax.lax.cond(
-                        env.rules['enable_teams'],
-                        lambda opp: opp.at[(current_player + 2) % 4].set(0),
-                        lambda opp: opp,
-                        operand=opp
-                    )
-                    opponent_pins = jnp.where(
-                        pos == 1,
-                        all_pins,
-                        -jnp.ones_like(all_pins)
-                    ).flatten()
+                        baseline = calculate_progress(env, actual_player)
 
-                    # Count pins in home for early-game strategy
-                    pins_in_home = jnp.sum(env.pins[current_player] < 0)
-                    
-                    # BASE SCORE: Prefer actions that are abundant
-                    valid_mask_reshaped = valid_mask.reshape(4, 6)  # (num_pins, 6)
-                    action_counts = jnp.sum(valid_mask_reshaped, axis=0)  # (6,)
-                    action_abundance = action_counts / jnp.maximum(jnp.sum(action_counts), 1.0)
-                    base_score = jnp.repeat(action_abundance, 4)  # (24,)
-                    
-                    # BONUS 1: Moving into goal (+5.0)
-                    goal_bonus = jnp.where(
-                        jnp.isin(new_positions, current_goal) & (current_positions < env.board_size),
-                        5.0,
-                        0.0
-                    ).flatten()
-                    
-                    # BONUS 2: Getting pin out of house
-                    out_of_home_weight = jnp.where(pins_in_home >= 2, 3.0, 2.0)
-                    out_bonus = jnp.where(
-                        (current_positions < 0) & (new_positions == env.start[current_player]),
-                        out_of_home_weight,
-                        0.0
-                    ).flatten()
-                    
-                    # BONUS 3: Hitting opponent (+2.5)
-                    hit_bonus = jnp.where(
-                        (new_positions != current_positions) & jnp.isin(new_positions, opponent_pins),
-                        2.0,
-                        0.0
-                    ).flatten()
-                    
-                    # TOTAL SCORE
-                    policy_scores = base_score + goal_bonus + out_bonus + hit_bonus
+                        def score_action(a):
+                            ne, _, _ = env_step(env, a)
+                            return baseline - calculate_progress(ne, actual_player)
 
-                    # WICHTIG: Erst mit valid_mask maskieren, damit nur legale Aktionen gewählt werden!
-                    policy_scores = jnp.where(valid_mask, policy_scores, -jnp.inf)
-                    
-                    # Softmax with temperature
-                    temperature = 0.25
-                    policy_logits = policy_scores / temperature
-                    
-                    action = jax.random.categorical(key, policy_logits)
-                    mapped_act = action
-                    next_env, reward, next_done = env_step(env, mapped_act)
+                        return jnp.concatenate([jax.vmap(score_action)(jnp.arange(440)), jnp.full(14, -jnp.inf)])  # (454,)
+
+                    # ── Swap phase: choose which card to pass to partner ──────────────────
+                    # Card indices: 0=Joker, 1=Swap-pin, 2..6=2-6, 7=hot-7,
+                    #               8..10=8-10, 11=1/11, 12=12, 13=13
+                    def do_swap_phase():
+                        player_id = env.current_player
+                        partner   = (player_id + 2) % 4
+                        hand      = env.hands[player_id].astype(jnp.float32)  # (14,)
+
+                        own_progress     = calculate_progress(env, player_id)
+                        partner_progress = calculate_progress(env, partner)
+                        own_done         = own_progress <= 0.0
+                        partner_needs    = partner_progress > 0.0
+
+                        # Higher = more willing to pass this card type
+                        base_priority = jnp.array([
+                             0.0,  # 0:  Joker        — keep
+                             6.0,  # 1:  Swap-pin     — situational
+                             8.0,  # 2:  2            — small, easy to pass
+                             7.0,  # 3:  3
+                             7.0,  # 4:  -4/4         — risky, pass first
+                             7.0,  # 5:  5
+                             7.0,  # 6:  6
+                             0.0,  # 7:  hot-7        — very strong, keep
+                             6.0,  # 8:  8
+                             6.0,  # 9:  9
+                             5.0,  # 10: 10
+                             0.0,  # 11: 1/11         — exit-home card, keep
+                             5.0,  # 12: 12
+                             2.0,  # 13: 13           — exit-home card, keep
+                        ], dtype=jnp.float32)
+
+                        # If own pins are all done but partner still needs exit cards,
+                        # Joker / 1|11 / 13 become high-priority to pass so partner
+                        # doesn't have to discard them.
+                        starting_bonus = jnp.array([
+                            15.0,  # 0:  Joker
+                             0.0,  # 1:  Swap-pin
+                             0.0,  # 2:  2
+                             0.0,  # 3:  3
+                             0.0,  # 4:  -4/4
+                             0.0,  # 5:  5
+                             0.0,  # 6:  6
+                             0.0,  # 7:  hot-7
+                             0.0,  # 8:  8
+                             0.0,  # 9:  9
+                             0.0,  # 10: 10
+                            15.0,  # 11: 1/11
+                             0.0,  # 12: 12
+                            15.0,  # 13: 13
+                        ], dtype=jnp.float32)
+                        pass_starting_bonus = jnp.where(own_done & partner_needs, starting_bonus, 0.0)
+
+                        # If holding 2+ of a special card (Joker/hot-7/1|11/13),
+                        # one copy is redundant — raise its pass priority.
+                        is_special = jnp.array([1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1], dtype=jnp.float32)
+                        double_bonus = jnp.where((hand >= 2.0) & (is_special > 0), 3.0, 0.0)
+
+                        priority    = base_priority + pass_starting_bonus + double_bonus
+                        in_hand     = hand > 0.0
+                        swap_scores = jnp.where(in_hand, priority, -jnp.inf)  # (14,)
+
+                        # Play-action slots are invalid in swap phase
+                        return jnp.concatenate([jnp.full(440, -jnp.inf), swap_scores])  # (454,)
+
+                    scores = jax.lax.cond(env.phase == 0, do_play_phase, do_swap_phase)
+                    action = jnp.argmax(jnp.where(valid_mask, scores, -jnp.inf))
+                    next_env, reward, next_done = env_step(env, action)
                     return next_env, next_done
 
                 def do_no_step():
@@ -534,42 +435,475 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
     
     return final_envs, final_winners
 
+def collect_random_game_stats(num_envs=50, max_steps=2000, seed=42):
+    """
+    Plays fully random games and collects per-step stats:
+      - number of valid actions
+      - hand_size of the current player
+      - phase (0=play, 1=swap)
+      - current player index
+
+    All stats are filtered to real steps (has_valid=True) only.
+    Prints a full breakdown at the end.
+    """
+    rng_key = jax.random.PRNGKey(seed)
+    rng_key, subkey = jax.random.split(rng_key)
+    seeds = jax.random.randint(subkey, (num_envs,), 0, 1_000_000)
+    envs = jax.vmap(lambda s: env_reset_batched(s, 0))(seeds)
+
+    # Per-step stat accumulators (numpy lists, appended each outer step)
+    all_n_valid   = []  # int
+    all_hand_size = []  # int
+    all_phase     = []  # 0 or 1
+    all_player    = []  # 0..3
+
+    # No-step event accumulators (active env, but has_valid=False → no legal move)
+    no_step_hand_size = []
+    no_step_phase     = []
+    no_step_player    = []
+
+    # Action frequency counter — shape (454,), accumulated across all steps
+    action_freq = np.zeros(454, dtype=np.int64)
+
+    # Low-valid-action samples: capture env state when n_valid <= 2
+    # Sampled lazily (at most MAX_LOW_SAMPLES total, reservoir-sampled)
+    MAX_LOW_SAMPLES = 50
+    low_samples = []     # list of dicts, filled during the loop
+    low_sample_count = 0  # total low-valid steps seen (for reservoir sampling)
+
+    @jax.jit
+    def random_step_all(envs, rng_key):
+        """One random step for every env in parallel. Returns (next_envs, stats, dones)."""
+        def step_one(env, key):
+            valid_mask = valid_actions(env).flatten()   # (454,)
+            has_valid  = jnp.any(valid_mask)
+
+            def do_random(env):
+                logits   = jnp.where(valid_mask, 0.0, -1e9)
+                action   = jax.random.categorical(key, logits)
+                next_env, _, done = env_step(env, action)
+                return next_env, done, action.astype(jnp.int32)
+
+            def do_no_step(env):
+                next_env, _, done = no_step(env)
+                return next_env, done, jnp.int32(-1)
+
+            next_env, done, action_taken = jax.lax.cond(has_valid, do_random, do_no_step, env)
+
+            n_valid   = jnp.sum(valid_mask).astype(jnp.int32)
+            hand_size = env.hand_size.astype(jnp.int32)
+            phase     = env.phase.astype(jnp.int32)
+            player    = env.current_player.astype(jnp.int32)
+            return next_env, done, n_valid, hand_size, phase, player, has_valid, action_taken
+
+        keys = jax.random.split(rng_key, num_envs)
+        next_envs, dones, n_valids, hand_sizes, phases, players, has_valids, actions_taken = jax.vmap(step_one)(envs, keys)
+        return next_envs, dones, n_valids, hand_sizes, phases, players, has_valids, actions_taken
+
+    active = np.ones(num_envs, dtype=bool)
+    for step in range(max_steps):
+        if not np.any(active):
+            break
+        rng_key, subkey = jax.random.split(rng_key)
+        prev_envs = envs  # snapshot BEFORE step — used for low-valid sampling
+        envs, dones, n_valids, hand_sizes, phases, players, has_valids, actions_taken = random_step_all(envs, subkey)
+
+        # device → host once per outer step
+        dones_np        = np.array(dones,         dtype=bool)
+        n_valids_np     = np.array(n_valids,       dtype=np.int32)
+        hand_sizes_np   = np.array(hand_sizes,     dtype=np.int32)
+        phases_np       = np.array(phases,         dtype=np.int32)
+        players_np      = np.array(players,        dtype=np.int32)
+        has_valids_np   = np.array(has_valids,     dtype=bool)
+        actions_taken_np = np.array(actions_taken, dtype=np.int32)
+
+        # Only record real (non-forced-skip) steps in still-active envs
+        record_mask = active & has_valids_np
+        if np.any(record_mask):
+            all_n_valid.extend(n_valids_np[record_mask].tolist())
+            all_hand_size.extend(hand_sizes_np[record_mask].tolist())
+            all_phase.extend(phases_np[record_mask].tolist())
+            all_player.extend(players_np[record_mask].tolist())
+            # Accumulate action frequencies for recorded steps
+            valid_actions_taken = actions_taken_np[record_mask]
+            np.add.at(action_freq, valid_actions_taken, 1)
+
+        # ── Low-valid-action sampling ─────────────────────────────────
+        # For steps with n_valid <= 2, capture env state for diagnostic printing.
+        # Uses reservoir sampling so we get a uniform sample over all such steps.
+        low_mask = active & has_valids_np & (n_valids_np <= 2)
+        low_indices = np.where(low_mask)[0]
+        for env_i in low_indices:
+            low_sample_count += 1
+            # Reservoir sampling: keep with prob MAX_LOW_SAMPLES / count
+            if len(low_samples) < MAX_LOW_SAMPLES:
+                slot = len(low_samples)
+                do_insert = True
+            else:
+                slot = int(np.random.randint(0, low_sample_count))
+                do_insert = slot < MAX_LOW_SAMPLES
+            if do_insert:
+                # Extract single env from the pre-step batch (consistent with phases_np, n_valids_np)
+                env_single = jax.tree_util.tree_map(lambda x: x[env_i], prev_envs)
+                cp = int(np.array(env_single.current_player))
+                hand = np.array(env_single.hands[cp], dtype=np.int32)
+                pins = np.array(env_single.pins, dtype=np.int32)
+                phase = int(phases_np[env_i])
+                hs = int(hand_sizes_np[env_i])
+                nv = int(n_valids_np[env_i])
+                # Decode which specific action indices are valid
+                vmask = np.array(valid_actions(env_single).flatten(), dtype=bool)
+                valid_idxs = np.where(vmask)[0].tolist()
+                sample = {
+                    'n_valid': nv, 'phase': phase, 'hand_size': hs,
+                    'player': cp, 'hand': hand.tolist(), 'pins': pins.tolist(),
+                    'valid_action_indices': valid_idxs,
+                }
+                if len(low_samples) < MAX_LOW_SAMPLES:
+                    low_samples.append(sample)
+                else:
+                    low_samples[slot] = sample
+        no_step_mask = active & ~has_valids_np
+        if np.any(no_step_mask):
+            no_step_hand_size.extend(hand_sizes_np[no_step_mask].tolist())
+            no_step_phase.extend(phases_np[no_step_mask].tolist())
+            no_step_player.extend(players_np[no_step_mask].tolist())
+
+        active &= ~dones_np
+
+    # ── Analysis ────────────────────────────────────────────────
+    all_n_valid   = np.array(all_n_valid,   dtype=np.int32)
+    all_hand_size = np.array(all_hand_size, dtype=np.int32)
+    all_phase     = np.array(all_phase,     dtype=np.int32)
+    all_player    = np.array(all_player,    dtype=np.int32)
+    N = len(all_n_valid)
+
+    sep = "=" * 60
+    print(f"\n{sep}")
+    print(f"  RANDOM GAME STATS  ({num_envs} games, {N:,} real steps)")
+    print(sep)
+
+    print(f"\n--- Valid Actions per Step ---")
+    print(f"  mean   : {all_n_valid.mean():.2f}")
+    print(f"  median : {int(np.median(all_n_valid))}")
+    print(f"  min    : {all_n_valid.min()}")
+    print(f"  max    : {all_n_valid.max()}")
+    buckets = [(1,1,'=1'), (2,3,'2-3'), (4,6,'4-6'), (7,10,'7-10'),
+               (11,20,'11-20'), (21,50,'21-50'), (51,100,'51-100'), (101,454,'101+')]
+    for lo, hi, lbl in buckets:
+        cnt = int(np.sum((all_n_valid >= lo) & (all_n_valid <= hi)))
+        if cnt > 0:
+            print(f"    {lbl:>8} : {cnt:>8,}  ({100*cnt/N:.1f}%)")
+
+    print(f"\n--- Valid Actions by Hand Size ---")
+    for hs in sorted(np.unique(all_hand_size)):
+        mask = all_hand_size == hs
+        sub  = all_n_valid[mask]
+        print(f"  hand_size={hs} : {mask.sum():>7,} steps | "
+              f"mean={sub.mean():.2f}  median={int(np.median(sub))}  "
+              f"min={sub.min()}  max={sub.max()}")
+
+    print(f"\n--- Valid Actions by Phase ---")
+    for ph, label in [(0, 'play'), (1, 'swap')]:
+        mask = all_phase == ph
+        if mask.sum() == 0:
+            continue
+        sub = all_n_valid[mask]
+        print(f"  phase={ph} ({label}) : {mask.sum():>7,} steps | "
+              f"mean={sub.mean():.2f}  median={int(np.median(sub))}  "
+              f"min={sub.min()}  max={sub.max()}")
+
+    print(f"\n--- Step Distribution by Phase ---")
+    for ph, label in [(0, 'play'), (1, 'swap')]:
+        cnt = int(np.sum(all_phase == ph))
+        print(f"  phase={ph} ({label}) : {cnt:>8,}  ({100*cnt/N:.1f}%)")
+
+    print(f"\n--- Step Distribution by Player ---")
+    for p in range(4):
+        cnt = int(np.sum(all_player == p))
+        print(f"  player {p} : {cnt:>8,}  ({100*cnt/N:.1f}%)")
+
+    print(f"\n--- Hand Size Distribution ---")
+    for hs in sorted(np.unique(all_hand_size)):
+        cnt = int(np.sum(all_hand_size == hs))
+        print(f"  hand_size={hs} : {cnt:>8,}  ({100*cnt/N:.1f}%)")
+
+    # ── Action frequency breakdown ───────────────────────────────
+    # Action space layout (440 play + 14 swap-phase = 454 total):
+    #   [0:220]    joker copies of all play actions
+    #   [0:48]     joker × swap-pin moves
+    #   [48:168]   joker × hot-7 splits (120 combos)
+    #   [168:212]  joker × normal moves (11 cards × 4 pins)
+    #   [212:220]  joker × neg-4 moves (4 pins × 2)  ← actually last 4 of first 220
+    #   [220:268]  swap-pin moves (48)
+    #   [268:388]  hot-7 splits (120)
+    #   [388:432]  normal card moves (11 cards × 4 pins)
+    #   [432:440]  neg-4 moves (4 pins, counted ×2 here: 8 total across joker/real)
+    #   [440:454]  swap-phase actions (14)
+    segments = [
+        (0,   220, "joker copies (0-219)"),
+        (0,    48, "  joker × swap-pin (0-47)"),
+        (48,  168, "  joker × hot-7     (48-167)"),
+        (168, 216, "  joker × normal    (168-215)"),
+        (216, 220, "  joker × neg-4     (216-219)"),
+        (220, 440, "real play actions (220-439)"),
+        (220, 268, "  real swap-pin   (220-267)"),
+        (268, 388, "  real hot-7       (268-387)"),
+        (388, 436, "  real normal      (388-435)"),
+        (436, 440, "  real neg-4       (436-439)"),
+        (440, 454, "swap-phase actions (440-453)"),
+    ]
+    print(f"\n--- Action Frequency by Segment ---")
+    print(f"  (total recorded steps: {N:,})")
+    for lo, hi, label in segments:
+        cnt    = int(action_freq[lo:hi].sum())
+        nonzero = int(np.sum(action_freq[lo:hi] > 0))
+        indent = "  " if label.startswith("  ") else ""
+        print(f"  {indent}{label:<38} : {cnt:>8,}  ({100*cnt/N:5.1f}%)  "
+              f"[{nonzero}/{hi-lo} actions ever used]")
+    print(f"\n--- Zero-frequency actions ---")
+    never_used = int(np.sum(action_freq == 0))
+    print(f"  {never_used}/454 actions never selected in {num_envs} random games")
+
+    # ── Low-valid-action deep-dive ───────────────────────────────
+    # Card index → human name (deck layout: 0=joker,1=swap,2..13=cards 2-13 except 7→hot7)
+    CARD_NAMES = {0:'Joker', 1:'Swap', 2:'2', 3:'3', 4:'4(-4)', 5:'5',
+                  6:'6', 7:'7(hot)', 8:'8', 9:'9', 10:'10', 11:'1/11', 12:'12', 13:'13'}
+    # Action segment labels for quick human-readable decode
+    def action_label(idx):
+        if idx < 0:   return 'none'
+        if idx < 48:  return f'J×swap #{idx}'
+        if idx < 168: return f'J×hot7 dist#{idx-48}'
+        if idx < 216: return f'J×normal #{idx-168}'
+        if idx < 220: return f'J×neg4 pin{idx-216}'
+        if idx < 268: return f'swap #{idx-220}'
+        if idx < 388: return f'hot7 dist#{idx-268}'
+        if idx < 436: return f'normal #{idx-388}'
+        if idx < 440: return f'neg4 pin{idx-436}'
+        return f'swap-phase card{idx-440}'
+
+    print(f"\n--- Low-Valid-Action Samples (n_valid<=2, {len(low_samples)} of {low_sample_count} sampled) ---")
+    print(f"  hand layout: [Joker,Swap,2,3,4(-4),5,6,7(hot),8,9,10,1/11,12,13]")
+    print(f"  pins layout: (player, pin_slot) — value=-1 means home, 0..63 circular board, 64+ goal")
+    print()
+    for s in low_samples:
+        hand = s['hand']
+        cards_held = [CARD_NAMES[i] for i, cnt in enumerate(hand) if cnt > 0]
+        pins_str = '  '.join(
+            f"P{pi}:{s['pins'][pi]}" for pi in range(len(s['pins']))
+        )
+        acts_str = '  '.join(action_label(a) for a in s['valid_action_indices'])
+        print(f"  n={s['n_valid']}  phase={'play' if s['phase']==0 else 'swap'}  "
+              f"hs={s['hand_size']}  player={s['player']}")
+        print(f"    hand      : {hand}  →  cards: {cards_held}")
+        print(f"    pins      : {pins_str}")
+        print(f"    valid acts: [{acts_str}]")
+        print()
+
+    # ── No-step events ───────────────────────────────────────────
+    no_step_hand_size_np = np.array(no_step_hand_size, dtype=np.int32)
+    no_step_phase_np     = np.array(no_step_phase,     dtype=np.int32)
+    no_step_player_np    = np.array(no_step_player,    dtype=np.int32)
+    N_no = len(no_step_phase_np)
+    total_active = N + N_no
+    print(f"\n--- No-Step Events (game active, no legal moves) ---")
+    print(f"  Total no-steps : {N_no:,}  ({100*N_no/total_active:.2f}% of all active steps)")
+    if N_no > 0:
+        print(f"  By phase:")
+        for ph, label in [(0, 'play'), (1, 'swap')]:
+            cnt = int(np.sum(no_step_phase_np == ph))
+            if cnt > 0:
+                print(f"    phase={ph} ({label}) : {cnt:>7,}  ({100*cnt/N_no:.1f}%)")
+        print(f"  By hand size:")
+        for hs in sorted(np.unique(no_step_hand_size_np)):
+            cnt = int(np.sum(no_step_hand_size_np == hs))
+            print(f"    hand_size={hs} : {cnt:>7,}  ({100*cnt/N_no:.1f}%)")
+        print(f"  By player:")
+        for p in range(4):
+            cnt = int(np.sum(no_step_player_np == p))
+            print(f"    player {p} : {cnt:>7,}  ({100*cnt/N_no:.1f}%)")
+
+    print(sep)
+    return (all_n_valid, all_hand_size, all_phase, all_player, action_freq,
+            no_step_hand_size_np, no_step_phase_np, no_step_player_np)
+
+def fairness_check(batch_size=20, seed=None):
+    """
+    Plays batch_size * 4 games with exclusively random agents.
+    Each starting player (0-3) starts exactly batch_size games.
+    Uses a dedicated JIT loop that only knows random / no_step.
+    """
+    if seed is None:
+        seed = np.random.randint(0, 1_000_000)
+
+    rng_key = jax.random.PRNGKey(seed)
+    rng_key, subkey = jax.random.split(rng_key)
+
+    num_total = batch_size * 4
+    seeds = jax.random.randint(subkey, (num_total,), 0, 1_000_000)
+    starting_players = jnp.repeat(jnp.arange(4), batch_size)
+    envs = batch_reset(seeds, starting_players)
+
+    final_envs, winners_flat, pscs_flat = _random_only_loop(envs, subkey, num_total)
+
+    winners_split = jnp.array_split(winners_flat, 4, axis=0)
+    winners = jnp.stack([jnp.sum(w, axis=0) for w in winners_split])  # (4, 4)
+
+    progress_mean, _ = calculate_player_progress(final_envs)
+
+    total_wins = jnp.sum(winners)
+    wins_per_player = jnp.sum(winners, axis=0)
+    win_pct = wins_per_player / jnp.maximum(total_wins, 1) * 100
+
+    # Step counts per player (summed over all games)
+    steps_per_player = jnp.sum(pscs_flat, axis=0)  # (4,)
+    total_steps = jnp.sum(steps_per_player)
+    steps_pct = steps_per_player / jnp.maximum(total_steps, 1) * 100
+
+    print("\n" + "=" * 60)
+    print("FAIRNESS CHECK – All Random Agents")
+    print("=" * 60)
+    print(f"Games per starting position: {batch_size}  (total: {num_total})")
+    print("\nTotal Wins per Player and different Starters:\n", winners)
+    print("\nTotal Wins per Player:\n", wins_per_player)
+    print("\nWin % per Player:", win_pct)
+    if RULES['enable_teams']:
+        team_a = float(win_pct[0] + win_pct[2])
+        team_b = float(win_pct[1] + win_pct[3])
+        print(f"\nTeam A (0&2): {team_a:.1f}%  |  Team B (1&3): {team_b:.1f}%")
+    print("\nTotal Steps per Player:", steps_per_player)
+    print("Steps % per Player:", steps_pct)
+    if RULES['enable_teams']:
+        steps_a = float(steps_pct[0] + steps_pct[2])
+        steps_b = float(steps_pct[1] + steps_pct[3])
+        print(f"Steps Team A (0&2): {steps_a:.2f}%  |  Steps Team B (1&3): {steps_b:.2f}%")
+    print("\nMean Final Pin Distance per Player:\n", progress_mean)
+    print("=" * 60)
+
+    return winners, progress_mean
+
+
+@functools.partial(jax.jit, static_argnames=['num_envs'])
+def _random_only_loop(envs, rng_key, num_envs):
+    """JIT loop that only executes random actions or no_step."""
+
+    def body_fn(carry):
+        envs, winners, dones, step_count, rng_key, player_step_counts = carry
+
+        rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
+        step_keys = jnp.array(step_keys)
+
+        def step_single_env(env, done, key, winner, psc):
+            def do_step(env, winner, psc):
+                valid_mask = valid_actions(env).flatten()
+
+                def do_random():
+                    logits = jnp.where(valid_mask, 0.0, -1e9)
+                    action = jax.random.categorical(key, logits)
+                    next_env, _, next_done = env_step(env, action)
+                    return next_env, next_done
+
+                def do_no_step():
+                    next_env, _, next_done = no_step(env)
+                    return next_env, next_done
+
+                next_env, next_done = jax.lax.cond(
+                    jnp.any(valid_mask),
+                    do_random,
+                    do_no_step,
+                )
+
+                new_winner = jax.lax.cond(
+                    next_done,
+                    lambda: winner + manual_get_winner(
+                        next_env.board, next_env.num_players,
+                        next_env.goal, next_env.rules
+                    ).astype(jnp.int32),
+                    lambda: winner,
+                )
+                # Count the step for the player who just acted
+                new_psc = psc + (jnp.arange(4) == env.current_player).astype(jnp.int32)
+                return next_env, next_done, new_winner, new_psc
+
+            return jax.lax.cond(
+                ~done,
+                lambda: do_step(env, winner, psc),
+                lambda: (env, done, winner, psc),
+            )
+
+        new_envs, new_dones, new_winners, new_pscs = jax.vmap(step_single_env)(
+            envs, dones, step_keys, winners, player_step_counts
+        )
+        return (new_envs, new_winners, new_dones, step_count + 1, rng_key, new_pscs)
+
+    def cond_fn(carry):
+        _, _, dones, step_count, _, _ = carry
+        return jnp.any(~dones) & (step_count < 2000)
+
+    init_winners = jnp.zeros((num_envs, 4), dtype=jnp.int32)
+    init_player_step_counts = jnp.zeros((num_envs, 4), dtype=jnp.int32)
+    final_envs, final_winners, _, _, _, final_pscs = jax.lax.while_loop(
+        cond_fn,
+        body_fn,
+        (envs, init_winners, envs.done, 0, rng_key, init_player_step_counts),
+    )
+    return final_envs, final_winners, final_pscs
+
 
 # Rules for evaluation games - can be adjusted to test specific rule variations
 RULES = {
-    'enable_teams': True,
-    'enable_initial_free_pin': False,
-    'enable_circular_board': False,
-    'enable_friendly_fire': True,
-    'enable_start_blocking': True,
-    'enable_jump_in_goal_area': False,
-    'must_traverse_start': True,
-    'disable_swapping': False,
-    'disable_hot_seven': False,
-    'disable_joker': False,
+    'enable_teams': True, # DOG-standard is True
+    'enable_initial_free_pin': False, # DOG-standard is False
+    'enable_circular_board': False, # DOG-standard is True
+    'enable_friendly_fire': True, # DOG-standard is True
+    'enable_start_blocking': True, # DOG-standard is True
+    'enable_jump_in_goal_area': False, # DOG-standard is False
+    'must_traverse_start': True, # DOG-standard is True
+    'disable_swapping': False, # DOG-standard is False
+    'disable_hot_seven': False, # DOG-standard is False
+    'disable_joker': False, # DOG-standard is False
 }
-
-start_time = time()
-NUM_SIMULATIONS = 70
-MAX_DEPTH = 40
+# start_time = time()
+NUM_SIMULATIONS = 50
+MAX_DEPTH = 25
 TEMPERATURE = 0.0
-# # play_n_randomly(batch_size=1000)  
 
-FILENAME = 'MuZero_DOG/models/params/muzero_dog_params_lr0.001_g200_it50_seed18.pkl'
+# collect_random_game_stats(num_envs=500, max_steps=2000, seed=33)
 
-params1 = 'random_agent'
-params2 = load_params_from_file(FILENAME)
-params3 = 'random_agent'
-params4 = load_params_from_file(FILENAME)
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=50)
+# FILENAME = 'MuZero_DOG/models/params/muzero_dog_params_lr0.001_g500_it50_seed37.pkl'
+# print(f"Evaluating model from {FILENAME} against random agents...")
+# params1 = None
+# params2 = load_params_from_file(FILENAME)
+# params3 = None
+# params4 = load_params_from_file(FILENAME)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-params1 = 'random_agent'
-params2 = None
-params3 = 'random_agent'
-params4 = None
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=50)
+# FILENAME = 'MuZero_DOG/models/params/muzero_dog_params_lr0.001_g500_it50_seed37.pkl'
+# print(f"Evaluating model from {FILENAME} against random agents...")
+# params1 = 'random_agent'
+# params2 = load_params_from_file(FILENAME)
+# params3 = 'random_agent'
+# params4 = load_params_from_file(FILENAME)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-end_time = time()
-print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
+# FILENAME = 'MuZero_DOG/models/params/muzero_dog_params_lr0.001_g500_it100_seed28.pkl'
+# print(f"Evaluating model from {FILENAME} against random agents...")
+# params1 = None
+# params2 = load_params_from_file(FILENAME)
+# params3 = None
+# params4 = load_params_from_file(FILENAME)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+
+
+# FILENAME = 'MuZero_DOG/models/params/muzero_dog_params_lr0.001_g500_it100_seed28.pkl'
+# FILENAME2 = 'MuZero_DOG/models/params/muzero_dog_params_lr0.001_g500_it50_seed28.pkl'
+# params1 = load_params_from_file(FILENAME2)
+# params2 = load_params_from_file(FILENAME)
+# params3 = load_params_from_file(FILENAME2)
+# params4 = load_params_from_file(FILENAME)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+
+# end_time = time()
+# print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
 
 

@@ -14,9 +14,10 @@ import wandb
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 from MuZero_DOG.muzero_dog import repr_net, dynamics_net, pred_net, init_muzero_params, load_params_from_file
-from DOG.dog import env_reset, encode_board
+from DOG.dog import env_reset, encode_board, encode_board_with_belief
 from MuZero_DOG.vec_replay_buffer import VectorizedReplayBuffer
 from MuZero_DOG.game_agent import play_n_games_v3
+# from MuZero_DOG.evaluate_agent import evaluate_agent_parallel
 
 def get_temperature(iteration, total_iterations):
     """Phasenbasiert: nur 4 verschiedene Werte, garantiert gleiche Float-Instanz"""
@@ -135,8 +136,8 @@ def loss_fn(params, batch):
     actions_padded = jnp.concatenate([batch['actions'], jnp.zeros((batch['actions'].shape[0], 1), dtype=jnp.int32)], axis=1)
 
     card_outcomes_padded = jnp.concatenate([
-        batch['card_outcomes'][:, 1:],              # (B, K-2): card_outcomes[1..K-2]
-        jnp.zeros((batch['card_outcomes'].shape[0], 2), dtype=jnp.int32)         # padding
+        batch['card_outcomes'],              # (B, K-2): card_outcomes[1..K-2]
+        jnp.zeros((batch['card_outcomes'].shape[0], 1), dtype=jnp.int32)         # padding
     ], axis=1)  # shape: (B, K)
 
     card_probs_padded = jnp.concatenate([
@@ -317,10 +318,10 @@ def test_training(config, params=None, opt_state=None):
         bootstrap_value_target=config["Bootstrap_Value_Target"]
     )
     
-    # dog_wandb_session.log({"games_in_replay_buffer": replay.size})
+    dog_wandb_session.log({"games_in_replay_buffer": replay.size})
     # collect initial set of games
     print("Collecting initial games...")
-    game_warmup = 0 # TODO: 
+    game_warmup = 5 # TODO: 
     for n in range(game_warmup):
         print(f"{n+1}/{game_warmup} Playing games to fill replay buffer...")
         buffers = play_n_games_v3(
@@ -334,11 +335,11 @@ def test_training(config, params=None, opt_state=None):
             temp=get_temperature(0, iterations)
         )
         replay.save_games_from_buffers(buffers)
-        # dog_wandb_session.log({"games_in_replay_buffer": replay.size})
+        dog_wandb_session.log({"games_in_replay_buffer": replay.size})
 
     times_per_iteration = []
     global_step = 0
-    for it in range(iterations):
+    for it in range(50,iterations):
         start_time = time()
         print(f"Iteration {it+1}/{iterations}")
         if it == switch_to_bootstrap_iteration:
@@ -371,7 +372,7 @@ def test_training(config, params=None, opt_state=None):
 
         print("Saving collected games to replay buffer...")
         replay.save_games_from_buffers(buffers)
-        # dog_wandb_session.log({"games_in_replay_buffer": replay.size})
+        dog_wandb_session.log({"games_in_replay_buffer": replay.size})
 
         print("Training on collected data...")
         train_start = time()
@@ -379,7 +380,7 @@ def test_training(config, params=None, opt_state=None):
             batch = replay.sample_batch()
             params, opt_state, losses = train_step(params, opt_state, batch)
             current_lr = learning_rate_schedule(global_step)
-            # dog_wandb_session.log({**losses, 'learning_rate': float(current_lr)})
+            dog_wandb_session.log({**losses, 'learning_rate': float(current_lr)})
             global_step += 1
             if i % (train_steps_per_iteration // 4) == 0:
                 log_losses = {k: float(v) for k, v in losses.items()}
@@ -392,13 +393,13 @@ def test_training(config, params=None, opt_state=None):
               f"(game_gen={game_gen_time:.1f}s  train={end_time - train_start:.1f}s)")
         times_per_iteration.append(end_time - start_time)
 
-        # if ((it+1) % 50 == 0) or (it == iterations - 1):
-        #     print(f"Saving checkpoint at iteration {it+1}...")
-        #     with open(f'MuZero_DOG/models/params/muzero_dog_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
-        #         pickle.dump(params, f)
+        if (it == iterations - 1):
+            print(f"Saving checkpoint at iteration {it+1}...")
+            with open(f'MuZero_DOG/models/params/muzero_dog_params_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+                pickle.dump(params, f)
 
-        #     with open(f'MuZero_DOG/models/opt_state/muzero_dog_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
-        #         pickle.dump(opt_state, f)
+            with open(f'MuZero_DOG/models/opt_state/muzero_dog_opt_state_lr{config["learning_rate"]}_g{config["num_games_per_iteration"]}_it{it+1}_seed{config["seed"]}.pkl', 'wb') as f:
+                pickle.dump(opt_state, f)
 
     # ============================================================
     # DIAGNOSTIC DUMP: Write replay buffer contents to file
@@ -501,30 +502,23 @@ DISCOUNT_SCALING = 1.0
 REWARD_SCALING = 1.0
 CHANCE_SCALING = 1.0
 config = {
-    "seed": 18,
+    "seed": 40,
     "learning_rate": 0.001,
-    "architecture": "DOG model. Non-circular board.",
-    "num_games_per_iteration": 20,
-    # game_gen_batch_size: number of parallel envs per play_n_games_v3 call.
-    # The mctx stochastic tree is (batch × sims × 582) — DOG has action_dim=454 +
-    # chance_dim=128 = 582, vs MADN's 28. Running 500 envs at once allocates a
-    # ~6 GB tree. Splitting into 5×100 keeps the live tree at ~1.2 GB and
-    # avoids HBM bandwidth saturation that causes 2-3x slowdown after training.
-    # Trade-off: 5 separate JIT calls (each already compiled) vs 1. The between-
-    # batch overhead is the numpy merge (~0.5s total), negligible vs game gen.
-    "iterations": 2,
-    "optimizer": "100 simulations training with small batch size and real DOG ruleset",
-    "Buffer_Capacity": 1500,
-    "Buffer_batch_Size": 64,
+    "architecture": "Chance Classic no belief states no Bootstrapping",
+    "num_games_per_iteration": 500,
+    "iterations": 100,
+    "optimizer": "adamw with piecewise constant learning rate schedule",
+    "Buffer_Capacity": 5000,
+    "Buffer_batch_Size": 128,
     "unroll_steps": 10,
     "td_steps": 50, 
-    "max_episode_length": 1500,
+    "max_episode_length": 1300,
     "MCTS_simulations": 50,
-    "MCTS_max_depth": 40,
-    "Bootstrap_Value_Target": False,
-    "Bootstrap_Switch_Iteration": 101, # Nach X Iterationen wird auf bootstrap value targets umgestellt
+    "MCTS_max_depth": 25,
+    "Bootstrap_Value_Target": False,   # Always bootstrap; MC-only (False) leaves timed-out episodes with target≈0
+    "Bootstrap_Switch_Iteration": 101,   # Enable from iteration 0 (switch mechanism not needed)
     "Temperature_Schedule": TEMPERATURE_SCHEDULE,
-    "train_steps_per_iteration": 500,
+    "train_steps_per_iteration": 1500,
     "rules": RULES,
     "Loss scaling": {
         "value": VALUE_SCALING, 
@@ -536,15 +530,15 @@ config = {
 }
 
 # # prep weights and biases
-# dog_wandb_session = wandb.init(entity="marco-wojtek-tu-dortmund",project="dog-muzero",config=config,)
+dog_wandb_session = wandb.init(entity="marco-wojtek-tu-dortmund",project="dog-muzero",config=config,)
 
 # --- Setup Optimizer ---
 learning_rate_schedule = optax.piecewise_constant_schedule(
     init_value=config["learning_rate"],  # 0.001
     boundaries_and_scales={
-        10 * config["train_steps_per_iteration"]: 0.2,    # It 15:  0.001 → 0.0002
-        25 * config["train_steps_per_iteration"]: 0.2,   # It 35: 0.0002 → 0.00004
-        40 * config["train_steps_per_iteration"]: 0.5,   # It 40: 0.00004 → 0.00002
+        15 * config["train_steps_per_iteration"]: 0.2,   # It 30: 0.001 → 0.0002
+        40 * config["train_steps_per_iteration"]: 0.5,   # It 65: 0.0002 → 0.00004
+        90 * config["train_steps_per_iteration"]: 0.5,   # It 90: 0.00004 → 0.00002
     }
 )
 
@@ -555,9 +549,10 @@ optimizer = optax.chain(
 # --- Start Training ---
 params = None
 opt_state = None
-# params = load_params_from_file('muzero_dog_params_00001.pkl')
-# with open('muzero_dog_opt_state_00001.pkl', 'rb') as f:
-#     opt_state = pickle.load(f)
+filename = 'muzero_dog_params_lr0.001_g500_it50_seed40.pkl'
+params = load_params_from_file(f"MuZero_DOG/models/params/{filename}")
+with open(f"MuZero_DOG/models/opt_state/{filename.replace('params', 'opt_state')}", 'rb') as f:
+    opt_state = pickle.load(f)
 starttime = time()
 params, opt_state, times_per_iteration = test_training(config=config, params=params, opt_state=opt_state)
 endtime = time()

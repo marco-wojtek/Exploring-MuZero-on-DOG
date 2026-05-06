@@ -640,7 +640,17 @@ def val_neg_move(env:DOG, move:int):
         (~pins_on_start[nearest_start_after] | (current_pins == start[current_player])) & result, # true if start not blocked and new pos is free
         result
     )
-    result = result & (env.rules['enable_circular_board'] | (moved_positions >= (start[current_player]))) # if circular board not enabled, prevent moving beyond start position backwards
+    # if circular board not enabled, prevent moving backward past own start (pre-wrap) or going negative (post-wrap)
+    # pre-wrap (pos >= start): moved must stay >= start (no going back before own start)
+    # post-wrap (pos < start): moved must stay >= 0 (no wrapping backward again)
+    result = result & (
+        env.rules['enable_circular_board'] |
+        jnp.where(
+            current_pins >= start[current_player],  # pre-wrap phase
+            moved_positions >= start[current_player],
+            moved_positions >= 0                    # post-wrap phase: only block if would go negative
+        )
+    )
 
     # filter actions for pins in start area
     result = jnp.where(
@@ -698,10 +708,8 @@ def valid_step_actions(env: DOG) -> chex.Array:
 
     # Maske für normale Karten
     normal_mask = valid_action[normal_card_indices]
-
     # Maske für die 1: True, wenn 11 vorhanden ist
     one_mask = valid_action[11]  # Index 11 entspricht Karte 11
-
     # Kombinierte Maske: [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13]
     # 1: one_mask, Rest: normal_mask
     final_mask = jnp.concatenate([one_mask[None], normal_mask])
@@ -1467,4 +1475,88 @@ def encode_boardV3(env: DOG) -> chex.Array:
 
     # Alles zusammenfügen
     board_encoding = jnp.concatenate([player_channels, team_channel, opponent_channel, home_positions, phase_channel, card_channels, opponent_card_channels, played_card_channels, hand_size_channel], axis=0)  # (features, board_size)
+    return board_encoding
+
+def encode_board_with_belief(env: DOG) -> chex.Array:
+    """
+    Wie encode_board, aber opponent_card_channels (3,) wird ersetzt durch
+    belief_channels (3, 14): Erwartete Kartenanzahl je Typ für jeden Gegner.
+    
+    Belief-Berechnung:
+      unbekannt_pool = initial_deck - deck_rest - eigene_hand
+      (= alle Karten die vergeben wurden aber deren Träger unbekannt ist)
+      belief_i = unbekannt_pool / sum(unbekannt_pool) * n_cards_i
+      
+    Das gibt für jeden Gegner den Erwartungswert der Kartentypen in seiner Hand,
+    unter der Annahme dass alle unbekannten Karten gleichmäßig verteilt sind.
+    Durch played_cards ist dieser Pool bereits informativ (gespielte Typen fehlen).
+    """
+    num_players = env.num_players
+    distance = env.board_size // 4
+    current_player = env.current_player
+    rolled_idx = (jnp.arange(num_players) + current_player) % num_players
+
+    # === Board channels (identisch zu encode_board) ===
+    new_board = jnp.roll(env.board[0:env.board_size], shift=-distance*current_player, axis=0)
+    goal_pos = jnp.roll(env.board[env.board_size:env.total_board_size], shift=-4*current_player, axis=0)
+    board = jnp.concatenate([new_board, goal_pos], axis=0)
+    player_channels = (board == rolled_idx[:, None]).astype(jnp.int8)        # (4, 80)
+    team_channel = jnp.sum(player_channels[::2], axis=0, keepdims=True)      # (1, 80)
+    opponent_channel = jnp.sum(player_channels[1::2], axis=0, keepdims=True) # (1, 80)
+    home_positions = jnp.ones((num_players, board.shape[0]), dtype=jnp.int8) * \
+                     jnp.count_nonzero(env.pins == -1, axis=1)[:, None]
+    home_positions = home_positions[rolled_idx]                               # (4, 80)
+    phase_channel = jnp.ones((1, board.shape[0]), dtype=jnp.int8) * env.phase # (1, 80)
+
+    # === Eigene Hand ===
+    current_cards = env.hands[current_player]                                 # (14,)
+    card_channels = jnp.tile(current_cards[:, None], (1, board.shape[0]))    # (14, 80)
+
+    # === Belief-Vektoren für Gegner (NEU, ersetzt opponent_card_channels) ===
+    initial_deck = reset_deck(env)                                            # (14,)
+    played_cards = initial_deck - env.deck - jnp.sum(env.hands, axis=0)      # (14,) bereits gespielt
+    played_card_channels = jnp.tile(played_cards[:, None], (1, board.shape[0])) # (14, 80)
+
+    # Unbekannter Pool: Karten vergeben aber nicht in eigener Hand
+    # = initial - noch_im_deck - eigene_hand
+    # Hinweis: env.deck = Karten die NOCH NICHT verteilt wurden
+    #          initial_deck - env.deck = alle jemals verteilten Karten
+    #          davon eigene abziehen = in Gegner-Händen verteilte (unbekannt welche)
+    unknown_pool = initial_deck - played_cards - current_cards                   # (14,) float
+    unknown_pool = jnp.maximum(unknown_pool.astype(jnp.float32), 0.0)
+    pool_total = jnp.maximum(jnp.sum(unknown_pool), 1.0)
+
+    def belief_for_opponent(opp_idx):
+        n_cards = jnp.sum(env.hands[opp_idx]).astype(jnp.float32)
+        # Gleichverteilungs-Prior: Erwartungswert je Typ = Pool-Anteil * n_cards_dieser_gegner
+        belief = unknown_pool / pool_total * n_cards                          # (14,)
+        return belief
+
+    # Für die 3 Gegner (rolled_idx[1:] = nächster, übernächster, gegenüber relativ zu current)
+    belief_opp1 = belief_for_opponent(rolled_idx[1])  # (14,)
+    belief_opp2 = belief_for_opponent(rolled_idx[2])  # (14,) — das ist der Partner!
+    belief_opp3 = belief_for_opponent(rolled_idx[3])  # (14,)
+
+    # Als Channels kacheln
+    B = board.shape[0]
+    belief_channels = jnp.concatenate([
+        jnp.tile(belief_opp1[:, None], (1, B)),  # (14, 80)
+        jnp.tile(belief_opp2[:, None], (1, B)),  # (14, 80)
+        jnp.tile(belief_opp3[:, None], (1, B)),  # (14, 80)
+    ], axis=0)                                    # (42, 80)
+
+    hand_size_channel = jnp.ones((1, B), dtype=jnp.int8) * env.hand_size    # (1, 80)
+
+    board_encoding = jnp.concatenate([
+        player_channels,       # (4,  80)
+        team_channel,          # (1,  80)
+        opponent_channel,      # (1,  80)
+        home_positions,        # (4,  80)
+        phase_channel,         # (1,  80)
+        card_channels,         # (14, 80)
+        belief_channels,       # (42, 80)  ← ersetzt (3, 80)
+        played_card_channels,  # (14, 80)
+        hand_size_channel,     # (1,  80)
+    ], axis=0)
+    # Neue Shape: (4+1+1+4+1+14+42+14+1, 80) = (82, 80)  statt (43, 80)
     return board_encoding

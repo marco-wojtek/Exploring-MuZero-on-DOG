@@ -34,7 +34,6 @@ RULES = {
     'disable_hot_seven': False, # DOG-standard is False
     'disable_joker': False, # DOG-standard is False
 }
-
 def env_reset_batched(seed):
     return env_reset(
         0,  # <- Das wird an '_' übergeben
@@ -61,7 +60,6 @@ def env_reset_batched(seed):
 # with JAX abstract tracing. Plain vmap is correct here.
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_actions)
-batch_encode = jax.vmap(encode_board)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 
 @functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'num_simulations', 'max_depth', 'max_steps', 'temp'])
