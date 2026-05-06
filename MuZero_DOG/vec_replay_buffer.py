@@ -236,14 +236,14 @@ class VectorizedReplayBuffer:
         # SCHRITT 7: Return Batch
         # ========================================
         return {
-            'observations': jnp.array(root_obs),                              # float16 → repr_net upcasts
-            'actions': jnp.array(actions),                                    # int16 → promoted in concat
-            'rewards': jnp.array(rewards_seq),                                # int8  → .astype(int32) in loss
-            'card_outcomes': jnp.array(card_outcomes),                        # uint8 → bit-ops in chance_dyn
-            'card_probs': jnp.array(card_probs_seq, dtype=jnp.float32),       # float16 → float32 for CE loss
-            'policies': jnp.array(policies, dtype=jnp.float32),               # float16 → float32 for CE loss
-            'values': jnp.array(values),                                      # float16, debug only
-            'masks': jnp.array(masks, dtype=jnp.float32),                     # bool_ → float32 for multiply
-            'target_values': jnp.array(target_values),                        # float64 np → float32 JAX
-            'discount_targets': jnp.array(discount_targets)                   # int8  → .astype(int32) in loss
+            'observations': jnp.array(root_obs),                            
+            'actions': jnp.array(actions),                                  
+            'rewards': jnp.array(rewards_seq),                                
+            'card_outcomes': jnp.array(card_outcomes),                       
+            'card_probs': jnp.array(card_probs_seq, dtype=jnp.float32),      
+            'policies': jnp.array(policies, dtype=jnp.float32),              
+            'values': jnp.array(values),                             
+            'masks': jnp.array(masks, dtype=jnp.float32),                     
+            'target_values': jnp.array(target_values),                        
+            'discount_targets': jnp.array(discount_targets)                   
         }

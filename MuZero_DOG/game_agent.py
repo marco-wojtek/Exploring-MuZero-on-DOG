@@ -54,30 +54,20 @@ def env_reset_batched(seed):
         disable_joker=RULES['disable_joker']
     )
 
-# 2. Vektorisierte Funktionen vorbereiten
-# NOTE: batch_reset cannot be jax.jit-wrapped because env_reset uses boolean array
-# indexing ([layout]) whose output shape depends on concrete values — incompatible
-# with JAX abstract tracing. Plain vmap is correct here.
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_actions)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
 
 @functools.partial(jax.jit, static_argnames=['num_envs', 'input_shape', 'num_simulations', 'max_depth', 'max_steps', 'temp'])
 def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num_simulations, max_depth, max_steps, temp):
-    """MCTS parallel + Early Exit + XLA optimiert
-    Verwende play_batch_of_games_jitted, wenn du viele Spiele parallel simulieren möchtest, insbesondere für Training oder Datengewinnung.
-    """
     def body_fn(carry):
         envs_state, buffers, dones, step_count, rng_key = carry
         
-        # Neue Keys für diesen Step generieren
         rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
         step_keys = jnp.array(step_keys)
 
-        # ✅ PARALLEL: vmap über alle aktiven Envs
         def step_single_env(env, buffer, done, key):
             def do_active_step(env, buffer):
-                # 1. WÜRFELN (automatisch in der Environment)
                 key1, key2 = jax.random.split(key)
                 
                 obs = encode_board(env)[None, ...]
@@ -92,9 +82,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                     lambda: jnp.int8(-1)
                 )
                 
-                # 3. Unterscheidung: MCTS oder no_step
                 def do_mcts(env):
-                    # Stochastic MuZero MCTS
                     policy_output, root_value = run_muzero_mcts(
                         params, key2, obs, invalid_actions=invalid_mask, num_simulations=num_simulations, max_depth=max_depth, temperature=temp
                     )
@@ -191,37 +179,24 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
         return (new_envs, new_buffers, new_dones, step_count + 1, rng_key)
     
     # Initialisierung
-    # GPU while-loop carry dtype summary (num_envs=500, max_steps=800):
-    #   obs:       float16  (500×800×448×2 = 358 MB, was 716 MB float32)
-    #   pol:       float16  (454 = 798 MB, was 1597 MB float32)
-    #   card_dist: float16  (500×800×128×2 = 102 MB, was 204 MB float32)
-    #   all others: int8/uint8/int16/bool_ (< 2 MB each)
-    # Total carry: ~1.27 GB vs ~2.54 GB before.
-    # NOTE: jax.lax.cond under jax.vmap evaluates BOTH branches for ALL envs,
-    # so MCTS runs even for finished games each while-loop step. The loop exits
-    # as soon as jnp.any(~dones) is False, so minimising max_steps is the best
-    # way to reduce this overhead.
     init_buffers = {
-        # float16 saves ~358 MB vs float32; repr_net does x.astype(float32) at first line
         'obs': jnp.zeros((num_envs, max_steps, *input_shape), dtype=jnp.float16),
-        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int16),    # range 0-997 < 32767
-        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),     # class labels 0/1/2
-        'val': jnp.zeros((num_envs, max_steps), dtype=jnp.float16),  # root value in [-1,1]
+        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int16),    
+        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),     
+        'val': jnp.zeros((num_envs, max_steps), dtype=jnp.float16),  
         'pol': jnp.zeros((num_envs, max_steps, 454), dtype=jnp.float16),
-        'mask': jnp.zeros((num_envs, max_steps), dtype=jnp.bool_),   # binary 0/1
-        'card_outcome': jnp.zeros((num_envs, max_steps), dtype=jnp.uint8),  # 0..127
-        # float16 saves ~102 MB vs float32; upcast to float32 in sample_batch return
+        'mask': jnp.zeros((num_envs, max_steps), dtype=jnp.bool_),   
+        'card_outcome': jnp.zeros((num_envs, max_steps), dtype=jnp.uint8),  
         'card_dist': jnp.zeros((num_envs, max_steps, 128), dtype=jnp.float16),
-        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),  # 0..3
-        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int8), # -1/0/1
-        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),# class labels 0/1/2
+        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),  
+        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int8), 
+        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),
         'idx': jnp.zeros(num_envs, dtype=jnp.int32)
     }
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
     
     def cond_fn(carry):
         _, _, dones, step_count, _ = carry
-        # Stoppe wenn ALLE done ODER max_steps erreicht
         return jnp.any(~dones) & (step_count < max_steps)
     
     final_envs, final_buffers, final_dones, _, _ = jax.lax.while_loop(

@@ -15,7 +15,6 @@ class ResBlock(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(self.features)(x)
         x = nn.LayerNorm()(x) 
-        # Skip Connection: Addiere Input zum Output
         return nn.relu(residual + x)
     
 class RepresentationNetwork(nn.Module):
@@ -59,7 +58,7 @@ class RepresentationNetwork(nn.Module):
         global_f = nn.LayerNorm()(global_f)
         global_f = nn.relu(global_f)
 
-        # === KOMBINIERE ===
+        # === COMBINE ===
         combined = jnp.concatenate([spatial_flat, global_f], axis=-1)
 
         x = nn.Dense(self.latent_dim)(combined)
@@ -69,12 +68,8 @@ class RepresentationNetwork(nn.Module):
         for _ in range(self.num_res_blocks):
             x = ResBlock(self.latent_dim)(x)
             
-        # ✅ LayerNorm statt Min-Max!
-        # Output ≈ N(0, 1) mit lernbarem γ, β
-        # → PredNet3 ResBlocks funktionieren direkt
-        # → Keine Information durch Ausreißer-Komprimierung verloren
         x = nn.Dense(self.latent_dim)(x)
-        x = nn.LayerNorm()(x) # TEST 4
+        x = nn.LayerNorm()(x) 
         
         return x
     
@@ -85,20 +80,20 @@ class DynamicsNetwork(nn.Module):
 
     @nn.compact
     def __call__(self, latent_state, action):
-        # 1. Action Encoding — dense embed to avoid 454-dim sparse input downstream
+        # Action Encoding 
         action_one_hot = jax.nn.one_hot(action, num_classes=self.num_actions)
         action_embed = nn.Dense(64)(action_one_hot)   # (Batch, 64)
         action_embed = nn.relu(action_embed)
 
-        # 2. LayerNorm at input
+        # LayerNorm at input
         latent_normed = nn.LayerNorm()(latent_state)  # (Batch, 256)
 
-        # 3. FiLM conditioning: action modulates latent state
+        # FiLM conditioning: action modulates latent state
         scale = nn.Dense(self.latent_dim)(action_embed)
         shift = nn.Dense(self.latent_dim)(action_embed)
         x = latent_normed * (1 + scale) + shift        # (Batch, 256)
 
-        # 4. Main processing
+        # Main processing
         x = nn.Dense(self.latent_dim)(x)
         x = nn.LayerNorm()(x)
         x = nn.relu(x)
@@ -119,7 +114,6 @@ class DynamicsNetwork(nn.Module):
 
         # --- Reward Head ---
         # Reward (winning) depends on board/goal state AND the action taken.
-        # Use action_embed (64-dim) instead of raw one-hot (454-dim sparse).
         reward_input = jnp.concatenate([next_latent, action_embed], axis=-1)  # (Batch, 320)
         reward_logits = nn.Dense(64)(reward_input)
         reward_logits = nn.relu(reward_logits)
@@ -127,7 +121,6 @@ class DynamicsNetwork(nn.Module):
 
         # --- Discount Head ---
         # Session-end (discount=0) is determined by hand size reaching 0 —
-        # a pure board/state signal. Action is not informative here.
         discount_logits = nn.Dense(64)(next_latent)   # state only, no action
         discount_logits = nn.relu(discount_logits)
         discount_logits = nn.Dense(3, name='discount_head')(discount_logits)
@@ -141,12 +134,8 @@ class PredictionNetwork(nn.Module):
     
     @nn.compact
     def __call__(self, latent_state):
-        # LayerNorm am Eingang: [0,1] → N(0,1)
-        # EINE Normalisierung für RepNet UND DynNet Latents!
         x = nn.LayerNorm()(latent_state)
         
-        # Shared Trunk: 2 ResBlocks (mehr Kapazität als PredNet2)
-        # Skip Connection funktioniert: N(0,1) + N(0,1) ✅
         for _ in range(self.num_res_blocks):
             x = ResBlock(self.latent_dim)(x)
         
@@ -255,23 +244,14 @@ def init_muzero_params(rng_key, input_shape):
     """
     key_repr, key_dyn, key_pred = jax.random.split(rng_key, 3)
     
-    # 1. Representation Network
-    # Input: Observation (Batch-Dimension hinzufügen für init)
     dummy_obs = jnp.ones((1, *input_shape))
     params_repr = repr_net.init(key_repr, dummy_obs)
     
-    # Um die Output-Shape des Representation Networks zu bekommen,
-    # führen wir einmal apply aus (oder wissen es aus der Config).
-    # Hier holen wir uns den latent state, um Dynamics/Prediction zu initialisieren.
     dummy_latent = repr_net.apply(params_repr, dummy_obs)
     
-    # 2. Dynamics Network
-    # Input: Latent State + Action (Integer)
-    dummy_action = jnp.array([0])  # Batch size 1, Action 0
+    dummy_action = jnp.array([0])  
     params_dyn = dynamics_net.init(key_dyn, dummy_latent, dummy_action)
-    
-    # 3. Prediction Network
-    # Input: Latent State
+
     params_pred = pred_net.init(key_pred, dummy_latent)
     
     return {

@@ -54,10 +54,6 @@ def env_reset_batched(seed):
         disable_joker=RULES['disable_joker']
     )
 
-# 2. Vektorisierte Funktionen vorbereiten
-# NOTE: batch_reset cannot be jax.jit-wrapped because env_reset uses boolean array
-# indexing ([layout]) whose output shape depends on concrete values — incompatible
-# with JAX abstract tracing. Plain vmap is correct here.
 batch_reset = jax.vmap(env_reset_batched)
 batch_valid_action = jax.vmap(valid_actions)
 batch_env_step = jax.vmap(env_step, in_axes=(0, 0))
@@ -70,14 +66,12 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     def body_fn(carry):
         envs_state, buffers, dones, step_count, rng_key = carry
         
-        # Neue Keys für diesen Step generieren
         rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
         step_keys = jnp.array(step_keys)
 
-        # ✅ PARALLEL: vmap über alle aktiven Envs
         def step_single_env(env, buffer, done, key):
             def do_active_step(env, buffer):
-                # 1. WÜRFELN (automatisch in der Environment)
+
                 key1, key2 = jax.random.split(key)
                 
                 obs = encode_board_with_belief(env)[None, ...] # TODO:
@@ -91,8 +85,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                     lambda: jnp.int8(current_player_before % 2),
                     lambda: jnp.int8(-1)
                 )
-                
-                # 3. Unterscheidung: MCTS oder no_step
+
                 def do_mcts(env):
                     # Stochastic MuZero MCTS
                     policy_output, root_value = run_muzero_mcts(
@@ -126,10 +119,7 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                         )
                     )
 
-                    # Detect if a deal happened: only a play-phase→swap-phase transition
-                    # (env_step_play_phase calls distribute_cards which sets phase=1).
-                    # Using hand-sum comparison fires a false positive on the 4th swap:
-                    # execute_team_swap re-adds 4 cards after 3 were removed (net +3).
+                    # Detect if a deal happened
                     deal_happened = (next_env.phase == jnp.int8(1)) & (env.phase == jnp.int8(0))
 
                     return (next_env, obs[0].astype(jnp.float16),
@@ -142,12 +132,8 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                             reward_target.astype(jnp.int8))
                 
                 def do_skip(env):
-                    # Keine validen Actions → no_step (discards all cards; may trigger distribute_cards)
                     next_env, reward, next_done = no_step(env)
                     dummy_obs = jnp.zeros_like(obs[0], dtype=jnp.float16)
-                    # Must detect deal here too: no_step calls distribute_cards (phase 0→1) when
-                    # all hands become empty after discarding. Hand-sum comparison is unreliable
-                    # (same false-positive risk), so use the same phase-transition check.
                     deal_happened = (next_env.phase == jnp.int8(1)) & (env.phase == jnp.int8(0))
                     return next_env, dummy_obs, jnp.int16(-1), reward, jnp.float16(0.0), jnp.zeros(454, dtype=jnp.float16), next_done, jnp.bool_(False), deal_happened.astype(jnp.bool_), jnp.int8(1), jnp.int8(1)
                 
@@ -180,7 +166,6 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 return next_env, new_buffer, next_done
             
             def do_skip_step(env, buffer):
-                # Game ist fertig, nichts tun
                 return env, buffer, done
             
             return jax.lax.cond(~done, do_active_step, do_skip_step, env, buffer)
@@ -197,24 +182,22 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
     # Dazu sind kleinere aber mehr Buffers nötig
     # Ein Idx trackt 
     init_buffers = {
-        # float16 saves ~358 MB vs float32; repr_net does x.astype(float32) at first line
         'obs': jnp.zeros((num_envs, max_steps, *input_shape), dtype=jnp.float16),
-        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int16),    # range 0-997 < 32767
-        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),     # class labels 0/1/2
-        'val': jnp.zeros((num_envs, max_steps), dtype=jnp.float16),  # root value in [-1,1]
+        'act': jnp.zeros((num_envs, max_steps), dtype=jnp.int16),    
+        'rew': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),     
+        'val': jnp.zeros((num_envs, max_steps), dtype=jnp.float16),  
         'pol': jnp.zeros((num_envs, max_steps, 454), dtype=jnp.float16),
-        'mask': jnp.zeros((num_envs, max_steps), dtype=jnp.bool_),   # binary 0/1
-        'deal_happened': jnp.zeros((num_envs, max_steps), dtype=jnp.bool_),   # binary 0/1
-        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),  # 0..3
-        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int8), # -1/0/1
-        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),# class labels 0/1/2
+        'mask': jnp.zeros((num_envs, max_steps), dtype=jnp.bool_),  
+        'deal_happened': jnp.zeros((num_envs, max_steps), dtype=jnp.bool_),   
+        'player': jnp.zeros((num_envs, max_steps), dtype=jnp.int8), 
+        'team': jnp.full((num_envs, max_steps), -1, dtype=jnp.int8),
+        'discount': jnp.zeros((num_envs, max_steps), dtype=jnp.int8),
         'idx': jnp.zeros(num_envs, dtype=jnp.int32),
     }
     init_dones = jnp.zeros(num_envs, dtype=jnp.bool_)
     
     def cond_fn(carry):
         _, _, dones, step_count, _ = carry
-        # Stoppe wenn ALLE done ODER max_steps erreicht
         return jnp.any(~dones) & (step_count < max_steps)
     
     final_envs, final_buffers, final_dones, _, _ = jax.lax.while_loop(

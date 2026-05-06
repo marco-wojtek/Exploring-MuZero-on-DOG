@@ -520,14 +520,9 @@ optimizer = optax.chain(
     optax.adamw(learning_rate_schedule, weight_decay=1e-4)
 )
 # --- Start Training ---
-# Option A: Frisches Training
 params = None
 opt_state = None
 
-# Option B: Fine-Tuning — NUR params laden, opt_state=None (neuer Optimizer).
-# Begründung: Gespeicherter opt_state enthält Adam-Moments aus altem Trainingsregime
-# (non-circular) + schedule ist am alten global_step → effektive LR faktisch 0.
-# Neuer Optimizer startet mit frischen Moments und voller init_lr.
 # params = load_params_from_file('MuZero_DOG/models/params/muzero_dog_params_lr0.001_g500_it100_seed25.pkl')
 # opt_state = None  # ← bewusst kein opt_state laden
 starttime = time()
