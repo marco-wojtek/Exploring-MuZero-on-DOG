@@ -699,6 +699,48 @@ def run_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulati
     #dirichlet_fraction = temperature * 0.2
 
     # 2. MCTS ausführen
+    # policy_output = mctx.gumbel_muzero_policy(
+    #     params=params,               # Wird an recurrent_fn weitergereicht
+    #     rng_key=key2,
+    #     root=root_output,            # Startpunkt der Suche
+    #     recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
+    #     num_simulations=num_simulations,
+    #     max_depth=max_depth,
+    #     invalid_actions=invalid_actions,
+    #     qtransform=functools.partial(mctx.qtransform_completed_by_mix_value, value_scale=0.5),
+    #     gumbel_scale=temperature,    
+    # )
+    policy_output = mctx.muzero_policy(
+       params=params,               # Wird an recurrent_fn weitergereicht
+       rng_key=key2,
+       root=root_output,            # Startpunkt der Suche
+       recurrent_fn=recurrent_inference_fn, # Funktion für Schritte im latenten Raum
+        num_simulations=num_simulations,
+        max_depth=max_depth,
+        invalid_actions=invalid_actions,
+        qtransform=mctx.qtransform_by_parent_and_siblings, 
+        dirichlet_fraction=0.25,     # Exploration Noise
+        dirichlet_alpha=0.3,
+        temperature=temperature
+    )
+    
+    # Der Root-Value ist der geschätzte Wert des aktuellen Zustands (für den aktuellen Spieler) nach der MCTS-Suche.
+    root_value = policy_output.search_tree.summary().value
+    # clip root_value auf [-1, 1], da unsere Value-Head-Ausgabe auch in diesem Bereich liegt
+    # root_value = jnp.clip(root_value, -1.0, 1.0)
+    # root_value = root_output.value
+    return policy_output, root_value
+
+@functools.partial(jax.jit, static_argnames=['num_simulations', 'max_depth', 'temperature'])
+def run_gumbel_muzero_mcts(params, rng_key, observations, invalid_actions, num_simulations, max_depth, temperature):
+    key1, key2 = jax.random.split(rng_key)
+
+    # 1. Root-Knoten berechnen (Inference)
+    root_output = root_inference_fn(params, observations)
+
+    #dirichlet_fraction = temperature * 0.2
+
+    # 2. MCTS ausführen
     policy_output = mctx.gumbel_muzero_policy(
         params=params,               # Wird an recurrent_fn weitergereicht
         rng_key=key2,

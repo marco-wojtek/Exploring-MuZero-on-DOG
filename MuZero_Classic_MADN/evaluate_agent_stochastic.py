@@ -258,7 +258,7 @@ def evaluate_agent_parallel(params1, params2, params3, params4, batch_size=20, s
     for param in [params1, params2, params3, params4]:
         if param is None:
             param = init_muzero_params(jax.random.PRNGKey(np.random.randint(0, 1000000)), enc.shape)
-            param['type'] = 1
+            param['type'] = 0
         elif param == 'rule_based_agent':
             param = init_muzero_params(jax.random.PRNGKey(0), enc.shape)
             param['type'] = 2
@@ -930,6 +930,116 @@ def play_eval_loop_jitted(envs, params_tuple, rng_key, num_envs):
     
     return final_envs, final_winners
 
+def fairness_check(batch_size=20, seed=None):
+    """
+    Spielt batch_size * 4 Spiele mit ausschließlich Random-Agenten.
+    Jeder Startspieler (0-3) beginnt exakt batch_size Spiele.
+    Nutzt einen eigenen JIT-Loop der nur random / no_step kennt.
+    """
+    if seed is None:
+        seed = np.random.randint(0, 1_000_000)
+
+    rng_key = jax.random.PRNGKey(seed)
+    rng_key, subkey = jax.random.split(rng_key)
+
+    num_total = batch_size * 4
+    seeds = jax.random.randint(subkey, (num_total,), 0, 1_000_000)
+    starting_players = jnp.repeat(jnp.arange(4), batch_size)
+    envs = batch_reset(seeds, starting_players)
+
+    final_envs, winners_flat = _random_only_loop(envs, subkey, num_total)
+
+    winners_split = jnp.array_split(winners_flat, 4, axis=0)
+    winners = jnp.stack([jnp.sum(w, axis=0) for w in winners_split])  # (4, 4)
+
+    progress_mean, _ = calculate_player_progress(final_envs)
+
+    total_wins = jnp.sum(winners)
+    wins_per_player = jnp.sum(winners, axis=0)
+    win_pct = wins_per_player / total_wins * 100
+
+    print("\n" + "=" * 60)
+    print("FAIRNESS CHECK – All Random Agents")
+    print("=" * 60)
+    print(f"Games per starting position: {batch_size}  (total: {num_total})")
+    print("\nTotal Wins per Player and different Starters:\n", winners)
+    print("\nTotal Wins per Player:\n", wins_per_player)
+    print("\nWin % per Player:", win_pct)
+    if RULES['enable_teams']:
+        team_a = float(win_pct[0] + win_pct[2])
+        team_b = float(win_pct[1] + win_pct[3])
+        print(f"\nTeam A (0&2): {team_a:.1f}%  |  Team B (1&3): {team_b:.1f}%")
+    print("\nMean Final Pin Distance per Player:\n", progress_mean)
+    print("=" * 60)
+
+    return winners, progress_mean
+
+@functools.partial(jax.jit, static_argnames=['num_envs'])
+def _random_only_loop(envs, rng_key, num_envs):
+    """JIT-Loop der ausschließlich Random-Aktionen oder No-Step ausführt."""
+
+    def body_fn(carry):
+        envs, winners, dones, step_count, rng_key = carry
+
+        rng_key, *step_keys = jax.random.split(rng_key, num_envs + 1)
+        step_keys = jnp.array(step_keys)
+
+        def step_single_env(env, done, key, winner):
+            def do_step(env, winner):
+                env = throw_die(env)
+                valid_mask = valid_action(env).flatten()
+
+                def do_random():
+                    logits = jnp.where(valid_mask, 0.0, -1e9)
+                    action = jax.random.categorical(key, logits)
+                    next_env, _, next_done = env_step(env, action)
+                    return next_env, next_done
+
+                def do_no_step():
+                    next_env, _, next_done = no_step(env)
+                    return next_env, next_done
+
+                next_env, next_done = jax.lax.cond(
+                    jnp.any(valid_mask),
+                    do_random,
+                    do_no_step,
+                )
+
+                new_winner = jax.lax.cond(
+                    next_done,
+                    lambda: winner + manual_get_winner(
+                        next_env.board, next_env.num_players,
+                        next_env.goal, next_env.rules
+                    ).astype(jnp.int32),
+                    lambda: winner,
+                )
+                return next_env, next_done, new_winner
+
+            return jax.lax.cond(
+                ~done,
+                lambda: do_step(env, winner),
+                lambda: (env, done, winner),
+            )
+
+        new_envs, new_dones, new_winners = jax.vmap(step_single_env)(
+            envs, dones, step_keys, winners
+        )
+        return (new_envs, new_winners, new_dones, step_count + 1, rng_key)
+
+    def cond_fn(carry):
+        _, _, dones, step_count, _ = carry
+        return jnp.any(~dones) & (step_count < 2000)
+
+    init_winners = jnp.zeros((num_envs, 4), dtype=jnp.int32)
+    final_envs, final_winners, _, _, _ = jax.lax.while_loop(
+        cond_fn,
+        body_fn,
+        (envs, init_winners, envs.done, 0, rng_key),
+    )
+    return final_envs, final_winners
+
+
+
 
 # Rules for evaluation games - can be adjusted to test specific rule variations
 RULES = {
@@ -944,16 +1054,16 @@ RULES = {
     'must_traverse_start': False
 }
 
-start_time = time()
+# start_time = time()
 NUM_SIMULATIONS = 100
 MAX_DEPTH = 50
-TEMPERATURE = 0.05
-FOLDER = "MuZero_Classic_MADN/models/params/"
-print("Games with Temperature =", TEMPERATURE)
-# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
-FILENAME = f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it50_seed31"
-# play_n_randomly(batch_size=1000)  
-print(FILENAME)
+TEMPERATURE = 0.0
+# FOLDER = "MuZero_Classic_MADN/models/params/"
+# print("Games with Temperature =", TEMPERATURE)
+# # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=150)
+# FILENAME = f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it50_seed31"
+# # play_n_randomly(batch_size=1000)  
+# print(FILENAME)
 # print("\nTrained Stochastic MuZero Agents 12345:")
 # params1 = 'random_agent'#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
 # params2 = 'random_agent'  # Stochastic MuZero Agent
@@ -986,55 +1096,55 @@ print(FILENAME)
 
 # evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nVersus 'seed 20':")
-params1 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl") # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")  # Stochastic MuZero Agent
+# print("\nVersus 'seed 20':")
+# params1 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl") # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-FILENAME = f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed31"
-# play_n_randomly(batch_size=1000)  
-print(FILENAME)
-print("\nTrained Stochastic MuZero Agents 12345:")
-params1 = 'random_agent'#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = 'random_agent'  # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  'random_agent'  # Stochastic MuZero Agent
+# FILENAME = f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed31"
+# # play_n_randomly(batch_size=1000)  
+# print(FILENAME)
+# print("\nTrained Stochastic MuZero Agents 12345:")
+# params1 = 'random_agent'#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = 'random_agent'  # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  'random_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250, set_seed=12345)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250, set_seed=12345)
 
-print("\nVersus 'random_agent':")
-params1 = 'random_agent'#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = 'random_agent'  # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  'random_agent'  # Stochastic MuZero Agent
+# print("\nVersus 'random_agent':")
+# params1 = 'random_agent'#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = 'random_agent'  # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  'random_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nVersus 'rule_based_agent':")
-params1 = 'rule_based_agent' #load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = 'rule_based_agent'  # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  'rule_based_agent'  # Stochastic MuZero Agent
+# print("\nVersus 'rule_based_agent':")
+# params1 = 'rule_based_agent' #load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = 'rule_based_agent'  # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  'rule_based_agent'  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nVersus 'none':")
-params1 = None#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = None # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  None  # Stochastic MuZero Agent
+# print("\nVersus 'none':")
+# params1 = None#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = None # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  None  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
 
-print("\nVersus 'seed 20':")
-params1 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
-params2 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl") # Stochastic MuZero Agent
-params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
-params4 =  load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")  # Stochastic MuZero Agent
+# print("\nVersus 'seed 20':")
+# params1 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")#load_params_from_file(f"{FILENAME}.pkl")  # Rule-Based Agent
+# params2 = load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl") # Stochastic MuZero Agent
+# params3 = load_params_from_file(f"{FILENAME}.pkl")  # MCTS Agent
+# params4 =  load_params_from_file(f"{FOLDER}stochastic_muzero_madn_params_lr0.005_g1500_it100_seed20.pkl")  # Stochastic MuZero Agent
 
-evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
-end_time = time()
-print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
+# evaluate_agent_parallel(params1, params2, params3, params4, batch_size=250)
+# end_time = time()
+# print(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

@@ -69,11 +69,6 @@ def play_batch_of_games_jitted(envs, num_envs, input_shape, params, rng_key, num
                 has_valid = jnp.any(valid_mask)
                 
                 current_player_before = env.current_player
-                current_team_before = jax.lax.cond(
-                    env.rules['enable_teams'],
-                    lambda: jnp.int8(current_player_before % 2),
-                    lambda: jnp.int8(-1)
-                )
 
                 # Unterscheidung: MCTS oder no_step
                 def do_mcts(env):
